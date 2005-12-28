@@ -9,6 +9,14 @@ use UNIVERSAL::require;
 use YAML;
 use version;
 use Jifty::DBI::SchemaGenerator;
+use Jifty::Config;
+
+=head2 options
+
+Returns a hash of all the options this script takes. (See the usage message for details)
+
+=cut
+
 
 sub options {
     return (
@@ -22,14 +30,27 @@ sub options {
     );
 }
 
+=head2 run
+
+Prints a help message if the users want it. If not, goes about its
+business.
+
+Sets up the environment, checks current database state, creates or deletes
+a database as necessary and then creates or updates your models' schema.
+
+
+
+=cut
+
+
 sub run {
     my $self = shift;
 
-    $self->check_usage();
+    $self->print_help();
     $self->setup_environment();
     $self->probe_database_existence();
     $self->manage_database_existence();
-    $self->setup_jifty_stuff();
+    $self->prepare_mode_classes();
     if ( $self->{create_all_tables} ) {
         $self->create_all_tables();
     } elsif ($self->{'setup_tables'}) {
@@ -38,6 +59,16 @@ sub run {
         print "Done.\n";
     }
 }
+
+
+=head2 setup_environment
+
+If the user has specified an C<--include> flag or a path on the
+commandline, add it to the application's C<@INC>.  After that, get a
+minimal Jifty environment set up
+
+=cut
+
 
 sub setup_environment {
     my $self = shift;
@@ -53,7 +84,17 @@ sub setup_environment {
 
 }
 
-sub check_usage {
+=head2 print_help
+
+Prints out help for the package using pod2usage.
+
+If the user specified --help, prints a brief usage message
+
+If the user specified --man, prints out a manpage
+
+=cut
+
+sub print_help {
     my $self = shift;
 
     # Option handling
@@ -63,7 +104,14 @@ sub check_usage {
         if $self->{man};
 }
 
-sub setup_jifty_stuff {
+=head2 prepare_mode_classes
+
+Reads in our application class from the config file, sets up a schema generator
+and finds all our app's models.
+
+=cut
+
+sub prepare_mode_classes {
 
     my $self = shift;
 
@@ -85,6 +133,14 @@ sub setup_jifty_stuff {
         sub_name => 'models',
     );
 }
+
+
+=head2 probe_database_existence
+
+Probes our database to see if it exists and is up to date.
+
+=cut
+
 
 sub probe_database_existence {
     my $self = shift;
@@ -118,7 +174,8 @@ sub probe_database_existence {
 
 =head2 create_all_tables
 
-Create all tables for this application's models. Generally, this happens on installation.
+Create all tables for this application's models. Generally, this happens on
+installation.
 
 =cut
 
@@ -324,6 +381,16 @@ sub upgrade_tables {
     }
 }
 
+
+=head2 manage_database_existence
+
+If the user wants the database created, creates the database. If the user wants 
+the old database deleted, does that too.
+
+
+=cut
+
+
 sub manage_database_existence {
     my $self     = shift;
     my $handle   = Jifty::Handle->new();
@@ -379,7 +446,6 @@ Jifty::Script::Schema - Create SQL to update or create your Jifty app's tables
 
 =head1 SYNOPSIS
 
-  
   jifty schema --setup      Creates or updates your application's database tables
 
  Options:
@@ -399,7 +465,6 @@ I<ProjectRoot> defaults to the current directory.
 
 =over 8
 
-
 =item B<--print>
 
 Rather than actually running the database create/update/drop commands, Prints the commands to standard output
@@ -415,7 +480,6 @@ Send DROP DATABASE command, if used in conjunction with B<--create>
 =item B<--setup>
 
 Actually set up your app's tables (create or update as needed)
-
 
 =item B<--include> I<libpath>, B<-I> I<libpath>
 

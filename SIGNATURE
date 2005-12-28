@@ -15,11 +15,11 @@ not run its Makefile.PL or Build.PL.
 Hash: SHA1
 
 SHA1 f70f69e062b4b16e50dd04ce4bb2cdbb2896d73b LICENSE
-SHA1 2b7e1c1b5e1099c17bfec2dc0510fa315c5e7a32 MANIFEST
-SHA1 f2b8ff16fd72de9e52136f205b15af88c09ad57a META.yml
-SHA1 795bd86960ce638e249856cf8a0c9b49526bf7eb Makefile.PL
-SHA1 7840a51f9600fd5dc3257ccbd98f2784de33afef README
-SHA1 459cdc7054188105ce16c97e1051db02d1fa740e bin/jifty
+SHA1 6744ebf2ee30bfd1261fa0ce10598b226a6b278a MANIFEST
+SHA1 ec16c841f9941d463022105a0034970fdb90b12b META.yml
+SHA1 69be9fee75ccadc0cbc2d8d357c1467884e4b273 Makefile.PL
+SHA1 e395a2eabaf8faf8266dedc664c1eb52c6c589cf README
+SHA1 9e922471c1892ae82614966389c90fe8f20da38a bin/jifty
 SHA1 b8bb315ef8fbdd2f069b6339ad0461b5d933d7da doc/ajax-upgraded-links
 SHA1 42eb797f2b0063b01764fd9d1a7aced2836f7388 doc/talks/npw2005.xul
 SHA1 7bfc26238b68334d65994f7740648fd21908a0ab doc/talks/takahashi.css
@@ -38,18 +38,18 @@ SHA1 49186d8a11618694b8c9a6f39bc2170e6d1b5eb9 inc/Module/Install/Share.pm
 SHA1 2a1b494a7e5adaa3216e86d909dd5bf87d084c80 inc/Module/Install/Win32.pm
 SHA1 c92e1d32922615347e059e7e3a2f53b5e9c98e3b inc/Module/Install/WriteAll.pm
 SHA1 c17e8f3cf8ebe1eb4929fd2bd2fd530a9de1abd0 lib/Email/Send/Jifty/Test.pm
-SHA1 40090226b315d48c44e193739fcbdba2615a19df lib/Jifty.pm
-SHA1 2d7c6f773a6f88517ddadc2fb445345e1b7e9a06 lib/Jifty/Action.pm
+SHA1 c0afafb27e31606e333f258a97185a7e9243c437 lib/Jifty.pm
+SHA1 3a9301bf08740ec9dace24744016aa493b622d39 lib/Jifty/Action.pm
 SHA1 b48bb9f3b85718e1417fa6249a630d615e56037a lib/Jifty/Action/Autocomplete.pm
 SHA1 59fb62030cfda9d5739b01d96586a2dce2371fbf lib/Jifty/Action/Record.pm
 SHA1 0e954f3597b7704e12af8700ae75cd546d1b8d88 lib/Jifty/Action/Record/Create.pm
 SHA1 fb09c0e8ac8eae4c5351ff1ea6902226eda24d03 lib/Jifty/Action/Record/Delete.pm
-SHA1 6f5e9c6bd04f8435317e8328fb38e348529ef1a1 lib/Jifty/Action/Record/Update.pm
+SHA1 6c6978d3e38d3986835b8df5e12f121da83db5a0 lib/Jifty/Action/Record/Update.pm
 SHA1 c99a798acc9c65baf4e750a70487c192980e0c54 lib/Jifty/Action/Redirect.pm
 SHA1 b72be2f8c3f2b73804c91395d296ff5f24f0e069 lib/Jifty/Bootstrap.pm
 SHA1 aa8814249c1f87c6b2d88ca92f12c75c20e5ba18 lib/Jifty/ClassLoader.pm
-SHA1 6f2b0c7035b75ac4ff92b08093f0666a4253f1f3 lib/Jifty/Collection.pm
-SHA1 abce9fa16ae959dd67ff7219b2b87c609f95b161 lib/Jifty/Config.pm
+SHA1 b6aafd2071020b5edc46367af3658b394e6ff0fc lib/Jifty/Collection.pm
+SHA1 a0343b129d6b566d66ccf2f53cd6b4196455481a lib/Jifty/Config.pm
 SHA1 608bad26d0af16359f724dcbd5e54c11b051d4de lib/Jifty/Continuation.pm
 SHA1 3737d490c58c49ee73151796216058c27a934069 lib/Jifty/CurrentUser.pm
 SHA1 35a807c160c96e952f13d2f46376288efdf54598 lib/Jifty/Everything.pm
@@ -62,30 +62,30 @@ SHA1 1f2d3cd6155ce09b52b6a13feee4bd2812f2969e lib/Jifty/JSON/Parser.pm
 SHA1 8790bc1f0c801434eb6eeb3795943539f0628ca9 lib/Jifty/LetMe.pm
 SHA1 29dd1d0b088ef6b476a19111a0663a2cb2422a11 lib/Jifty/Logger.pm
 SHA1 c2ef5f9cfac7a0adff5c492bfdd005d42e489173 lib/Jifty/Manual/AccessControl.pod
-SHA1 4e99c4241c83f0afad5c4365f43892964302a39e lib/Jifty/Manual/Glossary.pod
-SHA1 1318e001c302fca3c02746cdaa571f688921bda9 lib/Jifty/Manual/Tutorial.pod
+SHA1 f9f8e7616fcb97cd96ec905832a1a700ddb93235 lib/Jifty/Manual/Glossary.pod
+SHA1 de16cbc9258e96932f6bbe4cda1caabcf1832550 lib/Jifty/Manual/Tutorial.pod
 SHA1 bde680ee66a069362557eb81ffe4f2ede99549b1 lib/Jifty/MasonInterp.pm
 SHA1 3d3ff1ac29b323f6f8588cbe0a81c31a8a9788ab lib/Jifty/Model/Schema.pm
-SHA1 74431907780f84ee17e11df1676ac2c069d8046d lib/Jifty/Notification.pm
+SHA1 d1a51b2b703c530321e71b90d95b2bc9a5992bf7 lib/Jifty/Notification.pm
 SHA1 0711a9dcce42d352d08e4cd2643bb2df3fba0afb lib/Jifty/Object.pm
-SHA1 63be5119f7c44584cfe1d5d012cb3a1f9fc80e33 lib/Jifty/Record.pm
-SHA1 8719fd056fb51fae4519ea1c00cc65547c4cce75 lib/Jifty/Request.pm
+SHA1 655d36dd96f04f82813122c922778c0004115e86 lib/Jifty/Record.pm
+SHA1 061332c5ac71d940d80613a48014db790c2cc256 lib/Jifty/Request.pm
 SHA1 b5749efc1ff6ee5a013e9428b933c2483414dddb lib/Jifty/Request/Mapper.pm
 SHA1 cb2d6b96cd08167ae525f40ab2a2dfa6472d2c59 lib/Jifty/Response.pm
 SHA1 5a9411a2180f6f41c0d94130b0e1d887981dd6c6 lib/Jifty/Result.pm
-SHA1 ac3f9a8ba8fbc3c04f4a46881fefeec3b0a9f94c lib/Jifty/RightsFrom.pm
+SHA1 4bdbb56bcb8c40bd2e0d925eed0203477416728c lib/Jifty/RightsFrom.pm
 SHA1 a73f5540fdf60be857f17f47b1db607702efaca6 lib/Jifty/Script.pm
-SHA1 682f413c4a5252c6632271a661d7879acfc5a10f lib/Jifty/Script/App.pm
+SHA1 f68aa38d0b46aa795dbfbb79b71f9c357d80b534 lib/Jifty/Script/App.pm
 SHA1 68f7ed1fa1c7da7794842ee08b29437e7699fdce lib/Jifty/Script/FastCGI.pm
 SHA1 a9143c05b3e31df932b9f457da16f95cf86e935d lib/Jifty/Script/Help.pm
-SHA1 040eb14e52edae375453551c6cd362348b90a9e5 lib/Jifty/Script/Model.pm
-SHA1 3ac23520de9b2256ab304443d3f8bcd16df106aa lib/Jifty/Script/Schema.pm
+SHA1 9f4cd382b2a11700dfddc28a76acf16ec67f1e9d lib/Jifty/Script/Model.pm
+SHA1 b2559fd133e54c0edfa7cdd486c53af11876aa5d lib/Jifty/Script/Schema.pm
 SHA1 fb8a385e8bc074445cf6c3e1286817d506f65aca lib/Jifty/Script/Server.pm
 SHA1 fe69f92884931757519099e176038d6002d83272 lib/Jifty/Server.pm
-SHA1 9334e97bdd02db36e8e0ae14a043e7016ac62327 lib/Jifty/Test.pm
+SHA1 977c981205a8d4b5715f8757abf58720d7e5d45e lib/Jifty/Test.pm
 SHA1 a6de790b4d3673cb8289256da33277b35fc1dd2c lib/Jifty/Test/WWW/Mechanize.pm
 SHA1 6b0aafbcba17e28e4d0e71c2b1c2092b541a6fd3 lib/Jifty/Upgrade.pm
-SHA1 7116cd177a17a81b9ca78283b922ec2809479c63 lib/Jifty/Util.pm
+SHA1 d37f180ea0545cf5b4f3977d1195776b91dbf120 lib/Jifty/Util.pm
 SHA1 37a1316344316620fed6b1b8f66db642fb37b92d lib/Jifty/Web.pm
 SHA1 b1e7b18603e57a6a59ab69015675066f7ea1fb8f lib/Jifty/Web/Form.pm
 SHA1 1368713fb74c8ab7e986b748e46676ee85fe3809 lib/Jifty/Web/Form/Clickable.pm
@@ -185,7 +185,7 @@ SHA1 5c559a6d32bb97a663fc5ffeb8117aa92378cac1 share/web/templates/__jifty/online
 SHA1 99c21d406fa0ba32604f8554c4df4f75bccf6061 share/web/templates/_elements/header
 SHA1 e7ba7a1aa4d714bc693e41c2d4fccb6117ced044 share/web/templates/_elements/javascript
 SHA1 4da6700ff1fdc390436ff05906f4df979c44d572 share/web/templates/_elements/nav
-SHA1 543e75086ee7c28dd58d0d08cd7c8ad369a2f062 share/web/templates/_elements/sidebar
+SHA1 d5363c37159f79b59c0aa3190fac80d4dff1b95a share/web/templates/_elements/sidebar
 SHA1 71eeac728d8eb1a636fdc7ada7a7b3173db1ba6e share/web/templates/_elements/wrapper
 SHA1 6a09e6b74c25d8113c87e448c85988c9b7085f49 share/web/templates/autohandler
 SHA1 c30bc8a9d676894f4d2e71a367422544bf81a9ec share/web/templates/dhandler
@@ -197,12 +197,9 @@ SHA1 aaaac2006a52c95ee1a47c317bab058e4992bfe7 share/web/templates/validator.xml
 SHA1 f4bbc556f7846405db6a7f405254671b04a65285 t/01-dependencies.t
 SHA1 324384bfbd72955dec9a231ca6294c422be1dc34 t/02-form-protocol.t
 SHA1 98f8a2f37e3e07e35cc62622660eadf165e693fd t/03-sessions.t
-SHA1 b5cb07c1a06f1719adf35cbb3c573ad0e96908d4 t/99-pod-coverage.t
+SHA1 96f529f298a2b87959e530e99a4d3e4ef9d8b907 t/99-pod-coverage.t
 SHA1 bb0da54f2b3f2d7955baa41ee458cb3d1887f475 t/99-pod.t
-SHA1 821d786ccfbb28f828cd8ace13207058b5fe0304 t/Continuations/META.yml
-SHA1 22a860b0a73419dcc845e34973944fcfa64c1f81 t/Continuations/Makefile.PL
-SHA1 601c6228f7ed8b489af0f0ded525651ca148679e t/Continuations/bin/jifty
-SHA1 4a0d7decbf93fe7d14de199f700bf80a8ba5411d t/Continuations/continuationstest
+SHA1 da39a3ee5e6b4b0d3255bfef95601890afd80709 t/Continuations/bin/jifty
 SHA1 69d51b37601c4fc51b989234f96611357d96c137 t/Continuations/lib/Continuations/Action/CrossBridge.pm
 SHA1 01ebcf50d361afff117bfbb14125470da3010f90 t/Continuations/lib/Continuations/Action/GetGrail.pm
 SHA1 233ce8afb5de542506f03195f0d905f97d96324a t/Continuations/t/00-prototype.t
@@ -218,11 +215,9 @@ SHA1 a57494ba5021699868a520313332b08eee3bb1e9 t/Continuations/web/templates/help
 SHA1 6831427bd1a041b49a320d60ef7baf2e2e62be1a t/Continuations/web/templates/index-help.html
 SHA1 1e07e30d85ae2a6a21fd7ae3375b449486f8b2a4 t/Continuations/web/templates/index.html
 SHA1 467cccdcb5f3cf647f4bef751471eab8b20de965 t/Jifty.pm
-SHA1 d4fe22553064c1bfa79e02cf407de372b808e045 t/Mapper/Makefile.PL
-SHA1 601c6228f7ed8b489af0f0ded525651ca148679e t/Mapper/bin/jifty
+SHA1 da39a3ee5e6b4b0d3255bfef95601890afd80709 t/Mapper/bin/jifty
 SHA1 0860cc93ab27fda3abb12341a87924e826637175 t/Mapper/lib/Mapper/Action/CrossBridge.pm
 SHA1 6bee8bba7db76902f300f69bbc7ffbd045380074 t/Mapper/lib/Mapper/Action/GetGrail.pm
-SHA1 4a0d7decbf93fe7d14de199f700bf80a8ba5411d t/Mapper/mappertest
 SHA1 7ef92738118be1ae4bf958babec0ba0882ff1ecc t/Mapper/t/00-prototype.t
 SHA1 c58bd660ceeabb3c4bc684e96156cb8e624cb67c t/Mapper/t/01-raw-api.t
 SHA1 63c18e6a0c9a3cf21c20b0dd13bf9c9d72a9751a t/Mapper/t/02-api.t
@@ -231,7 +226,7 @@ SHA1 d713c17d08adfac2c54fff54a7d8b0ff9b0e03f7 t/Mapper/web/templates/index.html
 -----BEGIN PGP SIGNATURE-----
 Version: GnuPG v1.4.1 (GNU/Linux)
 
-iD8DBQFDrlWAEi9d9xCOQEYRAknwAJ4xhzGxQyoNhSCoA+d4nd7e6BbbBACgljNk
-8e3aWDZl84VwTn67FFg8OUU=
-=HboQ
+iD8DBQFDssmmEi9d9xCOQEYRApnjAKCUH6yzm5QOhA2CdJ+LzJkjDwhvUwCfYtYc
+3z9BXFIJyGQ7v0RWhjtYNfs=
+=ypcE
 -----END PGP SIGNATURE-----

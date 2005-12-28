@@ -58,15 +58,16 @@ sub run {
     die "You need to give your new model a --name\n"
       unless $model =~ /\w+/;
 
+    Jifty->new( no_handle => 1 );
     my $root = Jifty::Util->app_root;
-    my $appname = Jifty::Util->app_name;
+    my $appname = Jifty->config->framework("ApplicationName");
     my $path = "$root/lib/$appname/Model/$model.pm";
 
     my $modelFile = <<"EOT";
 package @{[$appname]}::Model::@{[$model]}::Schema;
 use Jifty::DBI::Schema;
 
-# You column definitions go here.  See L<Jifty::DBI::Schema> for
+# Your column definitions go here.  See L<Jifty::DBI::Schema> for
 # documentation about how to write column definitions.
 
 package @{[$appname]}::Model::@{[$model]};

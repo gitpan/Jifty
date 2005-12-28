@@ -3,7 +3,7 @@ use strict;
 
 package Jifty;
 
-our $VERSION = '0.51225';
+our $VERSION = '0.51228';
 
 =head1 NAME
 

@@ -14,6 +14,7 @@ Jifty::Config -- wrap a jifty configuration file
 
 use Jifty::Everything;
 use Jifty::DBI::Handle;
+use Jifty::Util;
 use UNIVERSAL::require;
 use YAML;
 use File::Spec;
@@ -36,23 +37,38 @@ __PACKAGE__->mk_accessors(qw/stash/);
 =head2 new PARAMHASH
 
 This class method instantiates a new C<Jifty::Config> object. This
-object deals with configuration files.  After it is created, it calls
-L</load>.
+object deals with configuration files.  
+
+PARAMHASH currently takes a single option
+
+=over
+
+=item load_config
+
+This boolean defaults to true. If true, L</load> will be called upon initialization.
+
+=back
+
 
 =cut
 
 sub new {
     my $proto = shift;
+    my %args = ( load_config => 1,
+                 @_ 
+             );
     my $self  = {};
     bless $self, $proto;
-    $self->load();
+    $self->stash( {} );
+
+    $self->load() if ($args{'load_config'});
     return $self;
 }
 
 =head2 load
 
-First, several defaults are assumed based on the name of the
-application -- see L</guess>.  Then, Jifty loads the main
+
+Jifty first loads the main
 configuration file for the application, looking for the
 C<JIFTY_CONFIG> environment variable or C<etc/config.yml> under the
 application's base directory.
@@ -70,6 +86,12 @@ Values in the site configuration file clobber those in the vendor
 configuration file. Values in the vendor configuration file clobber
 those in the application configuration file.
 
+Once we're all done loading from files, several defaults are
+assumed based on the name of the application -- see L</guess>. 
+
+After we have the config file, we call the coderef in C<$Jifty::Config::postload>,
+if it exists.
+
 If the value begins and ends with %, converts it with
 C<Jifty::Util/absolute_path> to an absolute path.  (This is
 unnecessary for most configuration variables which specify files, but
@@ -81,7 +103,6 @@ specify files.)
 sub load {
     my $self = shift;
 
-    $self->stash( $self->guess );
 
     my $file = $ENV{'JIFTY_CONFIG'} || Jifty::Util->app_root . '/etc/config.yml';
 
@@ -114,6 +135,11 @@ sub load {
 
     $config = Hash::Merge::merge( $self->stash, $site );
     $self->stash($config);
+
+    # Merge guessed values in for anything we didn't explicitly define
+    # Whatever's in the stash overrides anything we guess
+    $self->stash( Hash::Merge::merge( $self->guess, $self->stash ));
+
 
     # Finally, check for global postload hooks (these are used by the
     # test harness)
@@ -152,43 +178,58 @@ sub _get {
     my $section = shift;
     my $var     = shift;
 
-    $self->stash->{$section}->{$var};
+    return  $self->stash->{$section}->{$var} 
 }
 
 
 =head2 guess
 
-Attempts to guess (and return) a configuration hash, in the absence of
-a configuration file.  It uses the name of the directory containing
-the Jifty binary as the name of the application and database.
+Attempts to guess (and return) a configuration hash based solely
+on what we already know. (Often, in the complete absence of
+a configuration file).  It uses the name of the directory containing
+the Jifty binary as a default for C<ApplicationName> if it can't find one.
 
 =cut
 
 sub guess {
     my $self = shift;
 
-    my $name = Jifty::Util->app_name;
+    # Walk around a potential loop by calling guess to get the app name
+    my $app_name;
+    if (@_) {
+        $app_name = shift;
+    } elsif ($self->stash->{framework}->{ApplicationName}) {
 
+        $app_name =  $self->stash->{framework}->{ApplicationName};
+    } else {
+        $app_name =  Jifty::Util->default_app_name;
+    }
+
+    my $app_class = $app_name;
+    $app_class =~ s/-/::/g;
+    my $db_name = lc $app_name;
+    $db_name =~ s/-/_/g;
     return {
         framework => {
-            AdminMode       => 1,
-            ActionBasePath   => $name . "::Action",
-            ApplicationClass => $name,
-            CurrentUserClass => $name ."::CurrentUser",
-            ApplicationName  => $name,
+            AdminMode        => 1,
+            ActionBasePath   => $app_class . "::Action",
+            ApplicationClass => $app_class,
+            CurrentUserClass => $app_class . "::CurrentUser",
+            ApplicationName  => $app_name,
             Database         => {
-                Database => lc $name,
+                Database =>  $db_name,
                 Driver   => "SQLite",
                 Host     => "localhost",
                 Password => "",
                 User     => "",
                 Version  => "0.0.1",
             },
-            Mailer => 'Sendmail',
+            Mailer     => 'Sendmail',
             MailerArgs => [],
-            Web => {
-                DefaultStaticRoot => Jifty::Util->share_root .'/web/static',
-                DefaultTemplateRoot => Jifty::Util->share_root . '/web/templates',
+            Web        => {
+                DefaultStaticRoot => Jifty::Util->share_root . '/web/static',
+                DefaultTemplateRoot => Jifty::Util->share_root
+                    . '/web/templates',
                 StaticRoot   => "web/static",
                 TemplateRoot => "web/templates",
             }
@@ -217,6 +258,7 @@ sub load_file {
     $hashref = $self->_expand_relative_paths($hashref);
     return $hashref;
 }
+
 
 # Does a DFS, turning all leaves that look like C<%paths%> into absolute paths.
 sub _expand_relative_paths {
