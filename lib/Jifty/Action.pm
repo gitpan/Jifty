@@ -139,13 +139,15 @@ sub arguments {
 This routine, unsurprisingly, actually runs the action.
 
 If the result of the action is currently a success (validation did not
-fail), then calls L</take_action>, and finally L</cleanup>.
+fail), C<run> calls L</take_action>, and finally L</cleanup>.
 
 =cut
 
 sub run {
     my $self = shift;
+    $self->log->debug("Running action");
     return unless $self->result->success;
+    $self->log->debug("Taking action");
     $self->take_action;
     $self->cleanup;
 }
@@ -211,9 +213,9 @@ sub take_action { 1; }
 
 =head2 cleanup
 
-Perform any action specific cleanup.  By default, does nothing.
+Perform any action-specific cleanup.  By default, does nothing.
 
-Runs after take_action -- whether or not take_action returns success.
+Runs after L</take_action> -- whether or not L</take_action> returns success.
 
 =cut
 
@@ -361,7 +363,7 @@ sub register {
             %$info,
             action        => $self,
             input_name    => $self->double_fallback_form_field_name($name),
-            sticky       => 0,
+            sticky        => 0,
             default_value => ($self->argument_value($name) || $info->{'default_value'}),
             render_as     => 'Hidden'
         )->render();
@@ -402,14 +404,14 @@ Returns nothing.
 sub button {
     my $self = shift;
     my %args = ( arguments => {},
+                 submit => $self,
                  @_);
 
+    Jifty->web->form->register_action( $self );
     $args{parameters}{$self->form_field_name($_)} = $args{arguments}{$_}
       for keys %{$args{arguments}};
 
-    Jifty->web->link(%args,
-                     submit => $self,
-                    );
+    Jifty->web->link(%args);
 }
 
 =head1 NAMING METHODS
@@ -430,6 +432,12 @@ sub register_name {
 }
 
 
+sub _prefix_field {
+    my $self = shift;
+    my ($field_name, $prefix) = @_;
+    return join("-", $prefix, $field_name, $self->moniker);
+}
+
 =head2 form_field_name ARGUMENT
 
 Turn one of this action's L<arguments|Jifty::Manual::Glossary/arguments> into
@@ -439,10 +447,8 @@ a fully qualified name; takes the name of the field as an argument.
 
 sub form_field_name {
     my $self = shift;
-    my $field_name = shift;
-    return "J:A:F-$field_name-".$self->moniker;
+    return $self->_prefix_field(shift, "J:A:F");
 }
-
 
 =head2 fallback_form_field_name ARGUMENT
 
@@ -462,8 +468,7 @@ its true value.
 
 sub fallback_form_field_name {
     my $self = shift;
-    my $field_name = shift;
-    return "J:A:F:F-$field_name-".$self->moniker;
+    return $self->_prefix_field(shift, "J:A:F:F");
 }
 
 
@@ -481,8 +486,7 @@ Probably we need a more flexible system, though.
 
 sub double_fallback_form_field_name {
     my $self = shift;
-    my $field_name = shift;
-    return "J:A:F:F:F-$field_name-".$self->moniker;
+    return $self->_prefix_field(shift, "J:A:F:F:F");
 }
 
 
@@ -599,6 +603,7 @@ sub _validate_arguments {
     $self->_validate_argument($_)
       for $self->argument_names;
 
+
     return $self->result->success;
 }
 
@@ -621,6 +626,9 @@ sub _validate_argument {
     my $field = shift;
 
     return unless $field;
+    
+    $self->log->debug(" validating argument $field");
+
     my $field_info = $self->arguments->{$field};
     return unless $field_info;
 

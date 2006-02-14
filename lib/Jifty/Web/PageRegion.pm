@@ -32,8 +32,7 @@ unique id -- it should consist of only letters and numbers.
 
 =item path
 
-The path to the fragment that this page region contains.  This B<must>
-be under a C</fragments> path.
+The path to the fragment that this page region contains.
 
 =item defaults (optional)
 
@@ -232,24 +231,30 @@ sub render {
     if ($self->region_wrapper) {
         $result .= qq|<script type="text/javascript">\n|;
         $result .= qq|new Region('|. $self->qualified_name .qq|',|;
-        $result .= Jifty::JSON::objToJson(\%arguments, {quotapos => 1});
+        $result .= Jifty::JSON::objToJson(\%arguments, {singlequote => 1});
         $result .= qq|,'|. $self->path . qq|');\n|;
         $result .= qq|</script>|;
         $result .= qq|<div id="region-| . $self->qualified_name . qq|">|;
     }
 
-    # Use a subrequest so we can't show components we wouldn't
-    # normally be allowed to.  We pass in an empty 'J:ACTIONS' so that
-    # actions don't get run more than once.
+    # Merge in defaults
+    %arguments = (%{ Jifty->web->request->arguments }, region => $self, %arguments);
 
-    Jifty->web->mason->make_subrequest
-      ( comp => $self->path,
-        args => [ %{ Jifty->web->request->arguments },
-                  region => $self,
-                  'J:ACTIONS' => '',
-                  %arguments ],
-        out_method => \$result,
-      )->exec;
+    # Make a fake request and throw it at the dispatcher
+    my $subrequest = Jifty::Request->new;
+    $subrequest->from_webform( %arguments );
+    $subrequest->path( $self->path );
+    # Remove all of the actions
+    $subrequest->remove_action( $_->moniker ) for $subrequest->actions;
+    $subrequest->is_subrequest( 1 );
+    local Jifty->web->{request} = $subrequest;
+
+    # Convince Mason to tack its response onto a variable and not send
+    # headers when it does so
+    Jifty->handler->mason->interp->out_method( sub { $result .= $_[0]; });
+
+    # Call into the dispatcher
+    Jifty->dispatcher->handle_request;
 
     if ($self->region_wrapper) {
         $result .= qq|</div>|;

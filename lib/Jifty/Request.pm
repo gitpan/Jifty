@@ -4,10 +4,10 @@ use strict;
 package Jifty::Request;
 
 use base qw/Jifty::Object Class::Accessor Clone/;
-__PACKAGE__->mk_accessors(qw(arguments just_validating path continuation));
+__PACKAGE__->mk_accessors(qw(is_subrequest arguments just_validating path _continuation));
 
 use Jifty::JSON;
-use YAML;
+use Jifty::YAML;
 
 =head1 NAME
 
@@ -91,33 +91,29 @@ sub new {
 =head2 fill
 
 Attempt to fill in the request from any number of various methods --
-YAML, JSON, etc.  Falls back to query parameters.
+YAML, JSON, etc.  Falls back to query parameters.  Takes a CGI object.
 
 =cut
 
 sub fill {
     my $self = shift;
-
-    # If this is a subrequest, we need to pull from the mason args in
-    # order to avoid infinite looping
-    $self->from_mason_args
-      if Jifty->web->mason->is_subrequest;
+    my ($cgi) = @_;
 
     # Grab content type and posted data, if any
-    my $ct   = Jifty->web->mason->cgi_request->header_in("Content-Type");
-    my $data = Jifty->web->mason->request_args->{POSTDATA};
+    my $ct   = $ENV{"CONTENT_TYPE"};
+    my $data = $cgi->param('POSTDATA');
 
     # Check it for something appropriate
     if ($data) {
         if ($ct eq "text/x-json") {
             return $self->from_data_structure(Jifty::JSON::jsonToObj($data));
         } elsif ($ct eq "text/x-yaml") {
-            return $self->from_data_structure(YAML::Load($data));
+            return $self->from_data_structure(Jifty::YAML::Load($data));
         }
     }
 
     # Fall back on using the mason args
-    return $self->from_mason_args;
+    return $self->from_cgi($cgi);
 }
 
 =head2 from_data_structure
@@ -140,13 +136,18 @@ sub from_data_structure {
 
     my %actions = %{$data->{actions} || {}};
     for my $a (values %actions) {
+        my %arguments;
+        for my $arg (keys %{$a->{fields} || {}}) {
+            for my $type (qw/doublefallback fallback value/) {
+                $arguments{$arg} = $a->{fields}{$arg}{$type}
+                  if exists $a->{fields}{$arg}{$type};
+            }
+        }
         $self->add_action(moniker   => $a->{moniker},
                           class     => $a->{class},
-                          # TODO: ORDER
-                          arguments => {map {$_ => $a->{fields}{$_}{value}
-                                                || $a->{fields}{$_}{fallback}
-                                                || $a->{fields}{$_}{doublefallback}}
-                                        keys %{$a->{fields} || {}} },
+                          order     => $a->{order},
+                          active    => exists $a->{active} ? $a->{active} : 1,
+                          arguments => \%arguments,
                          );
     }
 
@@ -167,31 +168,46 @@ sub from_data_structure {
     return $self;
 }
 
-=head2 from_mason_args
+=head2 from_cgi CGI
 
-Calls C<from_webform> with the current mason request's args.
+Calls C<from_webform> with the CGI's parameters, after doing Mason
+parameter mapping, and splitting C<|>'s in argument names.  See
+L</argument munging>.
 
 Returns itself.
 
 =cut
 
-sub from_mason_args {
+sub from_cgi {
     my $self = shift;
+    my ($cgi) = @_;
 
-    my $path = $ENV{REQUEST_URI};
+    my $path = $cgi->path_info;
     $path =~ s/\?.*//;
     $self->path( $path );
 
-    return $self->from_webform(%{ Jifty->web->mason->request_args });
-}
+    use HTML::Mason::Utils;
+    my %args = HTML::Mason::Utils::cgi_request_args( $cgi, $cgi->request_method );
 
+    my @splittable_names = grep /=|\|/, keys %args;
+    for my $splittable (@splittable_names) {
+        delete $args{$splittable};
+        for my $newarg (split /\|/, $splittable) {
+            # If there are multiple =s, you just lose.
+            my ($k, $v) = split /=/, $newarg;
+            $args{$k} = $v;
+            # The following breaks page regions and the like, sadly:
+            #$args{$k} ? (ref $args{$k} ? [@{$args{$k}},$v] : [$args{$k}, $v] ) : $v;
+        }
+    }
+    return $self->from_webform( %args );
+}
 
 =head2 from_webform %QUERY_ARGS
 
 Parses web form arguments into the Jifty::Request data structure.
-Takes in the query arguments, as parsed by Mason (thus, repeated
-arguments have already been turned into array refs).  See
-L</SERIALIZATION> for details of how query parameters are parsed.
+Takes in the query arguments. See L</SERIALIZATION> for details of how
+query parameters are parsed.
 
 Returns itself.
 
@@ -207,53 +223,63 @@ sub from_webform {
     $self->_extract_continuations_from_webform(%args);
 
     # Pull in all of the arguments
+    # XXX ALEX: I think this breaks J:CLONE
     $self->arguments(\%args);
 
     # Extract actions and state variables
-    $self->_extract_actions_from_webform(%args);
-    $self->_extract_state_variables_from_webform(%args);
+    $self->from_data_structure($self->webform_to_data_structure(%args));
 
     $self->just_validating(1) if defined $args{'J:VALIDATE'} and length $args{'J:VALIDATE'};
 
     return $self;
 }
 
-=head2 merge_param KEY => VALUE
+=head2 argument KEY [=> VALUE]
 
 Merges a single query parameter into the request.  This may add
 actions, change action arguments, or change state variables.
 
 =cut
 
-sub merge_param {
+sub argument {
     my $self = shift;
 
-    my ($key, $value) = @_;
-    $self->arguments->{$key} = $value;
+    my $key = shift;
+    if (@_) {
+        my $value = shift;
+        $self->arguments->{$key} = $value;
 
-    my $args = Jifty->web->mason->{'request_args'};
-    push @$args, $key => $value;
-
-    if ($key =~ /^J:A-(?:(\d+)-)?(.+)/s) {
-        $self->add_action(moniker => $2, class => $value, order => $1, arguments => {}, active => 1);
-    } elsif ($key =~ /^J:A:F-(\w+)-(.+)/s and $self->action($2)) {
-        $self->action($2)->argument($1 => $value);
-    } elsif ($key =~ /^J:V-(.*)/s) {
-        $self->add_state_variable(key => $1, value => $value);
+        if ($key =~ /^J:A-(?:(\d+)-)?(.+)/s) {
+            $self->add_action(moniker => $2, class => $value, order => $1, arguments => {}, active => 1);
+        } elsif ($key =~ /^J:A:F-(\w+)-(.+)/s and $self->action($2)) {
+            $self->action($2)->argument($1 => $value);
+            $self->action($2)->modified(1);
+        } elsif ($key =~ /^J:V-(.*)/s) {
+            $self->add_state_variable(key => $1, value => $value);
+        }
     }
+    return $self->arguments->{$key};
 }
 
-sub _extract_state_variables_from_webform {
-    my $self = shift;
-    my %args = (@_);
+=head2 delete KEY
 
-    foreach my $state_variable ( keys %args ) {
-        if(  $state_variable  =~ /^J:V-(.*)$/s) {
-            $self->add_state_variable(
-                key     => $1,
-                value   => $args{$state_variable}
-            );
-        }
+Removes the argument supplied -- this is the opposite of L</argument>,
+above.
+
+=cut
+
+sub delete {
+    my $self = shift;
+
+    my $key = shift;
+    delete $self->arguments->{$key};
+    if ($key =~ /^J:A-(?:(\d+)-)?(.+)/s) {
+        $self->remove_action($2);
+    } elsif ($key =~ /^J:A:F-(\w+)-(.+)/s and $self->action($2)) {
+        $self->action($2)->delete($1);
+        $self->action($2)->modified(1);
+    } elsif ($key =~ /^J:V-(.*)/s) {
+        $self->remove_state_variable($1);
     }
 }
 
@@ -299,55 +325,89 @@ sub parse_form_field_name {
     return ( $type, $argument, $moniker );
 }
 
-sub _extract_actions_from_webform {
+=head2 webform_to_data_structure HASHREF
+
+Converts the data from a webform's %args to the datastructure that
+L<Jifty::Request> uses internally.
+
+XXX TODO: ALEX: DOC ME
+
+=cut
+
+sub webform_to_data_structure {
     my $self = shift;
     my %args = (@_);
 
+
+    my $data = {actions => {}, variables => {}};
+
+    # Pass path through
+    $data->{path} = $self->path;
+
+    # Are we only setting some actions as active?
     my $active_actions;
     if (exists $args{'J:ACTIONS'}) {
         $active_actions = {};
         $active_actions->{$_} = 1 for split ';', $args{'J:ACTIONS'};
     } # else $active_actions stays undef
 
-    for my $maybe_action (keys %args) {
-        next unless $maybe_action =~ /^J:A-(?:(\d+)-)?(.+)/s;
+    # Mapping from argument types to data structure names
+    my %types = ("J:A:F:F:F" => "doublefallback", "J:A:F:F" => "fallback", "J:A:F" => "value");
 
-        my $order   = $1;
-        my $moniker = $2;
-        my $class = $args{$maybe_action};
-
-        my $arguments = {};
-        for my $type (qw/J:A:F:F:F J:A:F:F J:A:F/) {
-            for my $key (keys %args) {
-                my ($t, $a, $m) = $self->parse_form_field_name($key);
-                $arguments->{$a} = $args{$key} if defined $t and $t eq $type and $m eq $moniker;
-            }
+    # The "sort" here is key; it ensures that action registrations
+    # come before action arguments
+    for my $key (sort keys %args) {
+        my $value = $args{$key};
+        if( $key  =~ /^J:V-(.*)$/s ) {
+            # It's a variable
+            $data->{variables}{$1} = $value;
+        } elsif ($key =~ /^J:A-(?:(\d+)-)?(.+)/s) {
+            # It's an action declatation
+            $data->{actions}{$2} = {
+                order   => $1,
+                moniker => $2,
+                class   => $value,
+                active  => ($active_actions ? ($active_actions->{$2} || 0) : 1),
+            };
+        } else {
+            # It's possibly a form field
+            my ($t, $a, $m) = $self->parse_form_field_name($key);
+            next unless $t and $types{$t} and $data->{actions}{$m};
+            $data->{actions}{$m}{fields}{$a}{$types{$t}} = $value;
         }
+    }
 
-        $self->add_action(
-            moniker => $moniker,
-            class => $class,
-            order => $order,
-            arguments => $arguments,
-            active => ($active_actions ? ($active_actions->{$moniker} || 0) : 1)
-        );
-    } 
+    return $data;
 }
 
 sub _extract_continuations_from_webform {
     my $self = shift;
     my %args = (@_);
 
-    # Loading a continuation
-    foreach my $continuation_id ($args{'J:C'}, $args{'J:CALL'}  ) {
-        next unless $continuation_id;
-        $self->continuation(Jifty->web->session->get_continuation($continuation_id));
-    }
-
     if ($args{'J:CLONE'} and Jifty->web->session->get_continuations($args{'J:CLONE'})) {
         my %params = %{Jifty->web->session->get_continuations($args{'J:CLONE'})->request->arguments};
-        $self->merge_param($_ => $params{$_}) for keys %params;
+        $self->argument($_ => $params{$_}) for keys %params;
     }
+}
+
+=head2 continuation [CONTINUATION]
+
+Gets or sets the continuation associated with the request.
+
+=cut
+
+sub continuation {
+    my $self = shift;
+
+    $self->_continuation(@_) if @_;
+    return $self->_continuation if $self->_continuation;
+
+    foreach my $continuation_id ($self->argument('J:C'), $self->argument('J:CALL') ) {
+        next unless $continuation_id;
+        return Jifty->web->session->get_continuation($continuation_id);
+    }
+
+    return undef;
 }
 
 =head2 call_continuation
@@ -361,6 +421,7 @@ sub call_continuation {
     my $self = shift;
     my $cont = $self->arguments->{'J:CALL'};
     return unless $cont and Jifty->web->session->get_continuation($cont);
+    $self->log->debug("Calling continuation $cont");
     $self->continuation(Jifty->web->session->get_continuation($cont));
     $self->continuation->call;
 }
@@ -424,7 +485,19 @@ sub add_state_variable {
         $state_var->$k($args{$k}) if defined $args{$k};
     } 
     $self->{'state_variables'}{$args{'key'}} = $state_var;
+}
 
+=head2 remove_state_variable KEY
+
+Removes the given state variable.  The opposite of
+L</add_state_variable>, above.
+
+=cut
+
+sub remove_state_variable {
+    my $self = shift;
+    my ($key) = @_;
+    delete $self->{'state_variables'}{$key};
 }
 
 =head2 actions
@@ -452,8 +525,6 @@ sub action {
     my $moniker = shift;
     return $self->{'actions'}{$moniker};
 } 
-
-
 
 =head2 add_action PARAMHASH
 
@@ -497,6 +568,18 @@ sub add_action {
     $self;
 } 
 
+=head2 remove_action MONIKER
+
+Removes an action with the given moniker.
+
+=cut
+
+sub remove_action {
+    my $self = shift;
+    my ($moniker) = @_;
+    delete $self->{'actions'}{$moniker};
+}
+
 =head2 fragments
 
 Returns a list of fragments requested, as L<Jifty::Request::Fragment> objects.
@@ -532,7 +615,7 @@ sub add_fragment {
                 @_
                );
 
-    my $fragment = $self->{'actions'}->{ $args{'name'} } || Jifty::Request::Fragment->new;
+    my $fragment = $self->{'fragments'}->{ $args{'name'} } || Jifty::Request::Fragment->new;
 
     for my $k (qw/name path wrapper/) {
         $fragment->$k($args{$k}) if defined $args{$k};
@@ -571,13 +654,13 @@ sub do_mapping {
         my ($key, $value) = Jifty::Request::Mapper->map(destination => $_, source => $self->arguments->{$_}, %args);
         next unless $key ne $_;
         delete $self->arguments->{$_};
-        $self->merge_param($key => $value);
+        $self->argument($key => $value);
     }
 }
 
 package Jifty::Request::Action;
 use base 'Class::Accessor';
-__PACKAGE__->mk_accessors( qw/moniker arguments class order active/);
+__PACKAGE__->mk_accessors( qw/moniker arguments class order active modified/);
 
 =head2 Jifty::Request::Action
 
@@ -605,6 +688,16 @@ sub argument {
 
     $self->arguments->{$key} = shift if @_;
     $self->arguments->{$key};
+}
+
+=head3 delete
+
+=cut
+
+sub delete {
+    my $self = shift;
+    my $argument = shift;
+    delete $self->arguments->{$argument};
 }
 
 
@@ -652,14 +745,34 @@ sub argument {
     $self->arguments->{$key};
 }
 
+=head3 delete
+
+=cut
+
+sub delete {
+    my $self = shift;
+    my $argument = shift;
+    delete $self->arguments->{$argument};
+}
+
 =head1 SERIALIZATION
 
 =head2 CGI Query parameters
 
 The primary source of Jifty requests through the website are CGI query
 parameters.  These are requests submitted using CGI GET or POST
-requests to your Jifty application.  See L<Jifty::MasonInterp> for
-details of the CGI parsing.
+requests to your Jifty application.
+
+=head2 argument munging
+
+In addition to standard Mason argument munging, Jifty also takes
+arguments with a B<name> of
+
+   bla=bap|beep=bop|foo=bar
+
+and an arbitrary value, and makes them appear as if they were actually
+separate arguments.  The purpose is to allow submit buttons to act as
+if they'd sent multiple values, without using JavaScript.
 
 =head2 actions
 

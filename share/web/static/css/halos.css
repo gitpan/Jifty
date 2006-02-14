@@ -1,0 +1,61 @@
+div.halo_actions {
+  display: none;
+  position: fixed;
+  right: 0;
+  bottom: 0;
+
+
+}
+
+div.halo_actions dl {
+ background: #ccc;
+ list-style-type: none;
+ border: yellow 2px solid;
+
+ margin: 1em;
+ padding:1em;
+ 
+}
+
+div.halo_actions dl a {
+ color: black;
+}
+
+span.halo_button {
+  color: yellow;
+  position: absolute;
+  z-index: 9999;
+  font-size:2em;
+}
+
+div#render_info_tree {
+   display: none;
+   position: fixed;
+   font-size: 0.5em;
+   border: 1px solid yellow;
+   right: 1em;
+   bottom: 1em;
+   border: 2px solid #fc0;
+   padding: 1em;
+}
+
+div#render_info_tree ul {
+   list-style: none;
+   padding-left: 1em;
+}
+
+
+div#render_info {
+  position: fixed;
+  right:0.5em;
+  bottom:0;
+}
+
+span.halo_name {
+  color: black;
+  background-color: yellow;
+  border: 1px solid black;
+  position: static;
+  padding: 0.25em;
+}
+

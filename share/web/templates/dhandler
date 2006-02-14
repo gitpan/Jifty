@@ -26,6 +26,8 @@ if ( $file =~ /\.(gif|png|jpe?g)$/i ) {
     $type = 'text/css';
 } elsif ( $file =~ /\.js$/i ) {
     $type = 'application/x-javascript';
+} elsif ($file =~ /\.ico$/i){ 
+    $type = 'image/x-icon';
 }
 
 my @options = (

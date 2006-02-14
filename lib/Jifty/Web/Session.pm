@@ -51,11 +51,6 @@ sub load {
     my $self = shift;
     my $session_id = shift;
 
-    my $m    = Jifty->web->mason;
-    return
-        if $m
-        && $m->is_subrequest;    # avoid reentrancy, as suggested by masonbook
-    
     require Apache::Session::File;
     
     unless ($session_id) {
@@ -63,23 +58,26 @@ sub load {
         my $cookiename = $self->cookie_name;
         $session_id    =  $cookies{$cookiename} ? $cookies{$cookiename}->value() : undef;
     }
-    
+
     $Storable::Deparse = 1;
     $Storable::Eval    = 1;
     my %session;
+
+    my $session_dir = Jifty::Util->absolute_path( Jifty->config->framework('Web')->{'SessionDir'} );
+
     eval {
         tie %session, 'Apache::Session::File', ( $session_id ? $session_id : undef ),
                 {
-                 Directory     => '/tmp',
-                 LockDirectory => '/tmp',
+                 Directory     => $session_dir,
+                 LockDirectory => $session_dir,
                 };
 
             };
     if ($@) {
         tie %session, 'Apache::Session::File', undef,
                 {
-                 Directory     => '/tmp',
-                 LockDirectory => '/tmp',
+                 Directory     => $session_dir,
+                 LockDirectory => $session_dir,
                 };
     }
 
@@ -101,6 +99,17 @@ sub unload {
     $self->_session->{object_store}->close;
     $self->_session->release_all_locks();
     $self->_session(undef);
+}
+
+=head2 loaded
+
+Returns true if the session has already been loaded
+
+=cut
+
+sub loaded {
+    my $self = shift;
+    return $self->_session && $self->get('_session_id');
 }
 
 sub _session {
@@ -223,7 +232,6 @@ Sets the session cookie
 
 sub set_cookie {
     my $self = shift;
-    my $m    = Jifty->web->mason;
 
     my $cookie_name = $self->cookie_name;
     my %cookies     = CGI::Cookie->fetch();
@@ -239,8 +247,7 @@ sub set_cookie {
     if ( not $cookies{$cookie_name}
         or ( $cookies{$cookie_name} ne $cookie->as_string ) )
     {
-        $m->cgi_request->headers_out->{'Set-Cookie'} = $cookie->as_string
-            if ($m);
+        Jifty->web->response->add_header( 'Set-Cookie' => $cookie->as_string );
     }
 }
 

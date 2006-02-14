@@ -21,12 +21,12 @@ creates a handy standalone web server for a lightweight Jifty application.
 =cut
 
 use Jifty::Everything;
-use base qw/HTTP::Server::Simple::Mason/;
-use base qw/Class::Accessor/;
+use base qw/HTTP::Server::Simple::CGI/;
 use base qw/Jifty::Object/;
 use File::Spec;
 use Module::Refresh;
 use Log::Log4perl;
+use HTTP::Server::Simple;
 use HTTP::Server::Simple::Recorder;
 
 =head1 METHODS
@@ -41,58 +41,19 @@ sub new {
     my $class = shift;
     my $self  = {};
     bless $self, $class;
-
     $self->setup_jifty(@_);
-
     $self->recording_on if $ENV{'JIFTY_RECORD'};
+
+    use Hook::LexWrap;
+    wrap 'HTML::Mason::FakeApache::send_http_header', pre => sub {
+        my $r = shift;
+        my $status = $r->header_out('Status') || '200 Jifty OK';
+        print STDOUT "HTTP/1.0 $status\n";
+    };
 
     return ($self);
 
 }
-
-=head2 mason_config
-
-The Jifty standalone server gets its Mason configuration from the same place that any other
-Jifty handler does: L<Jifty::Handler/mason_config>.
-
-=cut
-
-sub mason_config { Jifty::Handler->mason_config } 
-
-=head2 handle_error
-
-Overrides L<HTTP::Server::Simple::Mason>'s handle_error method to
-return an error to the browser, and log an error using Log::Log4perl
-
-=cut
-
-sub handle_error {
-    my $self = shift;
-    my $error = shift;
-   
-    # Report error as coming from the appropriate place
-    $Log::Log4perl::caller_depth++;
-    my $logger = Log::Log4perl::get_logger("");
-    my $time = Log::Log4perl::DateFormat->new("yyyy/MM/dd HH:mm:ss")->format(time); 
-    my $escaped_error = $error;
-    $escaped_error =~ s/</&lt;/gi;
-
-    warn "THIS IS UNSAFE ESCAPING";
-
-    print <<"EOF";
-<html>
-    <head><title>Internal Error</title></head>
-    <body>
-    <h1>Internal error</h1>
-    <p>Something bad happened inside the server. Generally, this indicates something like a programming error or a broken database.</p>
-    <pre>@{[ $escaped_error ]}</pre>
-    </body>
-</html>
-EOF
-
-    $logger->logdie($error);
-}
-
 
 =head2 setup_jifty
 
@@ -103,11 +64,11 @@ Sets up the Jifty singleton.  This is called automatically by L</new>.
 sub setup_jifty {
     my $self = shift;
     my %args = (
-        @_
+                port => undef,
+                @_
     );
 
     Jifty->config->framework('Web')->{'Port'} = $args{port} if $args{port};
-
     $self->port( Jifty->config->framework('Web')->{'Port'} || 8888 );
 }
 
@@ -122,12 +83,10 @@ request.
 
 sub handle_request {
     my $self = shift;
+    my $cgi = shift;
 
-    Module::Refresh->refresh;
+    Jifty->handler->handle_request( cgi  => $cgi );
 
-    local $HTML::Mason::Commands::JiftyWeb = Jifty::Web->new();
-     $self->SUPER::handle_request(@_); 
-    Jifty::Handler->cleanup_request();
 }
 
 
@@ -140,7 +99,6 @@ logging framework to record the server's startup
 
 sub print_banner {
     my $self = shift;
-
     $self->log->info("You can connect to your server at ", Jifty::Web->url, "/");
 } 
 

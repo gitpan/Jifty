@@ -15,8 +15,8 @@ Jifty::Config -- wrap a jifty configuration file
 use Jifty::Everything;
 use Jifty::DBI::Handle;
 use Jifty::Util;
+use Jifty::YAML;
 use UNIVERSAL::require;
-use YAML;
 use File::Spec;
 use File::Basename;
 use Log::Log4perl;
@@ -73,7 +73,7 @@ configuration file for the application, looking for the
 C<JIFTY_CONFIG> environment variable or C<etc/config.yml> under the
 application's base directory.
 
-It uses the main contifuration file to find a vendor configuration
+It uses the main configuration file to find a vendor configuration
 file -- if it doesn't find a framework variable named 'VendorConfig',
 it will use the C<JIFTY_VENDOR_CONFIG> environment variable.
 
@@ -199,7 +199,6 @@ sub guess {
     if (@_) {
         $app_name = shift;
     } elsif ($self->stash->{framework}->{ApplicationName}) {
-
         $app_name =  $self->stash->{framework}->{ApplicationName};
     } else {
         $app_name =  Jifty::Util->default_app_name;
@@ -212,6 +211,7 @@ sub guess {
     return {
         framework => {
             AdminMode        => 1,
+            DevelMode        => 1,
             ActionBasePath   => $app_class . "::Action",
             ApplicationClass => $app_class,
             CurrentUserClass => $app_class . "::CurrentUser",
@@ -228,12 +228,20 @@ sub guess {
             MailerArgs => [],
             Web        => {
                 DefaultStaticRoot => Jifty::Util->share_root . '/web/static',
-                DefaultTemplateRoot => Jifty::Util->share_root
-                    . '/web/templates',
+                DefaultTemplateRoot => Jifty::Util->share_root . '/web/templates',
+                SessionDir  => "var/session",
+                DataDir     => "var/mason",
                 StaticRoot   => "web/static",
                 TemplateRoot => "web/templates",
-            }
-        }
+                MasonConfig => {
+                    autoflush    => 0,
+                    error_mode   => 'fatal',
+                    error_format => 'text',
+                    default_escape_flags => 'h',
+                },
+                Globals      => [],
+            },
+        },
     };
 
 }
@@ -252,7 +260,7 @@ sub load_file {
 
     # only try to load files that exist
     return {} unless ( $file && -f $file );
-    my $hashref = YAML::LoadFile($file)
+    my $hashref = Jifty::YAML::LoadFile($file)
         or die "I couldn't load config file $file: $!";
 
     $hashref = $self->_expand_relative_paths($hashref);

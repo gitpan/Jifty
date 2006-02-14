@@ -20,7 +20,7 @@ use base qw/Jifty::DBI::Record::Cachable/;
 sub _init {
     my $self = shift;
     my %args = (@_);
-     $self->_get_current_user(%args);
+    $self->_get_current_user(%args);
     
     $self->SUPER::_init(@_);
 
@@ -217,7 +217,9 @@ sub _value {
     unless ($self->check_read_rights(@_)) {
         return (undef);
     }
-    Encode::decode_utf8($self->SUPER::_value(@_));
+    my $value = $self->SUPER::_value(@_);
+    utf8::upgrade($value) if defined $value;
+    $value;
 }
 
 

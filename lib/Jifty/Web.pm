@@ -47,6 +47,7 @@ Returns a L<HTML::Mason::Request> object
 =cut
 
 sub mason {
+    use HTML::Mason::Request;
     return HTML::Mason::Request->instance;
 }
 
@@ -110,7 +111,7 @@ sub serial {
 =head3 setup_session
 
 Sets up the current C<session> object (a L<Jifty::Web::Session> tied
-hash).
+hash).  Aborts if the session is already loaded.
 
 =cut
 
@@ -118,9 +119,8 @@ hash).
 sub setup_session {
     my $self = shift;
     my $m = Jifty->web->mason;
-    # avoid reentrancy, as suggested by masonbook
-    return if $m and $m->is_subrequest;
 
+    return if $self->session->loaded;
     $self->session->load();
 }
 
@@ -181,16 +181,17 @@ undef.
 
 =head2 REQUEST
 
-=head3 handle_request
+=head3 handle_request [REQUEST]
 
-This method sets up a current session, prepares a L<Jifty::Request>
-object and loads page-specific actions.
+This method sets up a current session, and then processes the given
+L<Jifty::Request> object.  If no request object is given, processes
+the request object in L</request>.
 
-Each action is vetted in three ways -- first, it must be marked as
-C<active> by the L<Jifty::Request> (this is the default).  Second, it
-must be in the set of allowed classes of actions (see L</is_allowed>,
-below).  Finally, the action must validate.  If it passes all of these
-criteria, the action is fit to be run.
+Each action on the request is vetted in three ways -- first, it must
+be marked as C<active> by the L<Jifty::Request> (this is the default).
+Second, it must be in the set of allowed classes of actions (see
+L</is_allowed>, below).  Finally, the action must validate.  If it
+passes all of these criteria, the action is fit to be run.
 
 Before they are run, however, the request has a chance to be
 interrupted and saved away into a continuation, to be resumed at some
@@ -208,34 +209,13 @@ For more details about continuations, see L<Jifty::Continuation>.
 
 sub handle_request {
     my $self = shift;
+    die "No request to handle" unless Jifty->web->request;
+    Jifty->web->response( Jifty::Response->new ) unless $self->response;
+    Jifty->web->setup_session;
 
-    #$self->log->debug( "Handling " . $ENV{'REQUEST_URI'} );
-    $self->setup_session;
-    $self->response( Jifty::Response->new ) unless $self->response;
-
-    # We local the request if we have one right now -- for mason
-    # subrequests, for instance, we want to make sure we get back the
-    # original request after the subrequest ends.  If this is *not* a
-    # subrequest, than we want to *not* local it, so that the mason
-    # components have access to the outermost request
-    if ($self->request) {
-        local $self->{request};
-        $self->_internal_request( Jifty::Request->new->fill );
-    } else {
-        $self->_internal_request( Jifty::Request->new->fill );
-    }
-}
-
-# Called when continuations get run, as well as by handle_request;
-# takes a Jifty::Request
-sub _internal_request {
-    my $self = shift;
-    my ($request) = @_;
-
-    $self->request($request);
-    $self->setup_page_actions;
     my @valid_actions;
     for my $request_action ( $self->request->actions ) {
+        $self->log->debug("Found action ".$request_action->class . " " . $request_action->moniker);
         next unless $request_action->active;
         unless ( $self->is_allowed( $request_action->class ) ) {
             $self->log->warn( "Attempt to call denied action '"
@@ -244,27 +224,58 @@ sub _internal_request {
             next;
         }
 
+        # Make sure we can instantiate the action
         my $action = $self->new_action_from_request($request_action);
         next unless $action;
-        $self->response->result( $action->moniker => $action->result );
+        $request_action->modified(0);
 
-        eval { push @valid_actions, $action if $action->validate; };
-        if ( my $err = $@ ) {
-            $self->log->fatal($err);
-        }
+        # Try validating -- note that this is just the first pass; as
+        # actions are run, they may fill in values which alter
+        # validation of later actions
+        $self->log->debug("Validating action ".ref($action). " ".$action->moniker);
+        $self->response->result( $action->moniker => $action->result );
+        $action->validate;
+
+        push @valid_actions, $request_action;
     }
     $self->save_continuation;
 
     unless ( $self->request->just_validating ) {
-        for my $action (@valid_actions) {
-            eval { $action->run; };
+        for my $request_action (@valid_actions) {
+
+            eval {
+                # Pull the action out of the request (again, since
+                # mappings may have affected parameters).  This
+                # returns the cached version unless the request has
+                # changed
+                my $action = $self->new_action_from_request($request_action);
+                next unless $action;
+                if ($request_action->modified) {
+                    # If the request's action was changed, re-validate
+                    $action->result(Jifty::Result->new);
+                    $action->result->action_class(ref $action);
+                    $self->response->result( $action->moniker => $action->result );
+                    $self->log->debug("Re-validating action ".ref($action). " ".$action->moniker);
+                    next unless $action->validate;
+                }
+            
+                $self->log->debug("Running action.");
+                $action->run; 
+            };
 
             if ( my $err = $@ ) {
+                # poor man's exception propagation
+                # We need to get "LAST RULE" exceptions back up to the dispatcher
+                die $err if ($err =~ /^LAST RULE/);
                 $self->log->fatal($err);
             }
+
+            # Fill in the request with any results that that action
+            # may have yielded.
+            $self->request->do_mapping;
         }
     }
-    $self->session->set_cookie;
+    $self->session->set_cookie();
 
     $self->request->call_continuation
         if $self->response->success;
@@ -274,21 +285,6 @@ sub _internal_request {
 
     # This may be a request for fragments, not for a whole page
     $self->serve_fragments if $self->request->fragments;
-}
-
-=head3 setup_page_actions
-
-Probe the page the current user has requested to see if it has any
-special actions it wants to run, if it wants to massage the existing
-actions, etc.
-
-=cut
-
-sub setup_page_actions {
-    my $self = shift;
-    if ( $self->mason->base_comp->method_exists('setup_actions') ) {
-        $self->mason->base_comp->call_method('setup_actions');
-    }
 }
 
 =head3 request [VALUE]
@@ -305,8 +301,7 @@ Gets or sets the current L<Jifty::Response> object.
 
 Gets the actions that have been created with this framework with
 C<new_action> (whether automatically via a L<Jifty::Request>, or in
-Mason code), as L<Jifty::Action> objects. (These are actually stored
-in the mason notes, so that they are magically saved over redirects.)
+Mason code), as L<Jifty::Action> objects.
 
 =cut
 
@@ -468,14 +463,14 @@ C<new_action> was supplied.
 
 C<MONIKER> is a unique designator of an action on a page.  The moniker
 is content-free and non-fattening, and may be auto-generated.  It is
-used to tie together argumentss that relate to the same action.
+used to tie together arguments that relate to the same action.
 
 C<ORDER> defines the order in which the action is run, with lower
 numerical values running first.
 
 C<ARGUMENTS> are passed to the L<Jifty::Action/new> method.  In
 addition, if the current request (C<$self->request>) contains an
-action with a matching moniker, any arguments thare are in that
+action with a matching moniker, any arguments that are in that
 requested action but not in the C<PARAMHASH> list are set.  This
 implements "sticky fields".
 
@@ -551,6 +546,8 @@ Given a L<Jifty::Request::Action>, creates a new action using C<new_action>.
 sub new_action_from_request {
     my $self       = shift;
     my $req_action = shift;
+    return $self->{'actions'}{ $req_action->moniker } if 
+      $self->{'actions'}{ $req_action->moniker } and not $req_action->modified;
     $self->new_action(
         class     => $req_action->class,
         moniker   => $req_action->moniker,
@@ -579,7 +576,7 @@ sub redirect_required {
     my $self = shift;
 
     if ($self->next_page
-        and ( ( $self->next_page ne $self->mason->request_comp->path )
+        and ( ( $self->next_page ne $self->request->path )
             or $self->request->state_variables )
         )
     {
@@ -604,23 +601,42 @@ sub redirect {
     my $page = shift || $self->next_page;
 
     if (   $self->response->results
-        or $self->request->state_variables
-        or %{ $self->mason->notes } )
+        or $self->request->state_variables )
     {
         my $request = Jifty::Request->new();
         $request->path($page);
-        $request->from_webform( map { "J:V-" . $_->key => $_->value }
-                $self->request->state_variables );
+        $request->add_state_variable( key => $_->key, value => $_->value )
+          for $self->request->state_variables;
         my $cont = Jifty::Continuation->new(
             request  => $request,
             response => $self->response,
-            notes    => $self->mason->notes,
             parent   => $self->request->continuation,
         );
-        $self->mason->redirect( $page . "?J:CALL=" . $cont->id );
-    } else {
-        $self->mason->redirect($page);
+        $page = $page . "?J:CALL=" . $cont->id;
     }
+    $self->_redirect($page);
+}
+
+sub _redirect {
+    my $self = shift;
+    my ($page) = @_;
+
+    # This is designed to work under CGI or FastCGI; will need an
+    # abstraction for mod_perl
+
+    # Clear out the mason output, if any
+    $self->mason->clear_buffer if $self->mason;
+
+    my $apache = Jifty->handler->apache;
+
+    # Headers..
+    $apache->header_out( Location => $page );
+    $apache->header_out( Status => 302 );
+    $apache->send_http_header();
+
+    # Abort or last_rule out of here
+    $self->mason->abort if $self->mason;
+    Jifty::Dispatcher::last_rule();
 
 }
 
@@ -644,7 +660,6 @@ sub save_continuation {
         my $c = Jifty::Continuation->new(
             request  => $self->request,
             response => $self->response,
-            notes    => $self->mason->notes,
             parent   => $self->request->continuation,
             clone    => $clone,
         );
@@ -656,12 +671,12 @@ sub save_continuation {
         {
 
 # We don't get to redirect to the new page; redirect to the same page, new cont
-            Jifty->web->mason->redirect(
+            $self->_redirect(
                 $self->request->path . "?J:C=" . $c->id );
         } else {
 
             # Set us up with the new continuation
-            Jifty->web->mason->redirect( $args{'J:PATH'}
+            $self->_redirect( Jifty::Web->url . $args{'J:PATH'}
                     . ( $args{'J:PATH'} =~ /\?/ ? "&" : "?" ) . "J:C="
                     . $c->id );
         }
@@ -689,7 +704,7 @@ sub multipage {
 
     unless ($request_action) {
         my $request = Jifty::Request->new();
-        $request->merge_param(
+        $request->argument(
             'J:CALL' => Jifty->web->request->continuation->id )
             if Jifty->web->request->continuation;
         $request->path("/");
@@ -751,9 +766,8 @@ sub tangent {
 
         my $request = Jifty::Request->new(path => Jifty->web->request->path)
           ->from_webform($clickable->get_parameters);
-        Jifty->web->_internal_request($request);
-
-        
+        local Jifty->web->{request} = $request;
+        Jifty->web->handle_request();
     }
 }
 
@@ -831,8 +845,7 @@ sub render_messages {
 
 =head3 render_request_debug_info
 
-Outputs the request arguments and any Mason notes in a <div
-id="debug"> tag.
+Outputs the request arguments.
 
 =cut
 
@@ -843,9 +856,6 @@ sub render_request_debug_info {
     $m->out('<div class="debug">');
     $m->out('<hr /><h1>Request args</h1><pre>');
     $m->out( YAML::Dump( { $m->request_args } ) );
-    $m->out('</pre>');
-    $m->out('<hr /><h1>$m->notes</h1><pre>');
-    $m->out( YAML::Dump( $m->notes ) );
     $m->out('</pre></div>');
 
     return '';
@@ -867,6 +877,17 @@ sub query_string {
             $key . "=" . $self->mason->interp->apply_escapes( $value, 'u' );
     }
     return ( join( ';', @params ) );
+}
+
+=head3 escape STRING
+
+HTML-escapes the given string and returns it
+
+=cut
+
+sub escape {
+    my $self = shift;
+    return join '', map {$self->mason->interp->apply_escapes( $_, 'h' )} @_;
 }
 
 =head3 navigation
@@ -1025,27 +1046,32 @@ sub serve_fragments {
     my $writer = XML::Writer->new( OUTPUT => \$output );
     $writer->xmlDecl( "UTF-8", "yes" );
     $writer->startTag("response");
-    for my $f ($self->request->fragments) {
+    for my $f ( $self->request->fragments ) {
         $writer->startTag( "fragment", id => $f->name );
         my @names = split '-', $f->name;
 
         # Set up the region stack
         local Jifty->web->{'region_stack'} = [];
-        while (my $region = shift @names) {
-            my $new = @names ? Jifty::Web::PageRegion->new(name => $region, _bootstrap => 1, parent => Jifty->web->current_region)
-                             : Jifty::Web::PageRegion->new(
-                                                           name           => $region,
-                                                           path           => $f->path,
-                                                           region_wrapper => $f->wrapper,
-                                                           parent         => Jifty->web->current_region,
-                                                           defaults       => $f->arguments,
-                                                          );
-            push @{Jifty->web->{'region_stack'}}, $new;
+        while ( my $region = shift @names ) {
+            my $new = @names
+                ? Jifty::Web::PageRegion->new(
+                name       => $region,
+                _bootstrap => 1,
+                parent     => Jifty->web->current_region
+                )
+                : Jifty::Web::PageRegion->new(
+                name           => $region,
+                path           => $f->path,
+                region_wrapper => $f->wrapper,
+                parent         => Jifty->web->current_region,
+                defaults       => $f->arguments,
+                );
+            push @{ Jifty->web->{'region_stack'} }, $new;
             $new->enter;
         }
 
         # Stuff the rendered region into the XML
-        $writer->cdata(Jifty->web->current_region->render);
+        $writer->cdata( Jifty->web->current_region->render );
         $writer->endTag();
     }
     $writer->endTag();
@@ -1053,11 +1079,17 @@ sub serve_fragments {
     # Spit out a correct content-type; we set this *here* instead of
     # above because each of the subrequests attempts to set it to
     # text/html -- so we have to override them after the fact.
-    $self->mason->cgi_request->content_type('text/xml; charset=utf=8');
+    $self->response->add_header("Content-Type" => 'text/xml; charset=utf-8');
 
-    # Output the data
-    $self->mason->out($output);
-    $self->mason->abort;
+    # Print a header and the content, and then bail
+    my $apache = Jifty->handler->apache;
+    $apache->send_http_header();
+
+    # Wide characters at this point should be harmlessly treated as UTF-8 octets.
+    no warnings 'utf8';
+    print $output;
+
+    Jifty::Dispatcher::last_rule;
 }
 
 1;

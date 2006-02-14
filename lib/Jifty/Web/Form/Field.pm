@@ -84,6 +84,16 @@ sub new {
         $self->$field( $args{$field} ) if exists $args{$field};
     }
 
+    # If they key and/or value imply that this argument is going to be
+    # a mapped argument, then do the mapping and mark the field as hidden.
+    my ($key, $value) = Jifty::Request::Mapper->query_parameters($self->input_name, $self->current_value);
+    if ($key ne $self->input_name) {
+        require Jifty::Web::Form::Field::Hidden;
+        bless $self, "Jifty::Web::Form::Field::Hidden";
+        $self->input_name($key);
+        $self->default_value($value);
+        $self->sticky_value(undef);
+    }
 
     # now that the form field has been instantiated, register the action with the form.
     if ($self->action and not (Jifty->web->form->has_action($self->action))) {
@@ -320,7 +330,9 @@ Output the start of div that wraps the form field
 
 sub render_wrapper_start {
     my $self = shift;
-    Jifty->web->out('<div class="form_field">' ."\n");
+    my @classes = qw(form_field);
+    if ($self->mandatory) { push @classes, 'mandatory' }
+    Jifty->web->out('<div class="'.join(' ', @classes).'">' ."\n");
 }
 
 =head2 render_wrapper_end
@@ -443,7 +455,7 @@ sub render_value {
 
 =head2 render_autocomplete
 
-Renders an empty div that /jifty/autocomplete.xml can fill in. Also renders the tiny snippet
+Renders an empty div that /__jifty/autocomplete.xml can fill in. Also renders the tiny snippet
 of javascript to make that call if necessary.
 Returns an empty string.
 
@@ -455,7 +467,7 @@ sub render_autocomplete {
     Jifty->web->out(
 qq!<div class="autocomplete" id="@{[$self->element_id]}-autocomplete" style="display:none;border:1px solid black;background-color:white;"></div>\n
         <script type="text/javascript">
-          new Jifty.Autocompleter('@{[$self->element_id]}', '@{[$self->element_id]}-autocomplete', '/jifty/autocomplete.xml')
+          new Jifty.Autocompleter('@{[$self->element_id]}', '@{[$self->element_id]}-autocomplete', '/__jifty/autocomplete.xml')
         </script>
   !
     );

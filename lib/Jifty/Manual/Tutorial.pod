@@ -31,17 +31,18 @@ that actually need to be compiled for your operating system. (Little
 things like Perl's database interface and the embedded SQLite that Jifty
 defaults to.)
 
-You can either grab a complete Jifty package from http://jifty.org/download
+You can either grab a complete Jifty package from http://download.jifty.org/pub/jifty/
 or install from CPAN. If you get the I<slim> version from CPAN, you'll have
 to install Jifty's dependencies yourself. (Though we help out with that 
-where we can.)  If you want to get up and running quickly, grab:
+where we can.)  If you want to get up and running quickly, grab the latest
+version from:
 
-    http://download.jifty.org/pub/jifty/jifty-latest.tgz
+    http://download.jifty.org/pub/jifty/
 
 Either way, the installation process is the same:
 
-  # tar xzvf jifty-<version>tgz
-  # cd jifty-version
+  # tar xzvf jifty-<version>.tgz
+  # cd jifty-<version>
   # perl Makefile.PL
   # make
   # make test
@@ -95,7 +96,7 @@ of the most important commands are C<schema>, which sets up or updates
 your database schema and C<server>, which starts a standalone
 webserver. To find out what commands your F<jifty> comes with, run:
 
-    C<jifty help>
+    jifty help
 
 =item etc
 
@@ -246,7 +247,7 @@ Ok. You have a working, if simplistic, application.  Start up a webserver and
 have a look around.  Be sure to check out the AJAX-enabled administrative UI,
 the online documentation browser, and the Pony.
 
-  # ./bin/jifty/server
+  # ./bin/jifty server
   INFO - You can connect to your server at http://localhost:8888/
 
 =head2 Building a user interface
@@ -332,8 +333,8 @@ a file called F<web/templates/fragments/page_of_posts> containing:
   my $posts = MyWeblog::Model::PostCollection->new();
   $posts->unlimit();
   $posts->set_page_info( current_page => $page,
-                             per_page     => 25
-                            );
+                         per_page     => 25
+                       );
   $m->out("No items found.") if ($posts->pager->total_entries == 0);
 
   </%init>
@@ -360,7 +361,7 @@ on your webserver.
 =head2 Navigation
 
 Of course, having to remember the URL to get to the posting page is a bit
-annoying.  To get a B<Post> button in the menu, you to override the default
+annoying.  To get a B<Post> button in the menu, you need to override the default
 menus.
 
 Jifty's I<default> menus live in F<_elements/nav> in the default application
@@ -376,8 +377,8 @@ and insert:
   <%init>
   my $top = Jifty->web->navigation;
   $top->child( Home => url => "/");
-  $top->child( Post  => url => "/post", 
-                        label => "Post Article");
+  $top->child( Post => url => "/post", 
+                       label => "Post Article");
   </%init>
 
 For more information about the menu system, see the documentation in
@@ -424,6 +425,8 @@ Future tutorials include:
 =item * Access Control and Security
 
 =item * Upgrading your application's data model
+
+=item * The dispatcher in depth
 
 =item * Deploying your application in production
 

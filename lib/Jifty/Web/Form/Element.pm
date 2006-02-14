@@ -63,8 +63,8 @@ C<new> parameter hash.
 
 =cut
 
-sub accessors { shift->handlers, qw(class key_binding id label) }
-__PACKAGE__->mk_accessors(qw(onclick class key_binding id label ));
+sub accessors { shift->handlers, qw(class key_binding id label tooltip) }
+__PACKAGE__->mk_accessors(qw(onclick class key_binding id label tooltip));
 
 =head2 javascript
 
@@ -123,7 +123,7 @@ sub javascript {
 
             push @fragments, \%args;
         }
-        $response .= qq| $trigger="update( @{[ Jifty::JSON::objToJson( {actions => \@actions, fragments => \@fragments }, {quotapos => 1}) ]} );|;
+        $response .= qq| $trigger="update( @{[ Jifty::JSON::objToJson( {actions => \@actions, fragments => \@fragments }, {singlequote => 1}) ]} );|;
         $response .= qq|return false;"|;
     }
     return $response;

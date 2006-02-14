@@ -8,7 +8,6 @@ use base qw/App::CLI::Command/;
 use File::Basename;
 use CGI::Fast;
 use Module::Refresh;
-use HTML::Mason::CGIHandler;
 use Jifty::Everything;
 
 =head1 NAME
@@ -29,6 +28,25 @@ to call jifty a bit differently:
  FastCgiServer /path/to/your/jifty/app/bin/jifty -initial-env JIFTY_COMMAND=fastcgi
  ScriptAlias /  /path/to/your/jifty/app/bin/jifty/
 
+For B<lighttpd> (L<http://www.lighttpd.net/>), use this setting:
+
+ server.modules  = ( "mod_fastcgi" )
+ server.document-root = "/path/to/your/jifty/app/web/templates"
+ fastcgi.server = (
+        "" => (
+            "your_jifty_app" => (
+                "socket"       => "/tmp/your_jifty_app.socket",
+                "check-local"  => "disable",
+                "bin-path"     => "/path/to/your/jifty/app/bin/jifty",
+                "bin-environment" => ( "JIFTY_COMMAND" => "fastcgi" ),
+                "min-procs"    => 1,
+                "max-procs"    => 5,
+                "max-load-per-proc" => 1,
+                "idle-timeout" => 20,
+            )
+        )
+    )
+
 =head2 run
 
 Creates a new FastCGI process.
@@ -37,29 +55,18 @@ Creates a new FastCGI process.
  
 sub run {
     Jifty->new();
-    my $Handler = HTML::Mason::CGIHandler->new( Jifty::Handler->mason_config );
 
     while ( my $cgi = CGI::Fast->new ) {
         # the whole point of fastcgi requires the env to get reset here..
         # So we must squash it again
         $ENV{'PATH'}   = '/bin:/usr/bin';
-        $ENV{'CDPATH'} = '' if defined $ENV{'CDPATH'};
         $ENV{'SHELL'}  = '/bin/sh' if defined $ENV{'SHELL'};
-        $ENV{'ENV'}    = '' if defined $ENV{'ENV'};
-        $ENV{'IFS'}    = '' if defined $ENV{'IFS'};
-
-        Module::Refresh->refresh;
-
-
-        local $HTML::Mason::Commands::JiftyWeb = Jifty::Web->new();
-
-        if ( ( !$Handler->interp->comp_exists( $cgi->path_info ) )
-             && ( $Handler->interp->comp_exists( $cgi->path_info . "/index.html" ) ) ) {
-            $cgi->path_info( $cgi->path_info . "/index.html" );
+        $ENV{'PATH_INFO'}   = $ENV{'SCRIPT_NAME'}
+            if $ENV{'SERVER_SOFTWARE'} =~ /^lighttpd\b/;
+        for (qw(CDPATH ENV IFS)) {
+            $ENV{$_} = '' if (defined $ENV{$_} );
         }
-
-        eval { $Handler->handle_cgi_object($cgi); };
-        Jifty::Handler->cleanup_request(); 
+        Jifty->handler->handle_request( cgi => $cgi );
     }
 }
 

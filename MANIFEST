@@ -1,3 +1,5 @@
+Changelog
+bin/build_par
 bin/jifty
 doc/ajax-upgraded-links
 doc/talks/npw2005.xul
@@ -20,6 +22,7 @@ lib/Email/Send/Jifty/Test.pm
 lib/Jifty.pm
 lib/Jifty/Action.pm
 lib/Jifty/Action/Autocomplete.pm
+lib/Jifty/Action/Devel/FileEditor.pm
 lib/Jifty/Action/Record.pm
 lib/Jifty/Action/Record/Create.pm
 lib/Jifty/Action/Record/Delete.pm
@@ -31,19 +34,20 @@ lib/Jifty/Collection.pm
 lib/Jifty/Config.pm
 lib/Jifty/Continuation.pm
 lib/Jifty/CurrentUser.pm
+lib/Jifty/Dispatcher.pm
 lib/Jifty/Everything.pm
 lib/Jifty/Handle.pm
 lib/Jifty/Handler.pm
 lib/Jifty/I18N.pm
 lib/Jifty/JSON.pm
-lib/Jifty/JSON/Converter.pm
-lib/Jifty/JSON/Parser.pm
 lib/Jifty/LetMe.pm
 lib/Jifty/Logger.pm
 lib/Jifty/Manual/AccessControl.pod
 lib/Jifty/Manual/Glossary.pod
+lib/Jifty/Manual/ObjectModel.pod
 lib/Jifty/Manual/Tutorial.pod
-lib/Jifty/MasonInterp.pm
+lib/Jifty/Mason/Halo.pm
+lib/Jifty/MasonHandler.pm
 lib/Jifty/Model/Schema.pm
 lib/Jifty/Notification.pm
 lib/Jifty/Object.pm
@@ -54,6 +58,7 @@ lib/Jifty/Response.pm
 lib/Jifty/Result.pm
 lib/Jifty/RightsFrom.pm
 lib/Jifty/Script.pm
+lib/Jifty/Script/Action.pm
 lib/Jifty/Script/App.pm
 lib/Jifty/Script/FastCGI.pm
 lib/Jifty/Script/Help.pm
@@ -87,9 +92,10 @@ lib/Jifty/Web/Form/Link.pm
 lib/Jifty/Web/Menu.pm
 lib/Jifty/Web/PageRegion.pm
 lib/Jifty/Web/Session.pm
-LICENSE
+lib/Jifty/YAML.pm
 Makefile.PL
 MANIFEST			This list of files
+MANIFEST.SKIP
 META.yml
 README
 share/web/static/css/app-base.css
@@ -99,6 +105,7 @@ share/web/static/css/base.css
 share/web/static/css/calendar.css
 share/web/static/css/combobox.css
 share/web/static/css/forms.css
+share/web/static/css/halos.css
 share/web/static/css/keybindings.css
 share/web/static/css/main.css
 share/web/static/css/nav.css
@@ -113,6 +120,7 @@ share/web/static/js/behaviour.js
 share/web/static/js/bps_util.js
 share/web/static/js/combobox.js
 share/web/static/js/dom-drag.js
+share/web/static/js/halo.js
 share/web/static/js/ie7/blank.gif
 share/web/static/js/ie7/ie7-base64.php
 share/web/static/js/ie7/ie7-content.htc
@@ -161,11 +169,14 @@ share/web/templates/__jifty/admin/fragments/list/new_item
 share/web/templates/__jifty/admin/fragments/list/update
 share/web/templates/__jifty/admin/fragments/list/view
 share/web/templates/__jifty/admin/index.html
+share/web/templates/__jifty/autocomplete.xml
+share/web/templates/__jifty/edit_file
 share/web/templates/__jifty/error/dhandler
 share/web/templates/__jifty/online_docs/autohandler
 share/web/templates/__jifty/online_docs/content.html
 share/web/templates/__jifty/online_docs/index.html
 share/web/templates/__jifty/online_docs/toc.html
+share/web/templates/__jifty/validator.xml
 share/web/templates/_elements/header
 share/web/templates/_elements/javascript
 share/web/templates/_elements/nav
@@ -175,12 +186,12 @@ share/web/templates/autohandler
 share/web/templates/dhandler
 share/web/templates/favicon.ico
 share/web/templates/index.html
-share/web/templates/let/autohandler
-share/web/templates/let/dhandler
-share/web/templates/validator.xml
 t/01-dependencies.t
+t/02-connect.t
 t/02-form-protocol.t
 t/03-sessions.t
+t/04-dispatcher.t
+t/04-forms.t
 t/99-pod-coverage.t
 t/99-pod.t
 t/Continuations/bin/jifty
@@ -207,4 +218,14 @@ t/Mapper/t/01-raw-api.t
 t/Mapper/t/02-api.t
 t/Mapper/web/templates/autohandler
 t/Mapper/web/templates/index.html
-SIGNATURE                                Public-key signature (added by MakeMaker)
+t/TestApp/bin/jifty
+t/TestApp/lib/TestApp/Model/User.pm
+t/TestApp/t/00-load.t
+t/TestApp/t/00-model-User.t
+t/TestApp/t/00-prototype.t
+t/TestApp/t/01-config.t
+t/TestApp/t/01-trivial.t
+t/TestApp/t/16-images.t
+t/TestApp/testapp
+t/TestApp/web/static/images/pony.jpg
+t/TestApp/web/templates/index.html

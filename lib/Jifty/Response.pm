@@ -25,7 +25,38 @@ Creates a new L<Jifty::Response> object.
 
 sub new {
     my $class = shift;
-    bless {results => {}}, $class;
+    bless {results => {}, headers => []}, $class;
+}
+
+
+=head2 add_header KEY => VALUE
+
+Add an HTTP header to the outgoing HTTP response. 
+
+=cut
+
+
+sub add_header {
+    my $self = shift;
+    # This one is so we can get jifty's headers into mason
+    # Otherwise we'd have to wrap mason's output layer
+     Jifty->handler->apache->header_out( @_ );
+
+
+    push @{$self->{headers}}, [@_];
+}
+
+=head2 headers
+
+Returns an array of key-value pairs of all the HTTP headers we want to
+stick on the outgoing HTTP request.
+
+
+=cut
+
+sub headers {
+    my $self = shift;
+    return @{$self->{headers}};
 }
 
 =head2 result MONIKER [RESULT]
