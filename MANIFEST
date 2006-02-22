@@ -46,6 +46,7 @@ lib/Jifty/Manual/AccessControl.pod
 lib/Jifty/Manual/Glossary.pod
 lib/Jifty/Manual/ObjectModel.pod
 lib/Jifty/Manual/Tutorial.pod
+lib/Jifty/Manual/Tutorial_ja.pod
 lib/Jifty/Mason/Halo.pm
 lib/Jifty/MasonHandler.pm
 lib/Jifty/Model/Schema.pm
@@ -110,10 +111,6 @@ share/web/static/css/keybindings.css
 share/web/static/css/main.css
 share/web/static/css/nav.css
 share/web/static/favicon.ico
-share/web/static/images/atom.png
-share/web/static/images/ical.png
-share/web/static/images/pdf.png
-share/web/static/images/plaintext.png
 share/web/static/images/pony.jpg
 share/web/static/js/app_behaviour.js
 share/web/static/js/behaviour.js
@@ -185,6 +182,7 @@ share/web/templates/_elements/wrapper
 share/web/templates/autohandler
 share/web/templates/dhandler
 share/web/templates/favicon.ico
+share/web/templates/helpers/calendar.html
 share/web/templates/index.html
 t/01-dependencies.t
 t/02-connect.t
@@ -219,13 +217,17 @@ t/Mapper/t/02-api.t
 t/Mapper/web/templates/autohandler
 t/Mapper/web/templates/index.html
 t/TestApp/bin/jifty
+t/TestApp/lib/TestApp/Dispatcher.pm
 t/TestApp/lib/TestApp/Model/User.pm
 t/TestApp/t/00-load.t
 t/TestApp/t/00-model-User.t
 t/TestApp/t/00-prototype.t
 t/TestApp/t/01-config.t
 t/TestApp/t/01-trivial.t
+t/TestApp/t/02-dispatch.t
 t/TestApp/t/16-images.t
 t/TestApp/testapp
 t/TestApp/web/static/images/pony.jpg
 t/TestApp/web/templates/index.html
+t/TestApp/web/templates/dispatch/basic
+t/TestApp/web/templates/dispatch/basic-show

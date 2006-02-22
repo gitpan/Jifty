@@ -145,14 +145,14 @@ sub handle_request {
     local $HTML::Mason::Commands::JiftyWeb = Jifty::Web->new();
     Jifty->web->request(Jifty::Request->new()->fill($self->cgi));
 
-    Jifty->log->debug("Recieved request for ".Jifty->web->request->path);
+    Jifty->log->debug("Received request for ".Jifty->web->request->path);
 
     $self->mason(Jifty::MasonHandler->new(
         $self->mason_config,
     ));
 
     $self->dispatcher(Jifty->config->framework('ApplicationClass')."::Dispatcher");
-    $self->dispatcher->require;
+    $self->dispatcher->require or Jifty->log->error("Compile error in ".$self->dispatcher.": $@");
     $self->dispatcher->handle_request();
 
     $self->cleanup_request();

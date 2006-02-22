@@ -63,29 +63,35 @@ sub out {
 }
 
 
-=head3 url [SCHEME]
+=head3 url
 
-Returns the root url of the server.  This is pulled from the
-configuration file.  Optionally overrides the default (http or https)
-scheme with the given C<SCHEME>.
+Returns the root url of this Jifty application.  This is pulled from the
+configuration file.  
+
 
 =cut
 
 sub url {
     my $self = shift;
-    my $url  = Jifty->config->framework("Web")->{BaseURL}
-        || "http://localhost";
-    my $port = Jifty->config->framework("Web")->{Port} || 8888;
-
-    $url =~ s/^\w+/shift/e if @_;
-
-    if (   ( $url =~ /^http\b/ and $port == 80 )
-        or ( $url =~ /^https\b/ and $port == 443 ) )
-    {
-        return $url;
-    } else {
-        return $url . ":" . $port;
+    my $url  = Jifty->config->framework("Web")->{BaseURL};
+    my $port = Jifty->config->framework("Web")->{Port};
+    
+    my $scheme = 'http';
+    if ($url =~ /^(\w+)/) {
+        $scheme = $1;
     }
+
+    if ($ENV{'HTTP_HOST'}) {
+        return $scheme ."://".$ENV{'HTTP_HOST'};
+    }
+
+    my $append_port = 0;
+    if (   ( $scheme  eq 'http' and $port != 80 )
+        or ( $scheme  eq'https' and $port != 443 ) ) {
+        $append_port = 1;
+    }
+    return( $url . ($append_port ? ":$port" : ""));
+
 }
 
 =head3 serial 
@@ -556,6 +562,43 @@ sub new_action_from_request {
     );
 }
 
+=head3 failed_actions
+
+Returns an array of L<Jifty::Action> objects, one for each
+L<Jifty::Request::Action> that is marked as failed in the current
+response.
+
+=cut
+
+sub failed_actions {
+    my $self = shift;
+    my @actions;
+    for my $req_action ($self->request->actions) {
+        next unless $self->response->result($req_action->moniker);
+        next unless $self->response->result($req_action->moniker)->failure;
+        push @actions, $self->new_action_from_request($req_action);
+    }
+    return @actions;
+}
+
+=head3 succeeded_actions
+
+As L</failed_actions>, but for actions that completed successfully;
+less often used.
+
+=cut
+
+sub succeeded_actions {
+    my $self = shift;
+    my @actions;
+    for my $req_action ($self->request->actions) {
+        next unless $self->response->result($req_action->moniker);
+        next unless $self->response->result($req_action->moniker)->success;
+        push @actions, $self->new_action_from_request($req_action);
+    }
+    return @actions;
+}
+
 =head2 REDIRECTS AND CONTINUATIONS
 
 =head3 next_page [VALUE]
@@ -621,6 +664,9 @@ sub _redirect {
     my $self = shift;
     my ($page) = @_;
 
+    # $page can't lead with // or it assumes it's a URI scheme.
+    $page =~ s{^/+}{/};
+
     # This is designed to work under CGI or FastCGI; will need an
     # abstraction for mod_perl
 
@@ -629,6 +675,7 @@ sub _redirect {
 
     my $apache = Jifty->handler->apache;
 
+    $self->log->debug("Redirecting to $page");
     # Headers..
     $apache->header_out( Location => $page );
     $apache->header_out( Status => 302 );
@@ -1047,30 +1094,27 @@ sub serve_fragments {
     $writer->xmlDecl( "UTF-8", "yes" );
     $writer->startTag("response");
     for my $f ( $self->request->fragments ) {
-        $writer->startTag( "fragment", id => $f->name );
-        my @names = split '-', $f->name;
-
         # Set up the region stack
         local Jifty->web->{'region_stack'} = [];
-        while ( my $region = shift @names ) {
-            my $new = @names
-                ? Jifty::Web::PageRegion->new(
-                name       => $region,
-                _bootstrap => 1,
-                parent     => Jifty->web->current_region
-                )
-                : Jifty::Web::PageRegion->new(
-                name           => $region,
+        my @regions;
+        do {
+            push @regions, $f;
+        } while ($f = $f->parent);
+        
+        for $f (reverse @regions) {
+            my $new = Jifty::Web::PageRegion->new(
+                name           => $f->name,
                 path           => $f->path,
                 region_wrapper => $f->wrapper,
                 parent         => Jifty->web->current_region,
                 defaults       => $f->arguments,
-                );
+            );
             push @{ Jifty->web->{'region_stack'} }, $new;
             $new->enter;
         }
 
         # Stuff the rendered region into the XML
+        $writer->startTag( "fragment", id => Jifty->web->current_region->qualified_name );
         $writer->cdata( Jifty->web->current_region->render );
         $writer->endTag();
     }
