@@ -5,7 +5,6 @@ package Jifty::Script::Schema;
 use base qw/App::CLI::Command/;
 
 use Pod::Usage;
-use UNIVERSAL::require;
 use version;
 use Jifty::DBI::SchemaGenerator;
 use Jifty::Config;
@@ -66,8 +65,8 @@ sub setup_environment {
     my $self = shift;
 
     # Import Jifty
-    Jifty->require                or die $UNIVERSAL::require::ERROR;
-    Jifty::Model::Schema->require or die $UNIVERSAL::require::ERROR;
+    Jifty::Util->require("Jifty");
+    Jifty::Util->require("Jifty::Model::Schema");
 }
 
 
@@ -196,9 +195,9 @@ sub create_all_tables {
        # TODO XXX FIXME:
        #   This *will* try to generate SQL for abstract base classes you might
        #   stick in $AC::Model::.
-        next if not UNIVERSAL::isa( $model, 'Jifty::Record' );
+        next unless $model->isa( 'Jifty::Record' );
         do { log->info("Skipping $model"); next }
-            if ( UNIVERSAL::can( $model, 'since' )
+            if ( $model->can( 'since' )
             and $appv < $model->since );
 
         $log->info("Using $model");
@@ -226,10 +225,10 @@ sub create_all_tables {
         # Load initial data
         eval {
             my $bootstrapper = $self->{'_application_class'} . "::Bootstrap";
-            $bootstrapper->require();
+            Jifty::Util->require($bootstrapper);
 
             $bootstrapper->run()
-                if ( UNIVERSAL::can( $bootstrapper => 'run' ) );
+                if  $bootstrapper->can( 'run' );
         };
         die $@ if $@;
 
@@ -274,7 +273,8 @@ sub upgrade_tables {
     # Figure out what versions the upgrade knows about.
     eval {
         my $upgrader = $self->{'_application_class'} . "::Upgrade";
-        $upgrader->require();
+        Jifty::Util->require($upgrader);
+
         $UPGRADES{$_} = [ $upgrader->upgrade_to($_) ]
             for grep { $appv >= version->new($_) and $dbv < version->new($_) }
             $upgrader->versions();
@@ -283,8 +283,7 @@ sub upgrade_tables {
     for my $model ( __PACKAGE__->models ) {
 
         # We don't want to get the Collections, for example.
-        do {next}
-            unless UNIVERSAL::isa( $model, 'Jifty::Record' );
+        do {next} unless $model->isa( 'Jifty::Record' );
 
         # Set us up the table
         $model = $model->new;
@@ -292,7 +291,7 @@ sub upgrade_tables {
             ->_db_schema_table_from_model($model);
 
         # If this whole table is new
-        if (    UNIVERSAL::can( $model, "since" )
+        if (    $model->can( 'since' )
             and $appv >= $model->since
             and $dbv < $model->since )
         {

@@ -12,9 +12,10 @@ Jifty::Util - Things that don't fit anywhere else
 
 =cut
 
-use Jifty::Everything;
+use Jifty;
 use File::Spec;
 use File::ShareDir;
+use UNIVERSAL::require;
 use Cwd ();
 
 # Trivial memoization to ward off evil Cwd calls.
@@ -64,7 +65,16 @@ currently only used to store the common Mason components.
 sub share_root {
     my $self = shift;
 
-    return $SHARE_ROOT ||=  File::Spec->rel2abs( File::ShareDir::module_dir('Jifty') );
+    $SHARE_ROOT ||=  eval { File::Spec->rel2abs( File::ShareDir::module_dir('Jifty') )};
+    if (not $SHARE_ROOT or not -d $SHARE_ROOT) {
+        # XXX TODO: This is a bloody hack
+        # Module::Install::ShareDir and File::ShareDir don't play nicely
+        # together
+        my @root = File::Spec->splitdir($self->jifty_root); # lib
+        pop @root; # Jifty-version
+        $SHARE_ROOT = File::Spec->catdir(@root,"share");
+    }
+    return ($SHARE_ROOT);
 }
 
 =head2 app_root
@@ -126,7 +136,13 @@ application's root directory, as defined by L</app_root>.
 sub default_app_name {
     my $self = shift;
     my @root = File::Spec->splitdir( Jifty::Util->app_root);
-    return pop @root;
+    my $name =  pop @root;
+    # Jifty-0.10211 should become Jifty
+    if ($name =~ /^(.*?)-(.*\..*)$/) {
+        $name = $1;
+
+    }
+    return $name;
 }
 
 =head2 make_path PATH
@@ -150,6 +166,37 @@ sub make_path {
         mkdir($path) || die "Couldn't create directory $path: $!";
     }
 
+}
+
+=head2 require PATH
+
+Uses L<UNIVERSAL::require> to require the provided C<PATH>.
+Additionally, logs any failures at the C<error> log level.
+
+=cut
+
+sub require {
+    my $self = shift;
+    my $class = shift;
+
+    my $path =  join('/', split(/::/,$class)).".pm";
+    return 1 if $INC{$path};
+
+    my $retval = $class->require;
+    if ($UNIVERSAL::require::ERROR) {
+       my $error = $UNIVERSAL::require::ERROR;
+        $error =~ s/ at .*?\n$//;
+        Jifty->log->error(sprintf("$error at %s line %d\n", (caller)[1,2]));
+        return 0;
+    }
+
+    # If people forget the '1;' line in the dispatcher, don't eit them
+    if ($class =~ /::Dispatcher$/ and ref $retval eq "ARRAY") {
+        Jifty->log->error("$class did not return a true value; assuming it was a dispatcher rule");
+        Jifty::Dispatcher::_push_rule($class, $_) for @{$retval};
+    }
+
+    return 1;
 }
 
 =head1 AUTHOR

@@ -81,7 +81,7 @@ for details.
 
 A list of actions to run when the object is clicked.  This may be an
 array refrence of a single element; each element may either be a
-moniker of a L<Jifty::Action>.  An undefined value submits B<all>
+moniker or a L<Jifty::Action>.  An undefined value submits B<all>
 actions in the form, an empty list reference (the default) submits
 none.
 
@@ -90,6 +90,12 @@ none.
 A boolean; whether state variables are preserved across the link.
 Defaults to true if there are any AJAX actions on the link, false
 otherwise.
+
+=item parameters
+
+A hash reference of query parameters that go on the link or button.
+These will end up being submitted exactly like normal query
+parameters.
 
 =item Anything from L<Jifty::Web::Form::Element>
 
@@ -112,6 +118,7 @@ sub new {
         continuation   => Jifty->web->request->continuation,
         submit         => [],
         preserve_state => 0,
+	parameters     => {},
         @_,
     );
 
@@ -146,7 +153,7 @@ sub new {
     }
 
     $self->parameter( $_ => $args{parameters}{$_} )
-        for %{ $args{parameters} };
+        for keys %{ $args{parameters} };
 
     return $self;
 }

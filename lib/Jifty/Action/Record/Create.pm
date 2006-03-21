@@ -57,14 +57,22 @@ sub take_action {
     my $record = $self->record;
 
     my %values;
-    $values{$_} = $self->argument_value($_) for grep { defined $self->argument_value($_) } $self->argument_names;
-    
-    my ($id) = $record->create(%values);
+    for (grep { defined $self->argument_value($_) } $self->argument_names) {
+        $values{$_} = $self->argument_value($_);
+        if (ref $values{$_} eq "Fh") { # CGI.pm's "lightweight filehandle class"
+            local $/;
+            my $fh = $values{$_};
+            binmode $fh;
+            $values{$_} = scalar <$fh>;
+        }
+    }
+
+    my ($id, $msg) = $record->create(%values);
 
     # Handle errors?
     unless ( $record->id ) {
         $self->result->error("An error occurred.  Try again later");
-        $self->log->error("Create of ".ref($record)." failed: ", $id);
+        $self->log->error("Create of ".ref($record)." failed: $msg");
         return;
     }
 
@@ -74,6 +82,19 @@ sub take_action {
     $self->report_success if  not $self->result->failure;
 
     return 1;
+}
+
+=head2 possible_fields
+
+Returns all of the columns on the record class.  This is because,
+unlike L<Jifty::Action::Record::Update>, columns which are marked as
+'immutable' should still be able to be set at creation time.
+
+=cut
+
+sub possible_fields {
+    my $self = shift;
+    return map {$_->name} grep {$_->type ne "serial"} $self->record->columns;
 }
 
 =head2 report_success

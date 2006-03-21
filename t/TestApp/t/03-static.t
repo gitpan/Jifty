@@ -4,7 +4,7 @@ use strict;
 
 BEGIN {chdir "t/TestApp"}
 use lib '../../lib';
-use Jifty::Test tests => 5;
+use Jifty::Test tests => 6;
 use Jifty::Test::WWW::Mechanize;
 
 my $server  = Jifty::Test->make_server;
@@ -19,6 +19,7 @@ for my $image (qw(pony.jpg)) {
     my $res = $mech->response;
     
     is($res->header('Content-Type'), 'image/jpeg', 'Content-Type is image/jpeg');
-    like($res->status_line, qr/^200 Jifty OK$/, 'Status line is from Mason');
+    like($res->status_line, qr/^200/, 'Serving out the request');
+    is(length $res->content, 39186, 'Content is right length');
 }
 

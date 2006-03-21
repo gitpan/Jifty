@@ -26,7 +26,7 @@ handlers.
 
 use base qw/Class::Accessor/;
 use Hook::LexWrap;
-__PACKAGE__->mk_accessors(qw(mason dispatcher cgi apache));
+__PACKAGE__->mk_accessors(qw(mason dispatcher static_handler cgi apache));
 
 =head2 new
 
@@ -36,10 +36,11 @@ Create a new Jifty::Handler object. Generally, Jifty.pm does this only once at s
 
 sub new {
     my $class = shift;
-    my $self = {};
+    my $self  = {};
     bless $self, $class;
 
     $self->create_cache_directories();
+
     # Creating a new CGI object breaks FastCGI in all sorts of painful
     # ways.  So wrap the call and preempt it if we already have one
     use CGI;
@@ -47,6 +48,12 @@ sub new {
         $_[-1] = Jifty->handler->cgi if Jifty->handler->cgi;
     };
 
+    $self->dispatcher(
+        Jifty->config->framework('ApplicationClass') . "::Dispatcher" );
+    Jifty::Util->require( $self->dispatcher );
+    $self->mason( Jifty::MasonHandler->new( $self->mason_config ) );
+
+    $self->static_handler(Jifty::Handler::Static->new());
 
     return $self;
 }
@@ -112,19 +119,21 @@ there is none.
 
 =head2 apache
 
-Returns the L<HTML::Mason::FakeApache> or L<Apache> objecvt for the
+Returns the L<HTML::Mason::FakeApache> or L<Apache> object for the
 current request, ot C<undef> if there is none.
 
 =head2 handle_request
 
-When your server processs (be it Jifty-internal, FastCGI or anything else) wants
-to handle a request coming in from the outside world, you should call C<handle_request>.
+When your server processs (be it Jifty-internal, FastCGI or anything
+else) wants to handle a request coming in from the outside world, you
+should call C<handle_request>.
 
 =over
 
 =item cgi
 
-A L<CGI>.pm object that your server has already set up and loaded with your request's data
+A L<CGI> object that your server has already set up and loaded with
+your request's data.
 
 =back
 
@@ -134,26 +143,29 @@ A L<CGI>.pm object that your server has already set up and loaded with your requ
 sub handle_request {
     my $self = shift;
     my %args = (
-        cgi           => undef,
+        cgi => undef,
         @_
     );
 
-    Module::Refresh->refresh if (Jifty->config->framework('DevelMode') );
-    $self->cgi($args{cgi});
-    $self->apache(HTML::Mason::FakeApache->new(cgi => $self->cgi));
+    Module::Refresh->refresh if ( Jifty->config->framework('DevelMode') );
+    $self->cgi( $args{cgi} );
+    $self->apache( HTML::Mason::FakeApache->new( cgi => $self->cgi ) );
 
     local $HTML::Mason::Commands::JiftyWeb = Jifty::Web->new();
-    Jifty->web->request(Jifty::Request->new()->fill($self->cgi));
+    Jifty->web->request( Jifty::Request->new()->fill( $self->cgi ) );
 
-    Jifty->log->debug("Received request for ".Jifty->web->request->path);
+    Jifty->web->response( Jifty::Response->new );
+    Jifty->web->setup_session;
+    Jifty->web->session->set_cookie;
 
-    $self->mason(Jifty::MasonHandler->new(
-        $self->mason_config,
-    ));
+    Jifty->log->debug( "Received request for " . Jifty->web->request->path );
 
-    $self->dispatcher(Jifty->config->framework('ApplicationClass')."::Dispatcher");
-    $self->dispatcher->require or Jifty->log->error("Compile error in ".$self->dispatcher.": $@");
-    $self->dispatcher->handle_request();
+    my $sent_response = 0;
+    $sent_response
+        = $self->static_handler->handle_request( Jifty->web->request->path )
+        if ( Jifty->config->framework('Web')->{'ServeStaticFiles'} );
+
+    $self->dispatcher->handle_request() unless ($sent_response);
 
     $self->cleanup_request();
 
@@ -171,7 +183,7 @@ sub cleanup_request {
     # Clean out the cache. the performance impact should be marginal.
     # Consistency is improved, too.
     Jifty->web->session->unload();
-    Jifty::Record->flush_cache;
+    Jifty::Record->flush_cache if Jifty::Record->can('flush_cache');
     $self->cgi(undef);
     $self->apache(undef);
 }

@@ -15,7 +15,8 @@ representation; that is, it is also a L<Jifty::DBI::Record> as well.
 =cut
 
 use base qw/Jifty::Object/;
-use base qw/Jifty::DBI::Record::Cachable/;
+use base qw/Jifty::DBI::Record/;
+
 
 sub _init {
     my $self = shift;
@@ -53,31 +54,44 @@ Override's L<Jifty::DBI::Record> in these ways:
 sub create {
     my $self    = shift;
     my %attribs = @_;
-    
-    unless ($self->check_create_rights(@_)) {
-        $self->log->error($self->current_user->id. " tried to create a ", ref $self, " without permission");
-        wantarray ? return (0, 'Permission denied') : return(0);
-    }
 
+    unless ( $self->check_create_rights(@_) ) {
+        $self->log->error( $self->current_user->id . " tried to create a ",
+            ref $self, " without permission" );
+        wantarray ? return ( 0, 'Permission denied' ) : return (0);
+    }
 
     foreach my $key ( keys %attribs ) {
         my $method = "validate_$key";
         next unless $self->can($method);
-        my ($val, $msg ) = $self->$method( $attribs{$key} );
+        my ( $val, $msg ) = $self->$method( $attribs{$key} );
         unless ($val) {
             $self->log->error("There was a validation error for $key");
-            return ($val, $msg);
+            return ( $val, $msg );
         }
+
         # remove blank values. We'd rather have nulls
-        if (exists $attribs{$key} and (not defined $attribs{$key} or $attribs{$key} eq "")) {
+        if ( exists $attribs{$key}
+            and ( not defined $attribs{$key} or $attribs{$key} eq "" ) )
+        {
             delete $attribs{$key};
         }
     }
 
-    my $id = $self->SUPER::create(%attribs);
-    $self->load_by_cols(id => $id) if ($id);
-    return wantarray  ? ($id, "Record created") : $id;
+    my($id,$msg) = $self->SUPER::create(%attribs);
+    $self->load_by_cols( id => $id ) if ($id);
+    return wantarray ? ( $id, "Record created" ) : $id;
 }
+
+
+=head2 primary_key
+
+Returns the default primary key for record columns: 'id'.
+This routine short-circuits a much heavier call up through Jifty::DBI
+
+=cut
+
+sub primary_key {'id'}
 
 
 =head2 load_or_create
@@ -151,7 +165,7 @@ sub current_user_can {
         return $self->delegate_current_user_can($right, @_); 
     }
 
-    unless ( UNIVERSAL::isa( $self->current_user, 'Jifty::CurrentUser' ) ) {
+    unless ( $self->current_user->isa( 'Jifty::CurrentUser' ) ) {
         $self->log->error(
             "Hm. called to authenticate without a currentuser - "
                 . $self->current_user );
@@ -213,11 +227,14 @@ sub _set {
     
 sub _value {
     my $self = shift;
+    my $column = shift;
 
-    unless ($self->check_read_rights(@_)) {
+    unless ($self->check_read_rights( $column => @_ )) {
         return (undef);
     }
-    return   Encode::decode_utf8($self->SUPER::_value(@_));
+    my $value = $self->SUPER::_value( $column => @_ );
+    return $value if ref $value or $self->column($column)->type eq 'blob';
+    return Encode::decode_utf8($value);
 #   This is the "Right' way to do things according to audrey, but it breaks
 #    
 #    my $value = $self->SUPER::_value(@_);
@@ -244,7 +261,7 @@ sub _collection_value {
     my $classname = $column->refers_to();
 
     return undef unless $classname;
-    return unless UNIVERSAL::isa( $classname, 'Jifty::DBI::Collection' );
+    return unless $classname->isa( 'Jifty::DBI::Collection' );
 
 
     my $coll = $classname->new( current_user => $self->current_user );
@@ -286,13 +303,25 @@ sub _to_record {
 
     return unless defined $value;
     return undef unless $classname;
-    return unless UNIVERSAL::isa( $classname, 'Jifty::DBI::Record' );
+    return unless $classname->isa( 'Jifty::Record' );
 
     # XXX TODO FIXME we need to figure out the right way to call new here
     # perhaps the handle should have an initiializer for records/collections
-    my $object = $classname->new();
+    my $object = $classname->new(current_user => $self->current_user);
     $object->load_by_cols(( $column->by || 'id')  => $value);
     return $object;
+}
+
+=head2 cache_key_prefix
+
+Returns a unique key for this application for the Memcached cache.
+This should be global within a given Jifty application instance.
+
+=cut
+
+
+sub cache_key_prefix {
+    Jifty->config->framework('Database')->{'Database'};
 }
 
 1;

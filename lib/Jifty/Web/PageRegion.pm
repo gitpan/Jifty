@@ -180,7 +180,17 @@ L<Jifty::Request/state_variables>.
 sub enter {
     my $self = shift;
 
+    $self->log->warn("Region occurred in more than once place: ".$self->qualified_name)
+      if (defined $self->parent and $self->parent != Jifty->web->current_region);
+
+    $self->parent(Jifty->web->current_region);
+    push @{Jifty->web->{'region_stack'}}, $self;
     $self->qualified_name(Jifty->web->qualified_region);
+
+    # Keep track of the fully qualified name (which should be unique)
+    $self->log->warn("Repeated region: " . $self->qualified_name)
+        if Jifty->web->{'regions'}{ $self->qualified_name };
+    Jifty->web->{'regions'}{ $self->qualified_name } = $self;
 
     # Merge in the settings passed in via state variables
     for (Jifty->web->request->state_variables) {
@@ -192,6 +202,24 @@ sub enter {
             $self->path($_->value);
             Jifty->web->set_variable("region-$1" => $_->value);
         }
+    }
+}
+
+=head2 exit 
+
+Exits the page region, if it is the most recent one.  Normally, you
+won't need to call this by hand; however, if you are calling L</enter>
+by hand, you will need to call the corresponding C<exit>.
+
+=cut
+
+sub exit {
+    my $self = shift;
+
+    if (Jifty->web->current_region != $self) {
+        $self->log->warn("Attempted to exit page region ".$self->qualified_name." when it wasn't the most recent");
+    } else {
+        pop @{Jifty->web->{'region_stack'}};
     }
 }
 
@@ -251,16 +279,26 @@ sub render {
     $subrequest->is_subrequest( 1 );
     local Jifty->web->{request} = $subrequest;
 
-    # Convince Mason to tack its response onto a variable and not send
+    # While we're inside this region, 
+    # have Mason to tack its response onto a variable and not send
     # headers when it does so
-    Jifty->handler->mason->interp->out_method( sub { $result .= $_[0]; });
+    # XXX TODO: this internals diving is icky
+   
+    my $region_content = '';
+    Jifty->handler->mason->interp->out_method( \$region_content);
+    
+    
 
     # Call into the dispatcher
-    Jifty->dispatcher->handle_request;
+    eval { Jifty->dispatcher->handle_request};
 
+     $result .= $region_content;
     if ($self->region_wrapper) {
         $result .= qq|</div>|;
     }
+
+    #XXX TODO: There's gotta be a better way to localize it
+    Jifty->handler->mason->interp->out_method( \&Jifty::MasonHandler::out_method);
 
     return $result;
 }

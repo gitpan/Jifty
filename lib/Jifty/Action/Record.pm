@@ -63,15 +63,13 @@ sub new {
     my $self = $class->SUPER::new(%args);
 
     my $record_class = $self->record_class;
-    $record_class->require;
-
-    $self->log->error("Can't require $record_class") if $UNIVERSAL::require::ERROR;
+    Jifty::Util->require($record_class);
 
     # Set up record
     if (ref $record_class) {
         $self->record($record_class);
         $self->argument_value($_, $self->record->$_) for @{ $self->record->_primary_keys };
-    } elsif (UNIVERSAL::isa($args{record}, $record_class)) {
+    } elsif (ref $args{record} and $args{record}->isa($record_class)) {
         $self->record($args{record});
         $self->argument_value($_, $self->record->$_) for @{ $self->record->_primary_keys };
     } else {
@@ -103,7 +101,7 @@ sub arguments {
 
     my $field_info = {};
 
-    my @fields = $self->record->writable_attributes;
+    my @fields = $self->possible_fields;
 
     # we use a while here because we may be modifying the fields on the fly.
     while ( my $field = shift @fields ) {
@@ -118,7 +116,7 @@ sub arguments {
 
             # If the current value is actually a pointer to another object, dereference it
             $current_value = $current_value->id
-              if UNIVERSAL::isa( $current_value, 'Jifty::Record' );
+              if ref($current_value) and $current_value->isa( 'Jifty::Record' );
             $info->{default_value} = $current_value if $self->record->id;
         }
 
@@ -144,11 +142,11 @@ sub arguments {
         }
 
         elsif ( defined $column->refers_to ) {
-            my $ref = $column->refers_to;
-            if ( UNIVERSAL::isa( $ref, 'Jifty::Record' ) ) {
+            my $refers_to = $column->refers_to;
+            if ( ref($refers_to) and $refers_to->isa( 'Jifty::Record' ) ) {
 
                 my $collection = Jifty::Collection->new(
-                    record_class => $ref,
+                    record_class => $refers_to,
                     current_user => $self->record->current_user
                 );
                 $collection->unlimit;
@@ -194,11 +192,23 @@ sub arguments {
    
         my $autocomplete_method = "autocomplete_".$field;
         if ($self->record->can($autocomplete_method) ) {
-            $info->{'ajax_autocomplete'} = 1;
-            $info->{'autocompleter'} = sub { 
-                    my $value = shift;
-                    return $self->record->$autocomplete_method( $value);
-                };
+            $info->{'autocompleter'} ||= sub { 
+                my($self, $value) = @_;
+                return $self->record->$autocomplete_method( $value);
+            };
+        }
+
+	my $canonicalize_method = "canonicalize_".$field;
+        if ($self->record->can($canonicalize_method) ) {
+            $info->{'canonicalizer'} ||= sub {
+                my($self, $value) = @_;
+                return $self->record->$canonicalize_method( $value );
+            };
+        } elsif (defined $column->render_as and $column->render_as eq "Date") {
+            $info->{'canonicalizer'} ||= sub {
+                my($self, $value) = @_;
+                return _canonicalize_date($self, $value );
+            };
         }
 
 
@@ -215,29 +225,16 @@ sub arguments {
     return $field_info;
 }
 
+=head2 possible_fields
 
-=head2 _canonicalize_argument ARGUMENT_NAME
-
-Canonicalizes the argument named ARGUMENT_NAME. This routine actually
-just makes sure we canonicalize dates and then passes on to the
-superclass.
+Returns the list of fields on the object that the action can update.
+This defaults to only the writable fields of the object.
 
 =cut
 
-
-sub _canonicalize_argument {
+sub possible_fields {
     my $self = shift;
-    my $arg_name = shift;
-
-
-    if (exists $self->arguments->{$arg_name}->{'render_as'} 
-     and $self->arguments->{$arg_name}->{'render_as'} eq 'Date') {
-        my $value = $self->_canonicalize_date($self->argument_value($arg_name));
-        $self->argument_value($arg_name => $value);
-    }
-
-    return($self->SUPER::_canonicalize_argument($arg_name));
-
+    return $self->record->writable_attributes;
 }
 
 =head2 _canonicalize_date DATE

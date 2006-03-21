@@ -34,7 +34,6 @@ the C<pager> method to B<get> information related to paging.
 
 use base qw/Jifty::Object Jifty::DBI::Collection Class::Accessor/;
 use Data::Page;
-use UNIVERSAL::require;
 
 =head1 MODEL
 
@@ -100,7 +99,7 @@ user.
 sub new_item {
     my $self = shift;
     my $class =$self->record_class();
-    $class->require();
+
     # We do this as a performance optimization, so we don't need to do the stackwalking to find it
     return $class->new(current_user => $self->current_user);
 }

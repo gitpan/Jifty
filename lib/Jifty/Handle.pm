@@ -14,7 +14,7 @@ database
 
 =cut
 
-use Jifty::Everything;
+use Jifty::Util;
 our @ISA;
 
 =head1 METHODS
@@ -40,7 +40,8 @@ sub new {
     # We do this to avoid Jifty::DBI::Handle's magic reblessing, because
     # it breaks subclass methods.
     my $driver_class  = "Jifty::DBI::Handle::".  $driver;
-    $driver_class->require;
+    Jifty::Util->require($driver_class);
+
     unshift @ISA, $driver_class;
     return $class->SUPER::new();
 }
@@ -102,6 +103,7 @@ then error out.
 sub check_schema_version {
     my $appv
         = version->new( Jifty->config->framework('Database')->{'Version'} );
+    require Jifty::Model::Schema;
     my $dbv = Jifty::Model::Schema->new->in_db;
     die
         "Schema has no version in the database; perhaps you need to run this:\n\t bin/jifty schema --setup\n"

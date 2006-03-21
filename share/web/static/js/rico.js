@@ -16,7 +16,7 @@
 
 //-------------------- rico.js
 var Rico = {
-  Version: '1.1.1_beta',
+  Version: '1.1.2',
   prototypeVersion: parseFloat(Prototype.Version.split(".")[0] + "." + Prototype.Version.split(".")[1])
 }
 
@@ -202,10 +202,9 @@ Rico.Accordion.prototype = {
    },
 
    showTab: function( accordionTab, animate ) {
+     if ( this.lastExpandedTab == accordionTab )
+        return;
 
-      if ( this.lastExpandedTab == accordionTab )
-         return;
- 
       var doAnimate = arguments.length == 1 ? true : animate;
 
       if ( this.options.onHideTab )
@@ -297,7 +296,7 @@ Rico.Accordion.Tab.prototype = {
       this.expanded = true;
       this.titleBar.style.backgroundColor = this.accordion.options.expandedBg;
       this.titleBar.style.color           = this.accordion.options.expandedTextColor;
-      this.content.style.overflow         = "visible";
+      this.content.style.overflow         = "auto";
    },
 
    titleBarClicked: function(e) {
@@ -412,10 +411,9 @@ Rico.AjaxEngine.prototype = {
    _requestOptions: function(options,xmlDoc) {
       var requestHeaders = ['X-Rico-Version', Rico.Version ];
       var sendMethod = 'post';
-      if ( xmlDoc == null ) {
+      if ( xmlDoc == null )
         if (Rico.prototypeVersion < 1.4)
-        	requestHeaders.push( 'Content-type', 'text/xml' );
-	  }
+        requestHeaders.push( 'Content-type', 'text/xml' );
       else
           sendMethod = 'get';
       (!options) ? options = {} : '';
@@ -2278,11 +2276,6 @@ Rico.LiveGrid.prototype = {
       this.processingRequest = null;
       this.unprocessedRequest = null;
 
-      if (this.options.sortCol) {
-          this.sortCol = options.sortCol;
-          this.sortDir = options.sortDir;
-      }
-
       this.initAjax(url);
       if ( this.options.prefetchBuffer || this.options.prefetchOffset > 0) {
          var offset = 0;
@@ -2291,32 +2284,33 @@ Rico.LiveGrid.prototype = {
             this.scroller.moveScroll(offset);
             this.viewPort.scrollTo(this.scroller.rowToPixel(offset));            
          }
+         if (this.options.sortCol) {
+             this.sortCol = options.sortCol;
+             this.sortDir = options.sortDir;
+         }
          this.requestContentRefresh(offset);
       }
    },
 
    addLiveGridHtml: function() {
      // Check to see if need to create a header table.
-      if (this.table.getElementsByTagName("thead").length == 0)
-	     return;
-		
-      // Create Table this.tableId+'_header'
-      var tableHeader = this.table.cloneNode(true);
-      tableHeader.setAttribute('id', this.tableId+'_header');
-      tableHeader.setAttribute('class', this.table.className+'_header');
+     if (this.table.getElementsByTagName("thead").length > 0){
+       // Create Table this.tableId+'_header'
+       var tableHeader = this.table.cloneNode(true);
+       tableHeader.setAttribute('id', this.tableId+'_header');
+       tableHeader.setAttribute('class', this.table.className+'_header');
 
-      // Clean up and insert
-      for( var i = 0; i < tableHeader.tBodies.length; i++ ) 
-      tableHeader.removeChild(tableHeader.tBodies[i]);
-      this.table.deleteTHead();
-     // this.table.parentNode.insertBefore(tableHeader,this.table);
+       // Clean up and insert
+       for( var i = 0; i < tableHeader.tBodies.length; i++ ) 
+       tableHeader.removeChild(tableHeader.tBodies[i]);
+       this.table.deleteTHead();
+       this.table.parentNode.insertBefore(tableHeader,this.table);
+     }
 
-   	  new Insertion.Before(this.table, "<div id='"+this.tableId+"_container'></div>");
-   	  this.table.previousSibling.appendChild(this.table);
-	  new Insertion.Before(this.table, tableHeader)
-      //this.table.parentNode.insertBefore(tableHeder, this.table)
-   	  new Insertion.Before(this.table,"<div id='"+this.tableId+"_viewport' style='float:left;'></div>");
-   	  this.table.previousSibling.appendChild(this.table);
+    new Insertion.Before(this.table, "<div id='"+this.tableId+"_container'></div>");
+    this.table.previousSibling.appendChild(this.table);
+    new Insertion.Before(this.table,"<div id='"+this.tableId+"_viewport' style='float:left;'></div>");
+    this.table.previousSibling.appendChild(this.table);
    },
 
 
@@ -2509,7 +2503,7 @@ Rico.LiveGridSort.prototype = {
    // event handler....
    headerCellClicked: function(evt) {
       var eventTarget = evt.target ? evt.target : evt.srcElement;
-      var cellId = eventTarget.id || eventTarget.parentNode.id;
+      var cellId = eventTarget.id;
       var columnNumber = parseInt(cellId.substring( cellId.lastIndexOf('_') + 1 ));
       var sortedColumnIndex = this.getSortedColumnIndex();
       if ( sortedColumnIndex != -1 ) {

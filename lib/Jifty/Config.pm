@@ -12,11 +12,8 @@ Jifty::Config -- wrap a jifty configuration file
 
 =cut
 
-use Jifty::Everything;
-use Jifty::DBI::Handle;
 use Jifty::Util;
 use Jifty::YAML;
-use UNIVERSAL::require;
 use File::Spec;
 use File::Basename;
 use Log::Log4perl;
@@ -223,6 +220,7 @@ sub guess {
                 Password => "",
                 User     => "",
                 Version  => "0.0.1",
+                RecordBaseClass => 'Jifty::DBI::Record::Cachable'
             },
             Mailer     => 'Sendmail',
             MailerArgs => [],
@@ -235,6 +233,7 @@ sub guess {
                 DataDir     => "var/mason",
                 StaticRoot   => "web/static",
                 TemplateRoot => "web/templates",
+                ServeStaticFiles => 1,
                 MasonConfig => {
                     autoflush    => 0,
                     error_mode   => 'fatal',

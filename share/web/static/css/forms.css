@@ -43,9 +43,17 @@ div.form_field span.formw {
     text-align: left;
 }
 
-input, textarea {
-    border: 1px inset black;
+input.text, input.date, input.password, textarea, select {
+    border-top: 1px solid #7c7c7c;
+    border-left: 1px solid #c3c3c3;
+    border-right: 1px solid #c3c3c3;
+    border-bottom: 1px solid #ddd;
+    background: #fff url(/static/images/css/fieldbg.gif) repeat-x top;
     padding: 0.2em;
+}
+
+input.date {
+    width: 10em;
 }
 
 .submit_button {
@@ -55,11 +63,12 @@ input, textarea {
 
 .submit_button input {
     clear: both;
-    border: 1px outset black;
-    background: white;
-    padding: 0.2em 1em;
-    font-weight: bold;
     margin: 0.5em 0 0 16%;
+}
+
+input.button {
+    padding: 0.15em 1em;
+    font-weight: bold;
 }
 
 h2.inline input {

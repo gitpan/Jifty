@@ -11,11 +11,6 @@ Jifty::Dispatcher - The Jifty Dispatcher
 
 =head1 SYNOPSIS
 
-In your F<autohandler>, put these two lines first:
-
-    require MyApp::Dispatcher;
-    MyApp::Dispatcher->handle_request;
-
 In B<MyApp::Dispatcher>:
 
     package MyApp::Dispatcher;
@@ -236,6 +231,8 @@ our @EXPORT = qw<
 
     get next_rule last_rule
 
+    already_run
+
     $Dispatcher
 >;
 
@@ -286,6 +283,7 @@ sub import {
     my @args  = grep { !/^-[Bb]ase/ } @_;
 
     no strict 'refs';
+    no warnings 'once';
     for (qw(RULES RULES_SETUP RULES_CLEANUP)) {
         @{ $pkg . '::' . $_ } = ();
     }
@@ -322,21 +320,24 @@ sub _ret (@) {
     } elsif ( defined wantarray ) {
         [ [ $op => splice( @_, 0, length($proto) ) ], @_ ];
     } else {
-        my $ruleset;
-        if ( $op eq 'before' ) {
-            $ruleset = 'RULES_SETUP';
-        } elsif ( $op eq 'after' ) {
-            $ruleset = 'RULES_CLEANUP';
-        } else {
-            $ruleset = 'RULES_RUN';
-        }
-
-        no strict 'refs';
-
-        # XXX TODO, need to spec stage here.
-        push @{ $pkg . '::' . $ruleset },
-            [ $op => splice( @_, 0, length($proto) ) ], @_;
+        _push_rule($pkg, [ $op => splice( @_, 0, length($proto) ) ] );
     }
+}
+
+sub _push_rule($$) {
+    my($pkg, $rule) = @_;
+    my $op = $rule->[0];
+    my $ruleset;
+    if ( $op eq 'before' ) {
+        $ruleset = 'RULES_SETUP';
+    } elsif ( $op eq 'after' ) {
+        $ruleset = 'RULES_CLEANUP';
+    } else {
+        $ruleset = 'RULES_RUN';
+    }
+    no strict 'refs';
+    # XXX TODO, need to spec stage here.
+    push @{ $pkg . '::' . $ruleset }, $rule;
 }
 
 sub _qualify ($@) {
@@ -406,14 +407,19 @@ to do is to put the following two lines first:
 sub handle_request {
     my $self = shift;
 
-    my $path = Jifty->web->request->path;
-    # XXX TODO: jesse commented this out because it weirdly breaks things
-    #    $path =~ s{/index\.html$}{};
 
     local $Dispatcher = $self->new();
+    # We don't want the previous mason request hanging aroudn once we start dispatching
+    local $HTML::Mason::Commands::m = undef;
+    # Mason introduces a DIE handler that generates a mason exception
+    # which in turn generates a backtrace. That's fine when you only
+    # do it once per request. But it's really, really painful when you do it
+    # often, as is the case with fragments
+    #
+    local $SIG{__DIE__} = 'DEFAULT';
 
     eval {
-        $Dispatcher->_do_dispatch($path);
+        $Dispatcher->_do_dispatch( Jifty->web->request->path);
     };
     if ( my $err = $@ ) {
         $self->log->warn(ref($err) . " " ."'$err'") if ( $err !~ /^LAST RULE/);
@@ -455,18 +461,17 @@ sub _handle_rule {
     my ( $self, $rule ) = @_;
     my ( $op,   @args );
 
-    # Handle the case where $op is a code reference.
-    {
-        local $@;
-        eval { ( $op, @args ) = @$rule };
-        ( $op, @args ) = ( run => $rule ) if $@;
+    # Handle the case where $rule is an array reference.
+    if (ref($rule) eq 'ARRAY') {
+        ( $op, @args ) = @$rule;
+    } else {
+        ( $op, @args ) = ( run => $rule );
     }
 
     # Handle the case where $op is an array.
     my $sub_rules;
-    {
-        local $@;
-        eval { $sub_rules = [ @$op, @args ] };
+    if (ref($op) eq 'ARRAY' ) {
+         $sub_rules = [ @$op, @args ];
     }
 
     if ($sub_rules) {
@@ -485,7 +490,17 @@ sub _handle_rule {
 no warnings 'exiting';
 
 sub next_rule { next RULE }
-sub last_rule { die "LAST RULE"; }
+sub last_rule { 
+    
+    # Mason introduces a DIE handler that generates a mason exception
+    # which in turn generates a backtrace. That's fine when you only
+    # do it once per request. But it's really, really painful when you do it
+    # often, as is the case with fragments
+   
+      local $SIG{__DIE__} = 'IGNORE';
+
+    die "LAST RULE"; 
+}
 sub next_show { last HANDLE_WEB }
 
 =head2 _do_under
@@ -566,15 +581,40 @@ This method is called by the dispatcher internally. You shouldn't need to.
 sub _do_after {
     my ( $self, $cond, $rules ) = @_;
     if ( my $regex = $self->_match($cond) ) {
-        $self->log->debug("Matched 'on' rule $regex for ".$self->{'path'});
+        $self->log->debug("Matched 'after' rule $regex for ".$self->{'path'});
         # match again to establish $1 $2 etc in the dynamic scope
         $self->{path} =~ $regex;
         $self->_handle_rules($rules);
     }
 }
 
+=head2 already_run
+
+Returns true if the code block has run once already in this request.
+This can be useful for 'after' rules to ensure that they only run
+once, even if there is a sub-dispatch which would cause it to run more
+than once.  The idiom is:
+
+    after '/some/path/*' => run {
+        return if already_run;
+        # ...
+    };
+
+=cut
+
+sub already_run {
+    my $id = $Dispatcher->{call_rule};
+    return 1 if get "__seen_$id";
+    set "__seen_$id" => 1;
+    return 0;
+}
+
 sub _do_run {
     my ( $self, $code ) = @_;
+
+    # Keep track of the coderef being run, so we can know about
+    # already_run
+    local $self->{call_rule} = $code;
 
     # establish void context and make a call
     ( $self->can($code) || $code )->();
@@ -665,7 +705,7 @@ sub _do_show {
     eval { Jifty->handler->mason->handle_comp(request->path); };
     my $err = $@;
     # Handle parse errors
-    if ( $err and not UNIVERSAL::isa $err, 'HTML::Mason::Exception::Abort' ) {
+    if ( $err and not eval { $err->isa( 'HTML::Mason::Exception::Abort' ) } ) {
         # XXX TODO: get this into the browser somehow
         warn "Mason error: $err";
         Jifty->web->redirect("/__jifty/error/mason_internal_error");
@@ -716,16 +756,23 @@ sub _do_dispatch {
     $self->{path} =~ s{/+}{/}g;
 
     $self->log->debug("Dispatching request to ".$self->{path});
+
     eval {
         $self->_handle_rules( [ $self->rules('SETUP') ] );
         HANDLE_WEB: { Jifty->web->handle_request(); }
         $self->_handle_rules( [ $self->rules('RUN'), 'show' ] );
+    };
+    if ( my $err = $@ ) {
+        $self->log->warn(ref($err) . " " ."'$err'") if ( $err !~ /^LAST RULE/);
+    }
+
+    eval {
         $self->_handle_rules( [ $self->rules('CLEANUP') ] );
     };
     if ( my $err = $@ ) {
         $self->log->warn(ref($err) . " " ."'$err'") if ( $err !~ /^LAST RULE/);
-
     }
+
     last_rule;
 }
 

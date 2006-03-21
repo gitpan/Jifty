@@ -167,7 +167,7 @@ sub validate {
     my $self = shift;
     $self->check_authorization || return;
     $self->setup || return;
-    $self->_canonicalize_arguments || return;
+    $self->_canonicalize_arguments;
     $self->_validate_arguments;
 }
 
@@ -535,17 +535,9 @@ described by L</arguments>.
 # better solution.
 sub _canonicalize_arguments {
     my $self   = shift;
-    my @fields = $self->argument_names;
 
-    my $all_fields_ok = 1;
-    foreach my $field (@fields) {
-        next unless $field and exists $self->argument_values->{$field};
-        unless ( $self->_canonicalize_argument($field) ) {
-
-            $all_fields_ok = 0;
-        }
-    }
-    return $all_fields_ok;
+    $self->_canonicalize_argument($_)
+      for $self->argument_names;
 }
 
 
@@ -571,20 +563,17 @@ sub _canonicalize_argument {
     my $value = $self->argument_value($field);
     my $default_method = 'canonicalize_' . $field;
 
+    return unless defined $value;
+
     if ( $field_info->{canonicalizer}
-        and UNIVERSAL::isa( $field_info->{canonicalizer}, 'CODE' ) )
+        and defined &{ $field_info->{canonicalizer} } )
     {
-        return $field_info->{canonicalizer}->( $self, $value );
+        $value = $field_info->{canonicalizer}->( $self, $value );
+    } elsif ( $self->can($default_method) ) {
+        $value = $self->$default_method( $value );
     }
 
-    elsif ( $self->can($default_method) ) {
-        return $self->$default_method( $value );
-    }
-
-    # If none of the checks have failed so far, then it's ok
-    else {
-        return $field;
-    }
+    $self->argument_value($field => $value);
 }
 
 =head2 _validate_arguments
@@ -660,7 +649,7 @@ sub _validate_argument {
 
     # Finally, fall back to running a validator sub
     if ( $field_info->{validator}
-        and UNIVERSAL::isa( $field_info->{validator}, 'CODE' ) )
+        and defined &{ $field_info->{validator} } )
     {
         return $field_info->{validator}->( $self, $value );
     }
@@ -702,7 +691,7 @@ sub _autocomplete_argument {
 
     if ( $field_info->{autocompleter}  )
     {
-        return $field_info->{autocompleter}->(  $value );
+        return $field_info->{autocompleter}->( $self, $value );
     }
 
     elsif ( $self->can($default_autocomplete) ) {

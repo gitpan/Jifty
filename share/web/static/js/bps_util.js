@@ -18,11 +18,11 @@ function updateParentField(field, value) {
 }
 
 function createCalendarLink(input) {
-    var e = document.getElementById(input);
+    var e = $(input);
     if (e) {
         var link = document.createElement('a');
         link.setAttribute('href', '#');
-        link.setAttribute('onclick', "openCalWindow('"+input+"'); return false;");
+        link.setAttribute('onclick', "openCalWindow('"+e.id+"'); return false;");
         link.setAttribute('class', 'calendar-link');
         
         var text = document.createTextNode('Calendar');
@@ -82,15 +82,4 @@ if (typeof window.onload != 'function') {
         oldonload();
         doOnLoadHooks();
     }
-}
-
-function toggle_display (id) {
-var e = document.getElementById(id);
-if (e.style.display !="block" ) {
-    e.style.display="block";
-} else {
-   e.style.display="none";
-} 
-
-
 }

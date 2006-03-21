@@ -73,9 +73,7 @@ sub _user_from_email {
     my $self = shift;
     my $email = shift;
     my $currentuser_object_class = Jifty->config->framework('CurrentUserClass');
-    $currentuser_object_class->require;
     return $currentuser_object_class->new( email => $email );
-
 }
 
 

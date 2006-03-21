@@ -17,8 +17,6 @@ use Apache::Session;
 use XML::Writer;
 use base qw/Class::Accessor Jifty::Object/;
 
-use UNIVERSAL::require;
-
 use vars qw/$SERIAL/;
 
 __PACKAGE__->mk_accessors(
@@ -35,7 +33,7 @@ Creates a new C<Jifty::Web> object
 
 sub new {
     my $class = shift;
-    my $self = bless {}, $class;
+    my $self = bless {region_stack => []}, $class;
     $self->session(Jifty::Web::Session->new());
     return ($self);
 }
@@ -167,9 +165,7 @@ sub current_user {
         return $self->session->get('user');
     }
     else {
-        my $class = Jifty->config->framework('CurrentUserClass');
-        $class->require;
-        my $object = $class->new();
+        my $object = Jifty->config->framework('CurrentUserClass')->new();
         $object->is_superuser(1) if Jifty->config->framework('AdminMode');
         return ($object);
     }
@@ -216,8 +212,6 @@ For more details about continuations, see L<Jifty::Continuation>.
 sub handle_request {
     my $self = shift;
     die "No request to handle" unless Jifty->web->request;
-    Jifty->web->response( Jifty::Response->new ) unless $self->response;
-    Jifty->web->setup_session;
 
     my @valid_actions;
     for my $request_action ( $self->request->actions ) {
@@ -520,16 +514,11 @@ sub new_action {
         unless $class =~ /^\Q$base_path\E::/
         or $class     =~ /^Jifty::Action::/;
 
-    unless ( $class->require ) {
-
-# The implementation class is provided by the client, so this isn't a "shouldn't happen"
-        $self->log->error( "Error requiring $class: ",
-            $UNIVERSAL::require::ERROR );
-        return;
-    }
+    # The implementation class is provided by the client, so this
+    # isn't a "shouldn't happen"
+    return unless Jifty::Util->require( $class );
 
     my $action;
-
     # XXX TODO bullet proof
     eval { $action = $class->new( %args, arguments => {%arguments} ); };
     if ($@) {
@@ -655,7 +644,12 @@ sub redirect {
             response => $self->response,
             parent   => $self->request->continuation,
         );
-        $page = $page . "?J:CALL=" . $cont->id;
+        if ($page =~ /\?/) {
+            $page .= "&";
+        } else {
+            $page .= "?";
+        }
+        $page .="J:CALL=" . $cont->id;
     }
     $self->_redirect($page);
 }
@@ -812,7 +806,7 @@ sub tangent {
             for keys %{ $self->{'state_variables'} };
 
         my $request = Jifty::Request->new(path => Jifty->web->request->path)
-          ->from_webform($clickable->get_parameters);
+          ->from_webform(%{Jifty->web->request->arguments}, $clickable->get_parameters);
         local Jifty->web->{request} = $request;
         Jifty->web->handle_request();
     }
@@ -849,12 +843,21 @@ Generates and renders a L<Jifty::Web::Form::Clickable> using the given
 I<PARAMHASH>, additionally defaults to calling the current
 continuation.
 
+Takes an additional argument, C<to>, which can specify a default path
+to return to if there is no current continuation.
+
 =cut
 
 sub return {
     my $self = shift;
+    my %args = (@_);
+    my $continuation = Jifty->web->request->continuation;
+    if (not $continuation and $args{to}) {
+        $continuation = Jifty::Continuation->new(request => Jifty::Request->new(path => $args{to}));
+    }
+    delete $args{to};
 
-    $self->link( call => Jifty->web->request->continuation, @_ );
+    $self->link( call => $continuation, %args );
 }
 
 =head3 render_messages
@@ -952,6 +955,22 @@ sub navigation {
     return $self->{navigation};
 }
 
+=head3 page_navigation
+
+Returns the L<Jifty::Web::Menu> for this web request; one is
+automatically created if it hasn't been already.  This is useful
+for separating page-level navigation from app-level navigation.
+
+=cut
+
+sub page_navigation {
+    my $self = shift;
+    if (!$self->{page_navigation}) {
+        $self->{page_navigation} = Jifty::Web::Menu->new();
+    }
+    return $self->{page_navigation};
+}
+
 =head2 STATE VARIABLES
 
 =head3 get_variable NAME
@@ -1026,8 +1045,9 @@ sub get_region {
 
 Creates and renders a L<Jifty::Web::PageRegion>; the C<PARAMHASH> is
 passed directly to its L<Jifty::Web::PageRegion/new> method.  The
-region is then added to the stack of regions, and the fragment is
-rendered.
+region is then L<Jifty::Web::PageRegion/enter>ed, then
+L<Jifty::Web::PageRegion/render>ed, and finally
+L<Jifty::Web::PageRegion/exit>ed.
 
 =cut
 
@@ -1036,19 +1056,16 @@ sub region {
 
     # Add ourselves to the region stack
     my $region = Jifty::Web::PageRegion->new(@_) or return;
-    $region->parent(Jifty->web->current_region);
-    local $self->{'region_stack'}
-        = [ @{ $self->{'region_stack'} || [] }, $region ];
-    $region->enter;
 
-    # Keep track of the fully qualified name (which should be unique)
-    warn "Repeated region: " . $self->qualified_region
-        if $self->{'regions'}{ $self->qualified_region };
-    $self->{'regions'}{ $self->qualified_region } = $region;
+    # Enter the region
+    $region->enter;
 
     # Render it
     $self->out( $region->render );
 
+    # Exit it when we're done
+    $region->exit;
+    
     "";
 }
 
@@ -1109,7 +1126,6 @@ sub serve_fragments {
                 parent         => Jifty->web->current_region,
                 defaults       => $f->arguments,
             );
-            push @{ Jifty->web->{'region_stack'} }, $new;
             $new->enter;
         }
 
@@ -1117,6 +1133,8 @@ sub serve_fragments {
         $writer->startTag( "fragment", id => Jifty->web->current_region->qualified_name );
         $writer->cdata( Jifty->web->current_region->render );
         $writer->endTag();
+
+        Jifty->web->current_region->exit while Jifty->web->current_region;
     }
     $writer->endTag();
 

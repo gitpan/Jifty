@@ -5,6 +5,7 @@ package Jifty::Object;
 
 use Log::Log4perl;
 use HTML::Entities;
+use Carp;
 
 =head1 Jifty::Object
 
@@ -32,7 +33,7 @@ C<current_user>, and so on up the call stack.
 sub current_user {
     my $self = shift;
     $self->{'_current_user'} = shift if (@_); 
-    use Carp qw/croak/; croak unless (ref $self);
+    Carp::croak unless (ref $self);
     return($self->{'_current_user'});
 
 }
@@ -60,6 +61,13 @@ sub _get_current_user {
     }
     my $depth = 1;
     my $caller;
+
+    # Mason introduces a DIE handler that generates a mason exception
+    # which in turn generates a backtrace. That's fine when you only
+    # do it once per request. But it's really, really painful when you do it
+    # often, as is the case with fragments
+    #
+    local $SIG{__DIE__} = 'DEFAULT';
     eval {
         package DB;
 
@@ -71,7 +79,7 @@ sub _get_current_user {
             my $caller_self      = $DB::args[0];
             next unless (ref($caller_self)); #skip class methods;
             next if ($caller_self eq $self);
-            next unless UNIVERSAL::can($caller_self => 'current_user');
+            next unless $caller_self->can('current_user');
 
             eval {
                 if ( $caller_self->current_user and $caller_self->current_user->id) {

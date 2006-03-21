@@ -50,6 +50,16 @@ Action.prototype = {
         return serialized.join('&');
     },
 
+    // Returns true if there is a file upload form as one of our elements
+    hasUpload: function() {
+        var fields = this.fields();
+        for (var i = 0; i < fields.length; i++) {
+            if (fields[i].getAttribute("type") == "file")
+                return true;
+        }
+        return false;
+    },
+
     // Return the action as a data strcture suitible to be JSON'd
     data_structure: function() {
         var a = {};
@@ -230,6 +240,12 @@ Behaviour.register({
         elt.onblur = function () {
             Form.Element.validate(this);
         } 
+    },
+    'input.date': function(e) {
+        if ( !Element.hasClassName( e, 'has-calendar-link' ) ) {
+            createCalendarLink(e);
+            Element.addClassName( e, 'has-calendar-link' );
+        }
     }
 });
 

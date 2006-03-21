@@ -15,7 +15,7 @@ Jifty::Server - Standalone web server for Jifty applications
 
 =head1 DESCRIPTION
 
-C<Jifty::Server> is a subclass of L<HTTP::Server::Simple::Mason> which
+C<Jifty::Server> is a subclass of L<HTTP::Server::Simple> which
 creates a handy standalone web server for a lightweight Jifty application.
 
 =cut
@@ -124,7 +124,7 @@ Sets this server to use L<HTTP::Server::Simple::Recorder>.
 sub recording_on {
     my $class = shift;
     our @ISA;
-    unshift @ISA, "HTTP::Server::Simple::Recorder" unless UNIVERSAL::isa($class, 'HTTP::Server::Simple::Recorder');
+    unshift @ISA, "HTTP::Server::Simple::Recorder" unless $class->isa('HTTP::Server::Simple::Recorder');
 } 
 
 1;

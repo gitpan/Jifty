@@ -5,15 +5,12 @@ name('Jifty');
 requires(perl => '5.8.3'); 
 requires('Apache::Session');
 requires('App::CLI' => 0.03 ); # App::CLI::Command::Help App::CLI::Command
-requires('CGI');                   # CGI::Fast
-requires('CGI::Cookie');
 requires('Cache::Cache'); #Cache::FileCache
 requires('Calendar::Simple');
-requires('Carp');
 requires('Class::Accessor');
 requires('Class::Container');
 requires('Clone');
-requires('Cwd');
+requires('Compress::Zlib');
 requires('DBD::SQLite');
 requires('Data::Page');
 requires('Digest::MD5');
@@ -23,32 +20,28 @@ requires('Email::Send' => '1.99_01'); # Email::Send::Jifty::Test
 requires('Email::Simple');
 requires('Email::Simple::Creator');
 requires('Encode');
-requires('Exporter');
-requires('File::Basename');
-requires('File::Copy');
-requires('File::Find');
+requires('File::MMagic');
 requires('File::ShareDir');
-requires('File::Spec');
-requires('FindBin');
-requires('Getopt::Long');
 requires('HTML::Entities');
 requires('HTML::Mason' => 1.3101);           # HTML::Mason::Exceptions HTML::Mason::FakeApache HTML::Mason::MethodMaker HTML::Mason::Request HTML::Mason::Utils
 requires('HTML::Mason::Plugin');
 requires('HTTP::Cookies');
+requires('HTTP::Date');
 requires('HTTP::Server::Simple' => '0.10');  # HTTP::Server::Simple::CGI
 requires('HTTP::Server::Simple::Recorder');
 requires('Hash::Merge');
 requires('Hook::LexWrap');
-requires('Jifty::DBI' => '0.06' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
+requires('Jifty::DBI' => '0.16' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
 requires('Locale::Maketext::Simple');
 requires('Log::Log4perl');
-requires('Math::BigInt');
+requires('LWP::UserAgent');
+requires('MIME::Types');
+requires('Module::CoreList');
 requires('Module::Install::Admin' => '0.50');
 requires('Module::Pluggable' => '2.95');
 requires('Module::Refresh');
 requires('Params::Validate');
 requires('Pod::Simple'); #Pod::Simple::Text
-requires('Pod::Usage');
 requires('Scalar::Util');
 requires('String::Koremutake');
 requires('Test::Base' => 0.44);            # Test::Base::Filter
@@ -60,7 +53,6 @@ requires('Test::WWW::Mechanize');
 requires('Time::HiRes');
 requires('Time::ParseDate');
 requires('UNIVERSAL::require');
-requires('UNIVERSAL');
 requires('URI');
 requires('WWW::Mechanize' => 1.12);
 requires('XML::Writer');
