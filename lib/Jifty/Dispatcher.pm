@@ -66,10 +66,10 @@ The Dispatcher runs rules in several stages:
 
 B<before> rules are run before Jifty evaluates actions. They're the
 perfect place to enable or disable L<Jifty::Action>s using
-L<Jifty::Web/allow_actions> and L<Jifty::Web/deny_actions> or to
-completely disallow user access to private I<component> templates such
-as the F<_elements> directory in a default Jifty application.  They're
-also the right way to enable L<Jifty::LetMe> actions.
+L<Jifty::API/allow> and L<Jifty::API/deny> or to completely disallow
+user access to private I<component> templates such as the F<_elements>
+directory in a default Jifty application.  They're also the right way
+to enable L<Jifty::LetMe> actions.
 
 You can entirely stop processing with the C<redirect> and C<abort>
 directives.
@@ -195,7 +195,7 @@ default page in call_next.
 
 =head2 dispatch $path
 
-eispatch again using $path as the request path, preserving args.
+Dispatch again using $path as the request path, preserving args.
 
 =head2 next_rule
 
@@ -407,15 +407,15 @@ to do is to put the following two lines first:
 sub handle_request {
     my $self = shift;
 
-
     local $Dispatcher = $self->new();
+
+    # XXX TODO: refactor this out somehow?
     # We don't want the previous mason request hanging aroudn once we start dispatching
     local $HTML::Mason::Commands::m = undef;
     # Mason introduces a DIE handler that generates a mason exception
     # which in turn generates a backtrace. That's fine when you only
     # do it once per request. But it's really, really painful when you do it
     # often, as is the case with fragments
-    #
     local $SIG{__DIE__} = 'DEFAULT';
 
     eval {
@@ -672,14 +672,14 @@ sub _do_show {
     $path ||= $self->{path};
     $self->log->debug("Showing path $path");
 
-    # If we've got a working directory (from an "under" rule) and we have 
+    # If we've got a working directory (from an "under" rule) and we have
     # a relative path, prepend the working directory
     $path = "$self->{cwd}/$path" unless $path =~ m{^/};
 
-    # If we're requesting a directory, go looking for the index.html
-    if ( $path =~ m{/$} and
-        Jifty->handler->mason->interp->comp_exists( $path . "/index.html" ) )
+    # When we're requesting a directory, go looking for the index.html
+    if ( $path =~ m{/$} and $self->template_exists( $path . "/index.html" ) )
     {
+
         $path .= "/index.html";
     }
 
@@ -687,31 +687,18 @@ sub _do_show {
     # the directory itself
 
     # XXX TODO, we should search all component roots
-    
-    if ($path !~ m{/$}
-        and -d Jifty::Util->absolute_path(
-            Jifty->config->framework('Web')->{'TemplateRoot'} . $path
-        )
-        )
-    {
 
+    if ($path !~ m{/$}
+        and -d Jifty::Util->absolute_path( Jifty->config->framework('Web')->{'TemplateRoot'} . $path))
+    {
         $self->_do_show( $path . "/" );
     }
 
     # Set the request path
     request->path($path);
+    $self->render_template(request->path);
 
-    $self->log->debug("Having Mason handle ".request->path);
-    eval { Jifty->handler->mason->handle_comp(request->path); };
-    my $err = $@;
-    # Handle parse errors
-    if ( $err and not eval { $err->isa( 'HTML::Mason::Exception::Abort' ) } ) {
-        # XXX TODO: get this into the browser somehow
-        warn "Mason error: $err";
-        Jifty->web->redirect("/__jifty/error/mason_internal_error");
-    } elsif ($err) {
-        die $err;
-    }
+
     last_rule;
 }
 
@@ -875,6 +862,11 @@ sub _compile_condition {
     $cond =~ s{(?:\\\/)+}{/}g;
     $cond =~ s{/$}{};
 
+    my $has_capture = ( $cond =~ / \\ [*?] /x);
+    if ($has_capture) {
+        $cond = $self->_compile_glob($cond);
+    }
+
     if ( $cond =~ m{^/} ) {
 
         # '/foo' => qr{^/foo}
@@ -888,6 +880,7 @@ sub _compile_condition {
         # empty path -- just match $cwd itself
         $cond = "(?<=\\A$self->{cwd})";
     }
+
     if ( $Dispatcher->{rule} eq 'on' ) {
 
         # "on" anchors on complete match only
@@ -899,9 +892,7 @@ sub _compile_condition {
     }
 
     # Make all metachars into capturing submatches
-    unless ( $cond
-        =~ s{( (?: \\ [*?] )+ )}{'('. $self->_compile_glob($1) .')'}egx )
-    {
+    if (!$has_capture) {
         $cond = "($cond)";
     }
 
@@ -914,16 +905,114 @@ Private function.
 
 Turns a metaexpression containing * and ? into a capturing perl regex pattern.
 
+The rules are:
+
+=over 4
+
+=item *
+
+A C<*> between two C</> characthers, or between a C</> and end of string,
+should at match one or more non-slash characters:
+
+    /foo/*/bar
+    /foo/*/
+    /foo/*
+    /*
+
+=item *
+
+All other C<*> can match zero or more non-slash characters: 
+
+    /*bar
+    /foo*bar
+    *
+
+=item *
+
+Consecutive C<?> marks are captured together:
+
+    /foo???bar      # One capture for ???
+    /foo??*         # Two captures, one for ?? and one for *
+
+=back
+
 =cut
 
 sub _compile_glob {
     my ( $self, $glob ) = @_;
-    $glob =~ s{\\}{}g;
-    $glob =~ s{\*}{[^/]+}g;
-    $glob =~ s{\?}{[^/]}g;
+    $glob =~ s{
+        # Stars between two slashes, or between a slash and end-of-string,
+        # should at match one or more non-slash characters.
+        (?<= /)      # lookbehind for slash
+        \\ \*        # star
+        (?= / | \z)  # lookahead for slash or end-of-string
+    }{([^/]+)}gx;
+    $glob =~ s{
+        # All other stars can match zero or more non-slash character.
+        \\ \*
+    }{([^/]*)}gx;
+    $glob =~ s{
+        # Consecutive question marks are captured as one unit;
+        # we do this by capturing them and then repeat the result pattern
+        # for that many times.  The divide-by-two takes care of the
+        # extra backslashes.
+        ( (?: \\ \? )+ )
+    }{([^/]{${ \( length($1)/2 ) }})}gx;
     $glob;
 }
 
+=head2 template_exists PATH
+
+Returns true if PATH is a valid template inside your template root.
+
+=cut
+
+sub template_exists {
+    my $self = shift;
+    my $template = shift;
+
+      return  Jifty->handler->mason->interp->comp_exists( $template);
+
+}
+
+
+=head2 render_template PATH
+
+Use our templating system to render a template. If there's an error, do the right thing.
+
+
+=cut
+
+sub render_template {
+    my $self = shift;
+    my $template = shift;
+
+    $self->log->debug( "Handling template " . $template );
+    eval { Jifty->handler->mason->handle_comp( $template ); };
+    my $err = $@;
+
+    # Handle parse errors
+    if ( $err and not eval { $err->isa('HTML::Mason::Exception::Abort') } ) {
+
+        # Save the request away, and redirect to an error page
+        Jifty->web->response->error($err);
+        my $c = Jifty::Continuation->new(
+            request  => Jifty->web->request,
+            response => Jifty->web->response,
+            parent   => Jifty->web->request->continuation,
+        );
+
+        warn "$err";
+
+        # Redirect with a continuation
+        Jifty->web->_redirect(
+            "/__jifty/error/mason_internal_error?J:C=" . $c->id );
+    }
+    elsif ($err) {
+        die $err;
+    }
+
+}
 
 
 1;

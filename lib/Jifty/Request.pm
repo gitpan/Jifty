@@ -3,7 +3,7 @@ use strict;
 
 package Jifty::Request;
 
-use base qw/Jifty::Object Class::Accessor Clone/;
+use base qw/Jifty::Object Class::Accessor::Fast Clone/;
 __PACKAGE__->mk_accessors(qw(is_subrequest arguments just_validating path _continuation));
 
 use Jifty::JSON;
@@ -138,9 +138,13 @@ sub from_data_structure {
     for my $a (values %actions) {
         my %arguments;
         for my $arg (keys %{$a->{fields} || {}}) {
-            for my $type (qw/doublefallback fallback value/) {
-                $arguments{$arg} = $a->{fields}{$arg}{$type}
-                  if exists $a->{fields}{$arg}{$type};
+            if (ref $a->{fields}{$arg}) {
+                for my $type (qw/doublefallback fallback value/) {
+                    $arguments{$arg} = $a->{fields}{$arg}{$type}
+                      if exists $a->{fields}{$arg}{$type};
+                }
+            } else {
+                $arguments{$arg} = $a->{fields}{$arg};
             }
         }
         $self->add_action(moniker   => $a->{moniker},
@@ -266,7 +270,17 @@ sub argument {
             $self->add_state_variable(key => $1, value => $value);
         }
     }
-    return $self->arguments->{$key};
+
+    defined(my $val = $self->arguments->{$key}) or return undef;
+
+    if (ref $val eq 'ARRAY') {
+        Encode::_utf8_on($_) for @$val;
+    }
+    else {
+        Encode::_utf8_on($val);
+    }
+
+    $val;
 }
 
 =head2 delete KEY
@@ -581,6 +595,18 @@ sub add_action {
     return $action;
 } 
 
+
+=head2 clear_actions
+
+Removes all actions from this request
+
+=cut
+
+sub clear_actions {
+    my $self = shift;
+    $self->{'actions'} = {};
+}
+
 =head2 remove_action MONIKER
 
 Removes an action with the given moniker.
@@ -686,8 +712,8 @@ sub do_mapping {
 }
 
 package Jifty::Request::Action;
-use base 'Class::Accessor';
-__PACKAGE__->mk_accessors( qw/moniker arguments class order active modified/);
+use base 'Class::Accessor::Fast';
+__PACKAGE__->mk_accessors( qw/moniker arguments class order active modified has_run/);
 
 =head2 Jifty::Request::Action
 
@@ -704,6 +730,8 @@ A small package that encapsulates the bits of an action request:
 =head3 order [INTEGER]
 
 =head3 active [BOOLEAN]
+
+=head3 has_run [BOOLEAN]
 
 =cut
 
@@ -729,7 +757,7 @@ sub delete {
 
 
 package Jifty::Request::StateVariable;
-use base 'Class::Accessor';
+use base 'Class::Accessor::Fast';
 __PACKAGE__->mk_accessors (qw/key value/);
 
 =head2 Jifty::Request::StateVariable
@@ -743,7 +771,7 @@ A small package that encapsulates the bits of a state variable:
 =cut
 
 package Jifty::Request::Fragment;
-use base 'Class::Accessor';
+use base 'Class::Accessor::Fast';
 __PACKAGE__->mk_accessors( qw/name path wrapper arguments parent/ );
 
 =head2 Jifty::Request::Fragment

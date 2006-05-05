@@ -35,6 +35,7 @@ sub arguments {
 
     for my $pk (@{ $self->record->_primary_keys }) {
         $arguments->{$pk}{'constructor'} = 1;
+        $arguments->{$pk}{'mandatory'} = 1;
         # XXX TODO IS THERE A BETTER WAY TO NOT RENDER AN ITEM IN arguments
         $arguments->{$pk}{'render_as'} = 'Unrendered'; 
         # primary key fields should always be hidden fields
@@ -50,13 +51,17 @@ going to change the record.  This is opposed to the behavior inherited
 from L<Jifty::Action>, where mandatory arguments B<must> be present
 for the action to run.
 
+However, constructor arguments are still required.
+
 =cut
 
 sub _validate_arguments {
-    my $self   = shift;
-    
-    $self->_validate_argument($_)
-      for grep {exists $self->argument_values->{$_}} $self->argument_names;
+    my $self = shift;
+
+    $self->_validate_argument($_) for grep {
+        exists $self->argument_values->{$_}
+            or $self->arguments->{$_}->{constructor}
+    } $self->argument_names;
 
     return $self->result->success;
 }
@@ -90,6 +95,10 @@ sub take_action {
         next
             if ( defined $column->type and ( $column->type =~ /^bool/i || $column->type =~ /^int/i )
             and defined $value and $value eq '' );
+
+        # Skip file uploads if blank
+        next if lc $self->arguments->{$field}{render_as} eq "upload"
+          and (not defined $value or not ref $value);
 
         if (ref $value eq "Fh") { # CGI.pm's "lightweight filehandle class"
             local $/;

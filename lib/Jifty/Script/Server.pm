@@ -6,6 +6,7 @@ use base qw/App::CLI::Command/;
 
 use Jifty::Everything;
 use Jifty::Server;
+use File::Path ();
 
 
 =head1 NAME
@@ -42,8 +43,14 @@ you.
 
 sub run {
     my $self = shift;
-    
     Jifty->new();
+
+    # Purge stale mason cache data
+    my $data_dir = Jifty->config->framework('Web')->{'DataDir'};
+    if (-d $data_dir) {
+        File::Path::rmtree(["$data_dir/cache", "$data_dir/obj"]);
+    }
+
     Jifty::Server->new(port => $self->{port})->run;
 }
 1;

@@ -40,7 +40,7 @@ aid in placing them in L<HTML::Mason> components.
 
 =cut
 
-use base qw/Jifty::Web::Form::Element Class::Accessor/;
+use base qw/Jifty::Web::Form::Element Class::Accessor::Fast/;
 
 use Scalar::Util;
 use HTML::Entities;
@@ -316,7 +316,7 @@ Renders a default CSS class for each part of our widget.
 
 sub classes {
     my $self = shift;
-    return join(' ', ($self->class||''), ($self->name||''));
+    return join(' ', ($self->class||''), ($self->name ? "argument-".$self->name : ''));
 }
 
 
@@ -358,7 +358,7 @@ Use this for sticking instructions right in front of a widget
 sub render_preamble {
     my $self = shift;
     Jifty->web->out(
-qq!<span class="preamble @{[$self->classes]}" >@{[$self->preamble || '' ]}</span>\n!
+qq!<span class="preamble @{[$self->classes]}" >@{[_($self->preamble) || '' ]}</span>\n!
     );
 
     return '';
@@ -375,7 +375,7 @@ an empty string.
 sub render_label {
     my $self = shift;
     Jifty->web->out(
-qq!<label class="label @{[$self->classes]}" for="@{[$self->input_name ]}">@{[$self->label ]}</label>\n!
+qq!<label class="label @{[$self->classes]}" for="@{[$self->input_name ]}">@{[_($self->label) ]}</label>\n!
     );
 
     return '';
@@ -443,7 +443,7 @@ sub render_value {
     my $self  = shift;
     my $field = '<span';
     $field .= qq! class="@{[ $self->classes ]}"> !;
-    $field .= HTML::Entities::encode_entities($self->current_value) if defined $self->current_value;
+    $field .= HTML::Entities::encode_entities(_($self->current_value)) if defined $self->current_value;
     $field .= qq!</span>\n!;
     Jifty->web->out($field);
     return '';
@@ -465,7 +465,7 @@ sub render_autocomplete {
     Jifty->web->out(
 qq!<div class="autocomplete" id="@{[$self->element_id]}-autocomplete" style="display:none;border:1px solid black;background-color:white;"></div>\n
         <script type="text/javascript">
-          new Jifty.Autocompleter('@{[$self->element_id]}', '@{[$self->element_id]}-autocomplete', '/__jifty/autocomplete.xml')
+          new Jifty.Autocompleter('@{[$self->element_id]}','@{[$self->element_id]}-autocomplete')
         </script>
   !
     );
@@ -505,9 +505,7 @@ sub render_errors {
     return unless $self->action;
 
     Jifty->web->out(
-qq!<span class="error @{[$self->classes]}" id="@{[$self->action->error_div_id($self->name)]}">
-      @{[  $self->action->result->field_error( $self->name ) || '']}
-    </span>\n!
+qq!<span class="error @{[$self->classes]}" id="@{[$self->action->error_div_id($self->name)]}">@{[  $self->action->result->field_error( $self->name ) || '']}</span>\n!
     );
     return '';
 }

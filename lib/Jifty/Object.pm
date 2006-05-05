@@ -15,9 +15,8 @@ the database handle or the logger object, while still allowing
 individual classes to overload these methods.
 
 We ought to be able to mix-in C<Jifty::Object> with any other class;
-thus, we will not define C<new> or C<_init> in C<Jifty::Object>, and
-we will not make any assumptions about the underlying representation
-of C<$self>.
+thus, we will not define C<new> or C<_init> in C<Jifty::Object>.  We
+do assume, however, that C<$self> is a blessed hash reference.
 
 =cut
 
@@ -33,9 +32,7 @@ C<current_user>, and so on up the call stack.
 sub current_user {
     my $self = shift;
     $self->{'_current_user'} = shift if (@_); 
-    Carp::croak unless (ref $self);
     return($self->{'_current_user'});
-
 }
 
 =for private _get_current_user
@@ -72,23 +69,24 @@ sub _get_current_user {
         package DB;
 
         # get the caller in array context to populate @DB::args
-        while (  not $self->current_user and $depth < 10) {
-            #local @DB::args;
-            my ($package, $filename, $line, $subroutine, $hasargs,
-                               $wantarray, $evaltext, $is_require, $hints, $bitmask)= caller( $depth++ );
-            my $caller_self      = $DB::args[0];
-            next unless (ref($caller_self)); #skip class methods;
-            next if ($caller_self eq $self);
-            next unless $caller_self->can('current_user');
+        while ( not $self->current_user and $depth < 10 ) {
 
-            eval {
-                if ( $caller_self->current_user and $caller_self->current_user->id) {
-                    $self->current_user($caller_self->current_user());
-                }
-            };
-            # Skip all that error checking
-        } 
+            #local @DB::args;
+            my ($package,   $filename, $line,       $subroutine, $hasargs,
+                $wantarray, $evaltext, $is_require, $hints,      $bitmask
+                )
+                = caller( $depth++ );
+            my $caller_self = $DB::args[0];
+            next unless ( ref($caller_self) );    #skip class methods;
+            next if ( $caller_self eq $self );
+            next
+                unless ( $caller_self->can('current_user')
+                and $caller_self->current_user
+                and defined $caller_self->current_user->id );
+            $self->current_user( $caller_self->current_user() );
+        }
     };
+
     # If we found something, return it
     return $self->current_user if $self->current_user;
 

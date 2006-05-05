@@ -15,7 +15,7 @@ generates L<Jifty::Web::Form::Link>s.
 
 =cut
 
-use base qw/Jifty::Web::Form::Element Class::Accessor/;
+use base qw/Jifty::Web::Form::Element Class::Accessor::Fast/;
 
 =head2 accessors
 
@@ -25,8 +25,8 @@ L<Jifty::Web::Form::Element/accessors>.
 
 =cut
 
-sub accessors { shift->SUPER::accessors(), qw(url escape_label tooltip); }
-__PACKAGE__->mk_accessors(qw(url escape_label tooltip));
+sub accessors { shift->SUPER::accessors(), qw(url escape_label tooltip target); }
+__PACKAGE__->mk_accessors(qw(url escape_label tooltip target));
 
 =head2 new PARAMHASH
 
@@ -41,7 +41,12 @@ The URL of the link; defaults to the current URL.
 
 =item tooltip
 
-Additional information about the link target.
+Additional information about the link.
+
+=item target
+
+Target of the link.  Mostly useful when specified as "_blank" to open
+a new window or as the name of a already existing window.
 
 =item escape_label
 
@@ -65,6 +70,7 @@ sub new {
         tooltip      => undef,
         escape_label => 1,
         class        => '',
+        target       => '',
         @_
     );
 
@@ -91,20 +97,21 @@ sub render {
     my $self = shift;
 
     my $label = $self->label;
-    $label = Jifty->web->mason->interp->apply_escapes( $label, 'h' )
+    $label = Jifty->web->escape( $label )
         if ( $self->escape_label );
 
     my $tooltip = $self->tooltip;
-    $tooltip = Jifty->web->mason->interp->apply_escapes( $tooltip, 'h' )
+    $tooltip = Jifty->web->escape( $tooltip )
         if ( $tooltip and $self->escape_label );
 
     Jifty->web->out(qq(<a));
-    Jifty->web->out(qq( id="@{[$self->id]}"))       if $self->id;
-    Jifty->web->out(qq( class="@{[$self->class]}")) if $self->class;
+    Jifty->web->out(qq( id="@{[$self->id]}"))         if $self->id;
+    Jifty->web->out(qq( class="@{[$self->class]}"))   if $self->class;
     Jifty->web->out(qq( title="@{[$self->tooltip]}")) if $tooltip;
+    Jifty->web->out(qq( target="@{[$self->target]}")) if $self->target;
     Jifty->web->out(qq( href="@{[$self->url]}"));
     Jifty->web->out( $self->javascript() );
-    Jifty->web->out(qq(>@{[$label]}</a>));
+    Jifty->web->out(qq(>$label</a>));
     $self->render_key_binding();
 
     return ('');

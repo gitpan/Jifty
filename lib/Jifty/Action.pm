@@ -17,7 +17,7 @@ for how to return values from actions.
 =cut
 
 
-use base qw/Jifty::Object Class::Accessor/;
+use base qw/Jifty::Object Class::Accessor::Fast/;
 
 __PACKAGE__->mk_accessors(qw(moniker argument_values order result sticky_on_success sticky_on_failure));
 
@@ -77,6 +77,8 @@ sub new {
         sticky_on_success => 0,
         sticky_on_failure => 1,
         @_);
+
+    $self->_get_current_user;
 
     $self->moniker($args{'moniker'} || 'auto-'.Jifty->web->serial);
     $self->order($args{'order'});
@@ -380,15 +382,15 @@ Returns nothing.
 
 sub render_errors {
     my $self = shift;
-    my $m = Jifty->web->mason; 
     
     if (defined $self->result->error) {
-        $m->out('<div class="form_errors">');
         # XXX TODO FIXME escape?
-        $m->out('<span class="error">'. $self->result->error .'</span>');
-        $m->out('</div>');
+        Jifty->web->out( '<div class="form_errors">'
+                . '<span class="error">'
+                . $self->result->error
+                . '</span>'
+                . '</div>' );
     }
-
     return '';
 }
 
@@ -408,6 +410,7 @@ sub button {
                  @_);
 
     Jifty->web->form->register_action( $self );
+    Jifty->web->form->print_action_registration($self->moniker);
     $args{parameters}{$self->form_field_name($_)} = $args{arguments}{$_}
       for keys %{$args{arguments}};
 
@@ -514,9 +517,17 @@ from L</arguments>.
 
 =cut
 
+
 sub argument_names {
-    my $self = shift;
-    return (sort keys %{$self->arguments});
+    my $self      = shift;
+    my %arguments = %{ $self->arguments };
+    return (
+        sort {
+            (($arguments{$a}->{'sort_order'} ||0 ) <=> ($arguments{$b}->{'sort_order'} || 0))
+                || (($arguments{$a}->{'name'} || '') cmp ($arguments{$b}->{'name'} ||'' ))
+                || $a cmp $b
+            } keys %arguments
+    );
 }
 
 
@@ -563,6 +574,7 @@ sub _canonicalize_argument {
     my $value = $self->argument_value($field);
     my $default_method = 'canonicalize_' . $field;
 
+    # XXX TODO: Do we really want to skip undef values?
     return unless defined $value;
 
     if ( $field_info->{canonicalizer}

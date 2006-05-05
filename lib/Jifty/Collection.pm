@@ -23,7 +23,7 @@ C<record_class('Application::Model::Foo')> or similar on it.
 
 In addition, each L<Jifty::Collection> includes a L<Data::Page> object
 to help with calculations related to paged data.  You should B<not>
-use the C<first_row> and C<rows_per_page> methods from
+call the C<first_row> and C<rows_per_page> methods from
 L<Jifty::DBI::Collection> on a L<Jifty::Collection>.  Instead, if
 you'd like to use paging, you should use the C<set_page_info> method
 to B<set> the number of records per page and first record on the
@@ -32,7 +32,7 @@ the C<pager> method to B<get> information related to paging.
 
 =cut
 
-use base qw/Jifty::Object Jifty::DBI::Collection Class::Accessor/;
+use base qw/Jifty::Object Jifty::DBI::Collection Class::Accessor::Fast/;
 use Data::Page;
 
 =head1 MODEL

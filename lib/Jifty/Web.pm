@@ -13,14 +13,13 @@ Jifty::Web - Web framework for a Jifty application
 
 use Jifty::Everything;
 use CGI::Cookie;
-use Apache::Session;
 use XML::Writer;
-use base qw/Class::Accessor Jifty::Object/;
+use base qw/Class::Accessor::Fast Jifty::Object/;
 
 use vars qw/$SERIAL/;
 
 __PACKAGE__->mk_accessors(
-    qw(next_page request response session temporary_current_user action_limits)
+    qw(next_page request response session temporary_current_user)
 );
 
 =head1 METHODS
@@ -63,14 +62,16 @@ sub out {
 
 =head3 url
 
-Returns the root url of this Jifty application.  This is pulled from the
-configuration file.  
-
+Returns the root url of this Jifty application.  This is pulled from
+the configuration file.  Takes an optional named parameter C<scheme>
+to specify the scheme.
 
 =cut
 
 sub url {
     my $self = shift;
+    my %args = @_;
+
     my $url  = Jifty->config->framework("Web")->{BaseURL};
     my $port = Jifty->config->framework("Web")->{Port};
     
@@ -78,6 +79,7 @@ sub url {
     if ($url =~ /^(\w+)/) {
         $scheme = $1;
     }
+    $scheme = $args{scheme} if $args{scheme};
 
     if ($ENV{'HTTP_HOST'}) {
         return $scheme ."://".$ENV{'HTTP_HOST'};
@@ -122,7 +124,6 @@ hash).  Aborts if the session is already loaded.
 # Create the Jifty::Web::Session object
 sub setup_session {
     my $self = shift;
-    my $m = Jifty->web->mason;
 
     return if $self->session->loaded;
     $self->session->load();
@@ -192,7 +193,7 @@ the request object in L</request>.
 Each action on the request is vetted in three ways -- first, it must
 be marked as C<active> by the L<Jifty::Request> (this is the default).
 Second, it must be in the set of allowed classes of actions (see
-L</is_allowed>, below).  Finally, the action must validate.  If it
+L<Jifty::API/is_allowed>).  Finally, the action must validate.  If it
 passes all of these criteria, the action is fit to be run.
 
 Before they are run, however, the request has a chance to be
@@ -211,13 +212,13 @@ For more details about continuations, see L<Jifty::Continuation>.
 
 sub handle_request {
     my $self = shift;
-    die "No request to handle" unless Jifty->web->request;
+    die _( "No request to handle" ) unless Jifty->web->request;
 
     my @valid_actions;
     for my $request_action ( $self->request->actions ) {
         $self->log->debug("Found action ".$request_action->class . " " . $request_action->moniker);
         next unless $request_action->active;
-        unless ( $self->is_allowed( $request_action->class ) ) {
+        unless ( Jifty->api->is_allowed( $request_action->class ) ) {
             $self->log->warn( "Attempt to call denied action '"
                     . $request_action->class
                     . "'" );
@@ -243,31 +244,36 @@ sub handle_request {
     unless ( $self->request->just_validating ) {
         for my $request_action (@valid_actions) {
 
-            eval {
-                # Pull the action out of the request (again, since
-                # mappings may have affected parameters).  This
-                # returns the cached version unless the request has
-                # changed
-                my $action = $self->new_action_from_request($request_action);
-                next unless $action;
-                if ($request_action->modified) {
-                    # If the request's action was changed, re-validate
-                    $action->result(Jifty::Result->new);
-                    $action->result->action_class(ref $action);
-                    $self->response->result( $action->moniker => $action->result );
-                    $self->log->debug("Re-validating action ".ref($action). " ".$action->moniker);
-                    next unless $action->validate;
-                }
-            
-                $self->log->debug("Running action.");
-                $action->run; 
-            };
+            # Pull the action out of the request (again, since
+            # mappings may have affected parameters).  This
+            # returns the cached version unless the request has
+            # been changed by argument mapping from previous
+            # actions (Jifty::Request::Mapper)
+            my $action = $self->new_action_from_request($request_action);
+            next unless $action;
+            if ($request_action->modified) {
+                # If the request's action was changed, re-validate
+                $action->result(Jifty::Result->new);
+                $action->result->action_class(ref $action);
+                $self->response->result( $action->moniker => $action->result );
+                $self->log->debug("Re-validating action ".ref($action). " ".$action->moniker);
+                next unless $action->validate;
+            }
+
+            $self->log->debug("Running action.");
+            eval { $action->run; };
+            $request_action->has_run(1);
 
             if ( my $err = $@ ) {
                 # poor man's exception propagation
                 # We need to get "LAST RULE" exceptions back up to the dispatcher
-                die $err if ($err =~ /^LAST RULE/);
+                die $err if ( $err =~ /^LAST RULE/ );
                 $self->log->fatal($err);
+                $action->result->error(
+                    Jifty->config->framework("DevelMode")
+                    ? $err
+                    : "There was an error completing the request.  Please try again later."
+                );
             }
 
             # Fill in the request with any results that that action
@@ -294,149 +300,6 @@ Gets or sets the current L<Jifty::Request> object.
 =head3 response [VALUE]
 
 Gets or sets the current L<Jifty::Response> object.
-
-=head2 ACTIONS
-
-=head3 actions 
-
-Gets the actions that have been created with this framework with
-C<new_action> (whether automatically via a L<Jifty::Request>, or in
-Mason code), as L<Jifty::Action> objects.
-
-=cut
-
-sub actions {
-    my $self = shift;
-
-    $self->{'actions'} ||= {};
-    return
-        sort { ( $a->order || 0 ) <=> ( $b->order || 0 ) }
-        values %{ $self->{'actions'} };
-}
-
-sub _add_action {
-    my $self   = shift;
-    my $action = shift;
-
-    $self->{'actions'}{ $action->moniker } = $action;
-}
-
-=head3 allow_actions RESTRICTIONS
-
-Takes a list of strings or regular expressions, and adds them in order
-to the list of limits for the purposes of L</is_allowed>.  See
-L</restrict_actions> for the details of how limits are processed.
-
-=cut
-
-sub allow_actions {
-    my $self = shift;
-    $self->restrict_actions( allow => @_ );
-}
-
-=head3 deny_actions RESTRICTIONS
-
-Takes a list of strings or regular expressions, and adds them in order
-to the list of limits for the purposes of L</is_allowed>.  See
-L</restrict_actions> for the details of how limits are processed.
-
-=cut
-
-sub deny_actions {
-    my $self = shift;
-    $self->restrict_actions( deny => @_ );
-}
-
-=head3 restrict_actions POLARITY RESTRICTIONS
-
-Method that L</allow_actions> and and L</deny_actions> call
-internally; I<POLARITY> is either C<allow> or C<deny>.  Allow and deny
-limits are evaluated in the order they're called.  The last limit that
-applies will be the one which takes effect.  Regexes are matched
-against the class; strings are fully qualified with the application's
-I<ActionBasePath> (if they not already) and used as an exact match
-against the class name.
-
-If you call:
-
-    Jifty->web->allow_actions ( qr'.*' );
-    Jifty->web->deny_actions  ( qr'Foo' );
-    Jifty->web->allow_actions ( qr'FooBar' );
-    Jifty->web->deny_actions ( qr'FooBarDeleteTheWorld' );
-
-
-calls to MyApp::Action::Baz will succeed.
-calls to MyApp::Action::Foo will fail.
-calls to MyApp::Action::FooBar will pass.
-calls to MyApp::Action::TrueFoo will fail.
-calls to MyApp::Action::TrueFooBar will pass.
-calls to MyApp::Action::TrueFooBarDeleteTheWorld will fail.
-calls to MyApp::Action::FooBarDeleteTheWorld will fail.
-
-=cut
-
-sub restrict_actions {
-    my $self         = shift;
-    my $polarity     = shift;
-    my @restrictions = @_;
-
-    die "Polarity must be 'allow' or 'deny'"
-        unless $polarity eq "allow"
-        or $polarity     eq "deny";
-
-    $self->action_limits( [] ) unless $self->action_limits;
-
-    for my $restriction (@restrictions) {
-
-        # Fully qualify it if it's a string and not already so
-        my $base_path = Jifty->config->framework('ActionBasePath');
-        $restriction = $base_path . "::" . $restriction
-            unless ref $restriction
-            or $restriction =~ /^\Q$base_path\E/;
-
-        # Add to list of restrictions
-        push @{ $self->action_limits },
-            { $polarity => 1, restriction => $restriction };
-    }
-}
-
-=head3 is_allowed CLASS
-
-Returns false if the I<CLASS> name (which is fully qualified with the
-application's ActionBasePath if it is not already) is allowed to be
-executed.  See L</restrict_actions> above for the rules that the class
-name must pass.
-
-=cut
-
-sub is_allowed {
-    my $self  = shift;
-    my $class = shift;
-
-    my $base_path = Jifty->config->framework('ActionBasePath');
-    $class = $base_path . "::" . $class
-        unless $class =~ /^\Q$base_path\E/;
-
-    # Assume that it passes
-    my $allow = 1;
-
-    $self->action_limits( [] ) unless $self->action_limits;
-
-    for my $limit ( @{ $self->action_limits } ) {
-
-        # For each limit
-        if ( ( ref $limit->{restriction} and $class =~ $limit->{restriction} )
-            or ( $class eq $limit->{restriction} ) )
-        {
-
-            # If the restriction passes, set the current allow/deny
-            # bit according to if this was a positive or negative
-            # limit
-            $allow = $limit->{allow} ? 1 : 0;
-        }
-    }
-    return $allow;
-}
 
 =head3 form
 
@@ -509,10 +372,7 @@ sub new_action {
     $class = $1;    # 'untaint'
 
     # Prepend the base path (probably "App::Action") unless it's there already
-    my $base_path = Jifty->config->framework('ActionBasePath');
-    $class = $base_path . "::" . $class
-        unless $class =~ /^\Q$base_path\E::/
-        or $class     =~ /^Jifty::Action::/;
+    $class = Jifty->api->qualify($class);
 
     # The implementation class is provided by the client, so this
     # isn't a "shouldn't happen"
@@ -527,7 +387,7 @@ sub new_action {
         return;
     }
 
-    $self->_add_action($action);
+    $self->{'actions'}{ $action->moniker } = $action;
 
     return $action;
 }
@@ -632,13 +492,25 @@ sub redirect {
     my $self = shift;
     my $page = shift || $self->next_page;
 
+    my @unrun = grep {not $_->has_run} Jifty->web->request->actions;
+
     if (   $self->response->results
-        or $self->request->state_variables )
+        or $self->request->state_variables
+        or @unrun )
     {
         my $request = Jifty::Request->new();
         $request->path($page);
         $request->add_state_variable( key => $_->key, value => $_->value )
           for $self->request->state_variables;
+        for (@unrun) {
+            $request->add_action(
+                moniker   => $_->moniker,
+                class     => $_->class,
+                order     => $_->order,
+                active    => $_->active,
+                arguments => $_->arguments,
+            );
+        }
         my $cont = Jifty::Continuation->new(
             request  => $request,
             response => $self->response,
@@ -860,10 +732,14 @@ sub return {
     $self->link( call => $continuation, %args );
 }
 
-=head3 render_messages
+=head3 render_messages [MONIKER]
 
 Outputs any messages that have been added, in a <div id="messages">
 tag.  Messages are added by calling L<Jifty::Result/message>.
+
+If a moniker is specified, only messages for that moniker 
+are rendered.
+
 
 =cut
 
@@ -871,43 +747,28 @@ tag.  Messages are added by calling L<Jifty::Result/message>.
 
 sub render_messages {
     my $self = shift;
-
+    my $only_moniker = '';
+    $only_moniker = shift if (@_);
     my %results = $self->response->results;
 
     return '' unless %results;
 
+    my @monikers = ($only_moniker) || sort keys %results;
+
     for my $type (qw(error message)) {
-        next unless grep { $results{$_}->$type() } keys %results;
+        next unless grep { defined $results{$_}  and $results{$_}->$type() } @monikers;
 
         my $plural = $type . "s";
         $self->out(qq{<div id="$plural">});
-        foreach my $moniker ( keys %results ) {
+        foreach my $moniker ( @monikers ) {
             if ( $results{$moniker}->$type() ) {
-                $self->out(qq{<div class="$type $moniker">});
-                $self->out( $results{$moniker}->$type() );
-                $self->out(qq{</div>});
+                $self->out( qq{<div class="$type $moniker">}
+                    . $results{$moniker}->$type()
+                    . qq{</div>} );
             }
         }
         $self->out(qq{</div>});
     }
-    return '';
-}
-
-=head3 render_request_debug_info
-
-Outputs the request arguments.
-
-=cut
-
-sub render_request_debug_info {
-    my $self = shift;
-    my $m    = $self->mason;
-    use YAML;
-    $m->out('<div class="debug">');
-    $m->out('<hr /><h1>Request args</h1><pre>');
-    $m->out( YAML::Dump( { $m->request_args } ) );
-    $m->out('</pre></div>');
-
     return '';
 }
 
@@ -924,7 +785,7 @@ sub query_string {
     my @params;
     while ( ( my $key, my $value ) = each %args ) {
         push @params,
-            $key . "=" . $self->mason->interp->apply_escapes( $value, 'u' );
+            $key . "=" . $self->escape_uri( $value );
     }
     return ( join( ';', @params ) );
 }
@@ -937,7 +798,18 @@ HTML-escapes the given string and returns it
 
 sub escape {
     my $self = shift;
-    return join '', map {$self->mason->interp->apply_escapes( $_, 'h' )} @_;
+    return join '', map {Jifty::View::Mason::Handler::escape_utf8( \$_ ); $_} @_;
+}
+
+=head3 escape_uri STRING
+
+URI-escapes the given string and returns it
+
+=cut
+
+sub escape_uri {
+    my $self = shift;
+    return join '', map {Jifty::View::Mason::Handler::escape_uri( \$_ ); $_} @_;
 }
 
 =head3 navigation
@@ -1119,7 +991,8 @@ sub serve_fragments {
         } while ($f = $f->parent);
         
         for $f (reverse @regions) {
-            my $new = Jifty::Web::PageRegion->new(
+            my $new = $self->get_region( join '-', grep {$_} $self->qualified_region, $f->name );
+            $new ||= Jifty::Web::PageRegion->new(
                 name           => $f->name,
                 path           => $f->path,
                 region_wrapper => $f->wrapper,

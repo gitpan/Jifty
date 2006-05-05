@@ -2,11 +2,12 @@ use warnings;
 use strict;
 
 package Jifty::Script::App;
-use base qw'App::CLI::Command Class::Accessor';
+use base qw'App::CLI::Command Class::Accessor::Fast';
 
 use File::Copy;
 use Jifty::Config;
 use Jifty::YAML;
+use File::Basename;
 
 __PACKAGE__->mk_accessors(qw/prefix dist_name mod_name/);
 
@@ -67,10 +68,18 @@ sub run {
 sub _install_jifty_binary {
     my $self = shift;
     my $prefix = $self->prefix;
+    my $basename = basename($0);
+
     # Copy our running copy of 'jifty' to bin/jifty
-    copy($0, "$prefix/bin/jifty");
+    copy($0, "$prefix/bin/$basename");
     # Mark it executable
-    chmod(0555, "$prefix/bin/jifty");
+    chmod(0555, "$prefix/bin/$basename");
+
+    # Do the same for .bat if we are on a DOSish platform
+    if (-e "$0.bat") {
+        copy("$0.bat", "$prefix/bin/$basename.bat");
+        chmod(0555, "$prefix/bin/$basename.bat");
+    }
 }
 
 
@@ -123,9 +132,11 @@ sub _directories {
         var
         var/sessions
         var/mason
-        web
-        web/templates
-        web/static
+        share
+        share/po
+        share/web
+        share/web/templates
+        share/web/static
         lib/__APP__/Model
         lib/__APP__/Action
         t

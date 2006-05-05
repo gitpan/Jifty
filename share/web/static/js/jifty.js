@@ -39,6 +39,15 @@ Action.prototype = {
         return elements;
     },
 
+    getField: function(name) {
+        var elements = this.fields();
+        for (var i = 0; i < elements.length; i++) {
+            if (Form.Element.getField(elements[i]) == name)
+                return elements[i];
+        }
+        return null;
+    },
+
     // Serialize and return all fields needed for this action
     serialize: function() {
         var fields = this.fields();
@@ -54,7 +63,7 @@ Action.prototype = {
     hasUpload: function() {
         var fields = this.fields();
         for (var i = 0; i < fields.length; i++) {
-            if (fields[i].getAttribute("type") == "file")
+            if ((fields[i].getAttribute("type") == "file") && fields[i].value)
                 return true;
         }
         return false;
@@ -378,8 +387,11 @@ function update() {
     for (var i = 0; i < named_args['actions'].length; i++) {
         var moniker = named_args['actions'][i];
         var a = new Action(moniker);
-        if (a.register)
+        if (a.register) {
+            if (a.hasUpload())
+                return true;
             request['actions'][moniker] = a.data_structure();
+        }
     }
 
     request['fragments'] = {};
@@ -404,6 +416,14 @@ function update() {
         if (element == null)
             continue;
 
+        // If we're removing the element, do it now
+        // XXX TODO: Effects on this?
+        if (f['mode'] == "Delete") {
+            fragments[name] = null;
+            Element.remove(element);
+            continue;
+        }
+
         f['is_new'] = (fragments[name] ? false : true);
         // If it's new, we need to create it so we can dump it
         if (f['is_new']) {
@@ -411,14 +431,21 @@ function update() {
             f['parent'] = null;
             if (f['mode'] && ((f['mode'] == "Before") || (f['mode'] == "After")))
                 element = element.parentNode;
-            while ((element != null) && (f['parent'] == null)) {
+            while ((element != null) && (element.getAttribute) && (f['parent'] == null)) {
                 if (/^region-/.test(element.getAttribute("id")))
                     f['parent'] = element.getAttribute("id").replace(/^region-/,"");
                 element = element.parentNode;
             }
 
+            if (f['parent']) {
+                f['region'] = name = f['parent'] + '-' + name;
+            }
+
             // Make the region (for now)
             new Region(name, f['args'], f['path'], f['parent']);
+        } else if (f['path'] == null) {
+            // If they didn't know tha path, fill it in now
+            f['path'] == fragments[name].path;
         }
 
         // Update with all new values
@@ -526,6 +553,7 @@ function update() {
     new Ajax.Request(document.URL,
                      options
                     );
+    return false;
 }
 
 function trace( msg ){
@@ -536,51 +564,49 @@ function trace( msg ){
 
 
 function show_wait_message (){
-    new Effect.Appear('jifty-wait-message', {duration: 0.5});
+    if ($('jifty-wait-message'))
+        new Effect.Appear('jifty-wait-message', {duration: 0.5});
 }
 
 function hide_wait_message (){
-    new Effect.Fade('jifty-wait-message', {duration: 0.2});
+    if ($('jifty-wait-message'))
+        new Effect.Fade('jifty-wait-message', {duration: 0.2});
 }
 
 
 
 Jifty.Autocompleter = Class.create();
 Object.extend(Object.extend(Jifty.Autocompleter.prototype, Ajax.Autocompleter.prototype), {
-  initialize: function(element, update, url, options) {
-    this.baseInitialize(element, update, options);
-    this.options.asynchronous  = true;
-    this.options.method        = 'get';
-    this.options.onComplete    = this.onComplete.bind(this);
-    this.options.defaultParams = this.options.parameters || null;
-    this.url                   = url;
+  initialize: function(field, div) {
+    this.field  = $(field);
+    this.action = Form.Element.getAction(this.field);
+    this.url    = '/__jifty/autocomplete.xml';
+
+
+    this.baseInitialize(this.field, $(div));
   },
 
   getUpdatedChoices: function() {
-    entry = encodeURIComponent("J:A-autocomplete")
-        + "=" +encodeURIComponent("Jifty::Action::Autocomplete");
+      var request = { path: this.url, actions: {} };
 
-    entry += '&' + encodeURIComponent("J:A:F-argument-autocomplete") 
-        + "=" + encodeURIComponent(this.options.paramName);
-      
-    entry += '&' + encodeURIComponent("J:A:F-action-autocomplete") 
-        + "=" + encodeURIComponent(
-                        Form.Element.getMoniker(this.element)
-                        );
+      var a = {};
+      a['moniker'] = 'autocomplete';
+      a['class']   = 'Jifty::Action::Autocomplete';
+      a['fields']  = {};
+      a['fields']['moniker']  = this.action.moniker;
+      a['fields']['argument'] = Form.Element.getField(this.field);
+      request['actions']['autocomplete'] = a;
+      request['actions'][this.action.moniker] = this.action.data_structure();
+      request['actions'][this.action.moniker]['active']  = 0;
 
-    entry += '&'+ encodeURIComponent("J:ACTIONS") + '=' + encodeURIComponent("autocomplete");
+      var options = { postBody: JSON.stringify(request),
+                      onComplete: this.onComplete.bind(this),
+                      requestHeaders: ['Content-Type', 'text/x-json']
+      };
 
-
-    this.options.parameters = this.options.callback ?
-      this.options.callback(this.element, entry) : entry;
-
-    if(this.options.defaultParams)
-      this.options.parameters += '&' + this.options.defaultParams;
-      
-    var action =  Form.Element.getAction(this.element);
-      this.options.parameters += '&' + action.serialize();
-
-    new Ajax.Request(this.url, this.options);
+      new Ajax.Request(this.url,
+                       options
+                       );
   }
 
 

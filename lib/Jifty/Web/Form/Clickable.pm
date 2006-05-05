@@ -12,7 +12,7 @@ either a button or a link.
 
 =cut
 
-use base qw/Jifty::Web::Form::Element Class::Accessor/;
+use base qw/Jifty::Web::Form::Element Class::Accessor::Fast/;
 
 =head2 accessors
 
@@ -25,10 +25,10 @@ L<Jifty::Web::Form::Element/accessors>.
 
 sub accessors {
     shift->SUPER::accessors,
-        qw(url escape_label tooltip continuation call returns submit preserve_state);
+        qw(url escape_label tooltip continuation call returns submit preserve_state button);
 }
 __PACKAGE__->mk_accessors(
-    qw(url escape_label tooltip continuation call returns submit preserve_state)
+    qw(url escape_label tooltip continuation call returns submit preserve_state button)
 );
 
 =head2 new PARAMHASH
@@ -97,6 +97,16 @@ A hash reference of query parameters that go on the link or button.
 These will end up being submitted exactly like normal query
 parameters.
 
+=item button
+
+By default, Jifty will attempt to make the clickable into a link
+rather than a button, if there are no actions to run on submit.
+Providing a true value for C<button> forces L<generate> to produce a
+L<Jifty::Web::Form::Clickable::InlineButton> instead of a
+L<Jifty::Web::Form::Link>.  Note that providing a false value will
+B<not> guarantee that you get a link, as a button may be necessary
+based on the presence of the L</submit> parameter.
+
 =item Anything from L<Jifty::Web::Form::Element>
 
 =back
@@ -118,7 +128,8 @@ sub new {
         continuation   => Jifty->web->request->continuation,
         submit         => [],
         preserve_state => 0,
-	parameters     => {},
+        parameters     => {},
+        button         => 0,
         @_,
     );
 
@@ -132,6 +143,11 @@ sub new {
         $args{submit} = [ $args{submit} ] unless ref $args{submit} eq "ARRAY";
         $args{submit}
             = [ map { ref $_ ? $_->moniker : $_ } @{ $args{submit} } ];
+
+        # If they have an onclick, add any and all submit actions to the onclick's submit list
+        if ($args{onclick}) {
+            $args{onclick} = [ (ref $args{onclick} eq "ARRAY" ? @{ $args{onclick} } : $args{onclick}), map { submit => $_ }, @{$args{submit}} ];
+        }
     }
 
     for my $field ( $self->accessors() ) {
@@ -323,10 +339,6 @@ sub post_parameters {
 
     my %parameters = ( %{ $self->{fallback} || {} }, $self->parameters );
 
-    # Actions to be submitted
-    $parameters{"J:ACTIONS"} = join( ';', @{ $self->submit } )
-        if $self->submit;
-
     my ($root) = $ENV{'REQUEST_URI'} =~ /([^\?]*)/;
 
     # Add a redirect, if this isn't to the right page
@@ -336,6 +348,11 @@ sub post_parameters {
             arguments => { url => $self->url } );
         $parameters{ $redirect->register_name } = ref $redirect;
         $parameters{ $redirect->form_field_name('url') } = $self->url;
+        $parameters{"J:ACTIONS"} = join( ';', @{ $self->submit }, $redirect->moniker )
+          if $self->submit;
+    } else {
+        $parameters{"J:ACTIONS"} = join( ';', @{ $self->submit } )
+          if $self->submit;
     }
 
     return %parameters;
@@ -463,7 +480,7 @@ sub generate {
         }
     }
 
-    return ( ( not( $self->submit ) || @{ $self->submit } )
+    return ( ( not( $self->submit ) || @{ $self->submit } || $self->button )
         ? $self->as_button(@_)
         : $self->as_link(@_) );
 }

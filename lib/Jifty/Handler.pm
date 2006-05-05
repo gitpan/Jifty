@@ -24,8 +24,9 @@ handlers.
 
 =cut
 
-use base qw/Class::Accessor/;
-use Hook::LexWrap;
+use base qw/Class::Accessor::Fast/;
+use Hook::LexWrap qw(wrap);
+use Module::Refresh ();
 __PACKAGE__->mk_accessors(qw(mason dispatcher static_handler cgi apache));
 
 =head2 new
@@ -51,9 +52,9 @@ sub new {
     $self->dispatcher(
         Jifty->config->framework('ApplicationClass') . "::Dispatcher" );
     Jifty::Util->require( $self->dispatcher );
-    $self->mason( Jifty::MasonHandler->new( $self->mason_config ) );
+    $self->mason( Jifty::View::Mason::Handler->new( $self->mason_config ) );
 
-    $self->static_handler(Jifty::Handler::Static->new());
+    $self->static_handler(Jifty::View::Static::Handler->new());
 
     return $self;
 }
@@ -90,8 +91,17 @@ sub mason_config {
     my %config = (
         static_source => 1,
         use_object_files => 1,
+        preprocess => sub {
+            # Force UTF-8 semantics on all our components by
+            # prepending this block to all components as Mason
+            # components defaults to parse the text as Latin-1
+            ${$_[0]} =~ s!^!<\%INIT>use utf8;</\%INIT>\n!;
+        },
         data_dir =>  Jifty::Util->absolute_path( Jifty->config->framework('Web')->{'DataDir'} ),
-        allow_globals => [qw[$JiftyWeb], @{Jifty->config->framework('Web')->{'Globals'} || []}],
+        allow_globals => [
+            qw[ $JiftyWeb ],
+            @{Jifty->config->framework('Web')->{'Globals'} || []},
+        ],
         comp_root     => [ 
                           [application =>  Jifty::Util->absolute_path( Jifty->config->framework('Web')->{'TemplateRoot'} )],
                           [jifty => Jifty->config->framework('Web')->{'DefaultTemplateRoot'}],
@@ -157,6 +167,7 @@ sub handle_request {
     Jifty->web->response( Jifty::Response->new );
     Jifty->web->setup_session;
     Jifty->web->session->set_cookie;
+    Jifty->api->reset;
 
     Jifty->log->debug( "Received request for " . Jifty->web->request->path );
 

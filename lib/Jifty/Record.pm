@@ -58,7 +58,7 @@ sub create {
     unless ( $self->check_create_rights(@_) ) {
         $self->log->error( $self->current_user->id . " tried to create a ",
             ref $self, " without permission" );
-        wantarray ? return ( 0, 'Permission denied' ) : return (0);
+        wantarray ? return ( 0, _('Permission denied') ) : return (0);
     }
 
     foreach my $key ( keys %attribs ) {
@@ -72,7 +72,7 @@ sub create {
 
         # remove blank values. We'd rather have nulls
         if ( exists $attribs{$key}
-            and ( not defined $attribs{$key} or $attribs{$key} eq "" ) )
+            and ( not defined $attribs{$key} or (not ref $attribs{$key} and $attribs{$key} eq "" )) )
         {
             delete $attribs{$key};
         }
@@ -80,7 +80,7 @@ sub create {
 
     my($id,$msg) = $self->SUPER::create(%attribs);
     $self->load_by_cols( id => $id ) if ($id);
-    return wantarray ? ( $id, "Record created" ) : $id;
+    return wantarray ? ( $id, _("Record created") ) : $id;
 }
 
 
@@ -219,7 +219,7 @@ sub _set {
 
     unless ($self->check_update_rights(@_)) {
         Jifty->log->logcluck("Permission denied");
-        return (0, 'Permission denied');
+        return (0, _('Permission denied'));
     }
     $self->SUPER::_set(@_);
 }
@@ -234,12 +234,9 @@ sub _value {
     }
     my $value = $self->SUPER::_value( $column => @_ );
     return $value if ref $value or $self->column($column)->type eq 'blob';
-    return Encode::decode_utf8($value);
-#   This is the "Right' way to do things according to audrey, but it breaks
-#    
-#    my $value = $self->SUPER::_value(@_);
-#    utf8::upgrade($value) if defined $value;
-#    $value;
+
+    Encode::_utf8_on($value) if defined $value;
+    $value;
 }
 
 
@@ -281,7 +278,7 @@ sub delete {
     my $self = shift;
     unless ($self->check_delete_rights(@_)) {
             Jifty->log->logcluck("Permission denied");
-            return(0, 'Permission denied');
+            return(0, _('Permission denied'));
         }
     $self->SUPER::delete(@_); 
 }
@@ -322,6 +319,12 @@ This should be global within a given Jifty application instance.
 
 sub cache_key_prefix {
     Jifty->config->framework('Database')->{'Database'};
+}
+
+sub _cache_config {
+    {   'cache_p'       => 1,
+        'cache_for_sec' => 60,
+    };
 }
 
 1;

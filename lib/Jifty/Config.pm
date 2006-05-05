@@ -23,7 +23,7 @@ Hash::Merge::set_behavior('RIGHT_PRECEDENT');
 require Module::Pluggable;
 
 use File::Basename();
-use base qw/Class::Accessor/;
+use base qw/Class::Accessor::Fast/;
 
 use vars qw/$CONFIG/;
 
@@ -137,6 +137,9 @@ sub load {
     # Whatever's in the stash overrides anything we guess
     $self->stash( Hash::Merge::merge( $self->guess, $self->stash ));
 
+    # There are a couple things we want to guess that we don't want
+    # getting stuck in a default config file for an app
+    $self->stash( Hash::Merge::merge( $self->defaults, $self->stash));
 
     # Finally, check for global postload hooks (these are used by the
     # test harness)
@@ -201,11 +204,12 @@ sub guess {
         $app_name =  Jifty::Util->default_app_name;
     }
 
-    my $app_class = $app_name;
+    my $app_class =  $self->stash->{framework}->{ApplicationClass} ||$app_name;
     $app_class =~ s/-/::/g;
     my $db_name = lc $app_name;
     $db_name =~ s/-/_/g;
-    return {
+
+    my $guess = {
         framework => {
             AdminMode        => 1,
             DevelMode        => 1,
@@ -213,6 +217,7 @@ sub guess {
             ApplicationClass => $app_class,
             CurrentUserClass => $app_class . "::CurrentUser",
             ApplicationName  => $app_name,
+            LogLevel         => 'INFO',
             Database         => {
                 Database =>  $db_name,
                 Driver   => "SQLite",
@@ -224,15 +229,16 @@ sub guess {
             },
             Mailer     => 'Sendmail',
             MailerArgs => [],
+            L10N       => {
+                PoDir => "%share/po%",
+            },
             Web        => {
-                DefaultStaticRoot => Jifty::Util->share_root . '/web/static',
-                DefaultTemplateRoot => Jifty::Util->share_root . '/web/templates',
                 Port => '8888',
                 BaseURL => 'http://localhost',
                 SessionDir  => "var/session",
                 DataDir     => "var/mason",
-                StaticRoot   => "web/static",
-                TemplateRoot => "web/templates",
+                StaticRoot   => "share/web/static",
+                TemplateRoot => "share/web/templates",
                 ServeStaticFiles => 1,
                 MasonConfig => {
                     autoflush    => 0,
@@ -243,6 +249,33 @@ sub guess {
                 Globals      => [],
             },
         },
+    };
+
+    return $self->_expand_relative_paths($guess);
+
+}
+
+
+=head2 defaults
+
+We have a couple default values that shouldn't be included in the
+"guessed" config, as that routine is used when initializing a new 
+application. Generally, these are platform-specific file locations.
+
+=cut
+
+sub defaults {
+    my $self = shift;
+    return {
+        framework => {
+            L10N => {
+                DefaultPoDir => Jifty::Util->share_root . '/po',
+            },
+            Web => {
+                DefaultStaticRoot => Jifty::Util->share_root . '/web/static',
+                DefaultTemplateRoot => Jifty::Util->share_root . '/web/templates',
+            }
+        }
     };
 
 }

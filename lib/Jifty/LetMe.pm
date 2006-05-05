@@ -2,11 +2,11 @@ use warnings;
 use strict;
 
 package Jifty::LetMe;
-use Digest::MD5;
-use Math::BigInt;
-use String::Koremutake;
+use Digest::MD5 ();
+use Math::BigInt ();
+use String::Koremutake ();
 
-use base qw/Jifty::Object Class::Accessor/;
+use base qw/Jifty::Object Class::Accessor::Fast/;
 
 __PACKAGE__->mk_accessors ( qw/checksum_provided email path args until user/);
 

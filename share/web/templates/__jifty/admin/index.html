@@ -30,19 +30,29 @@ for my $model ( __PACKAGE__->jifty_app_models ) {
 </%init>
 <&|/_elements/wrapper, title => 'Jifty Administrative Console' &>
 
-<h1>Database Administration</h1>
+<h1><%_('Database Administration')%></h1>
 
-<p>This console lets you manage the records in your Jifty database. Below, you should see a list of all your database tables. Feel free to go through and add, delete or modify records.</p>
+<p><%_('This console lets you manage the records in your Jifty database. Below, you should see a list of all your database tables. Feel free to go through and add, delete or modify records.')%></p>
 
-<p>To disable this administrative console, add "framework: AdminMode: 0" to your application's configuration file.</p>
+<p><%_(q{To disable this administrative console, add "framework: AdminMode: 0" to your application's configuration file.})%></p>
     
-
+<h2><%_('Models')%></h2>
 <ul>
 % foreach my $model (@models) {
 % next unless ($model =~ /^(?:.*)::(.*?)$/);
 % my $type = $1;
-<li><% Jifty->web->link( url => '/__jifty/admin/'.$type, label => $type)%>
+<li><% Jifty->web->link( url => '/__jifty/admin/model/'.$type, label => $type)%>
 %}
 </ul>
+
+<h2><%_('Actions')%></h2>
+<ul>
+% foreach my $action (Jifty->api->actions) {
+<li><% Jifty->web->link( url => '/__jifty/admin/action/'.$action, label => $action) %>
+% }
+</ul>
+
+<h2>Done?</h2>
+<% Jifty->web->return( to => "/", label => 'Back to the application') %>
 
 </&>

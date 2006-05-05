@@ -2,8 +2,10 @@ use warnings;
 use strict;
 
 package Jifty;
-
-our $VERSION = '0.60321';
+use encoding 'utf8';
+# Work around the fact that Time::Local caches thing on first require
+BEGIN { local $ENV{'TZ'} = "GMT";  require Time::Local;}
+our $VERSION = '0.60505';
 
 =head1 NAME
 
@@ -60,7 +62,7 @@ probably a better place to start.
 use base qw/Jifty::Object/;
 use Jifty::Everything;
 
-use vars qw/$HANDLE $CONFIG $LOGGER $DISPATCHER/;
+use vars qw/$HANDLE $CONFIG $LOGGER $HANDLER $DISPATCHER $API/;
 
 =head1 METHODS
 
@@ -103,6 +105,9 @@ sub new {
     # Load the configuration. stash it in ->config
     __PACKAGE__->config( Jifty::Config->new() );
 
+    Jifty::I18N->new(); # can't do this before we have the config set up
+
+
     # Now that we've loaded the configuration, we can remove the temporary 
     # Jifty::DBI::Record baseclass for records and insert our "real" baseclass,
     # which is likely Record::Cachable or Record::Memcached
@@ -116,6 +121,7 @@ sub new {
 
     __PACKAGE__->dispatcher(Jifty::Dispatcher->new());
     __PACKAGE__->handler(Jifty::Handler->new());
+    __PACKAGE__->api(Jifty::API->new());
 
 
    # Let's get the database rocking and rolling
@@ -158,8 +164,8 @@ An accessor for our L<Jifty::Handler> object.
 
 sub handler {
     my $class = shift;
-    $LOGGER = shift if (@_);
-    return $LOGGER;
+    $HANDLER = shift if (@_);
+    return $HANDLER;
 }
 
 =head2 handle
@@ -177,9 +183,8 @@ sub handle {
 
 =head2 dispatcher
 
-An accessor for the C<Jifty::Dispatcher> object that we use to make decisions about how
-to dispatch each request made by a web client.
-
+An accessor for the C<Jifty::Dispatcher> object that we use to make
+decisions about how to dispatch each request made by a web client.
 
 =cut
 
@@ -187,6 +192,19 @@ sub dispatcher {
     my $class = shift;
     $DISPATCHER = shift if (@_);
     return $DISPATCHER;
+}
+
+=head2 api
+
+An accessor for the L<Jifty::API> object that publishes and controls
+information about the application's L<Jifty::Action>s.
+
+=cut
+
+sub api {
+    my $class = shift;
+    $API = shift if (@_);
+    return $API;
 }
 
 =head2 web
@@ -203,7 +221,8 @@ sub web {
 
 =head2 setup_database_connection
 
-Set up our database connection. Optionally takes a param hash with a single argument
+Set up our database connection. Optionally takes a param hash with a
+single argument.  This method is automatically called by L</new>.
 
 =over
 

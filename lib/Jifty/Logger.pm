@@ -9,7 +9,7 @@ Jifty::Logger -- A master class for Jifty's logging framwork
 
 =head1 DESCRIPTION
 
-Uses L<Log4Perl> to log messages.  By default, logs all messages to
+Uses C<Log::Log4perl> to log messages.  By default, logs all messages to
 the screen.
 
 =cut
@@ -26,7 +26,7 @@ This class method instantiates a new C<Jifty::Logger> object. This
 object deals with logging for the system.
 
 Takes an optional name for this Jifty's logging "component" - See
-L<Log4Perl> for some detail about what that is.  It sets up a "warn"
+L<Log::Log4perl> for some detail about what that is.  It sets up a "warn"
 handler which logs warnings to the specified component.
 
 =cut
@@ -49,9 +49,10 @@ sub new {
         } elsif ( -f $log_config and -r $log_config ) {
             Log::Log4perl->init($log_config);
         } else {
+            my $log_level = Jifty->config->framework('LogLevel');
             my %default = (
-                'log4perl.rootLogger'        => "INFO,Screen",
-                '#log4perl.logger.SchemaTool' => "INFO,Screen",
+                'log4perl.rootLogger'        => "$log_level,Screen",
+                '#log4perl.logger.SchemaTool' => "$log_level,Screen",
                 'log4perl.appender.Screen'   => 'Log::Log4perl::Appender::Screen',
                 'log4perl.appender.Screen.stderr' => 1,
                 'log4perl.appender.Screen.layout' =>

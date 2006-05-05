@@ -26,20 +26,20 @@ specified by providing at most one of the following keys:
 =item append => PATH
 
 Add the given C<PATH> as a new fragment, just before the close of the
-CSS selector given by C<element>, which defaults to the end of the
+CSS selector given by L</element>, which defaults to the end of the
 current region.
 
 =item prepend => PATH
 
 Add the given C<PATH> as a new fragment, just after the start of the
-CSS selector given by C<element>, which defaults to the start of the
+CSS selector given by L</element>, which defaults to the start of the
 current region.
 
 =item replace_with => PATH
 
 Replaces the region specified by the C<region> parameter (which
 defaults to the current region) with the fragment located at the given
-C<PATH>.
+C<PATH>.  If C<undef> is passed as the C<PATH>, acts like a L</delete>.
 
 =item refresh => REGION
 
@@ -48,8 +48,12 @@ L<Jifty::Web::PageRegion> object, or the fully qualified name of such.
 
 =item refresh_self => 1
 
-Refreshes the current region; this is the default action, if C<args>
-are supplied, but no other mode is given.
+Refreshes the current region; this is the default action, if a
+non-empty C<args> is supplied, but no other mode is given.
+
+=item delete => REGION
+
+Removes the given C<REGION> from the page, permanently.
 
 =back
 
@@ -65,7 +69,7 @@ region.
 =item element => CSS SELECTOR
 
 A css selector specifying where the new region should be placed; used
-with C<append> and C<prepend>, above.  The
+with L</append> and L</prepend>, above.  The
 L<Jifty::Web::PageRegion/get_element> method may be useful in
 specifying elements of parent page regions.
 
@@ -93,7 +97,7 @@ can be used to change the duration of the effect, for instance.
 
 =cut
 
-use base qw/Jifty::Object Class::Accessor/;
+use base qw/Jifty::Object Class::Accessor::Fast/;
 use Jifty::JSON;
 
 =head2 handlers
@@ -151,14 +155,24 @@ sub javascript {
                 @args{qw/mode path/} = ('Top', $hook->{prepend});
                 $hook->{element} ||= "#region-".$hook->{region};
             } elsif (exists $hook->{replace_with}) {
-                @args{qw/mode path region/} = ('Replace', $hook->{replace_with}, $hook->{region});
+                if (defined $hook->{replace_with}) {
+                    @args{qw/mode path region/} = ('Replace', $hook->{replace_with}, $hook->{region});
+                } else {
+                    @args{qw/mode region/} = ('Delete', $hook->{region});
+                }
             } elsif (exists $hook->{refresh}) {
                 my $region = ref $hook->{refresh} ? $hook->{refresh} : Jifty->web->get_region($hook->{refresh});
-                warn "Can't find region ".$hook->{refresh} and next unless $region;
-                @args{qw/mode path region/} = ('Replace', $hook->{refresh}->path, $hook->{refresh});
-            } elsif ((exists $hook->{refresh_self} and Jifty->web->current_region) or $hook->{args}) {
+                if ($region) {
+                    @args{qw/mode path region/} = ('Replace', $region->path, $region->qualified_name);
+                } else {
+                    $self->log->debug("Can't find region ".$hook->{refresh});
+                    @args{qw/mode path region/} = ('Replace', undef, $hook->{refresh});
+                }
+            } elsif ((exists $hook->{refresh_self} and Jifty->web->current_region) or ($hook->{args} and %{$hook->{args}})) {
                 # If we just pass arguments, treat as a refresh_self
                 @args{qw/mode path region/} = ('Replace', Jifty->web->current_region->path, Jifty->web->current_region);
+            } elsif (exists $hook->{delete}) {
+                @args{qw/mode region/} = ('Delete', $hook->{delete});
             } else {
                 # If we're not doing any of the above, skip this one
                 next;
@@ -181,11 +195,23 @@ sub javascript {
 
             push @fragments, \%args;
         }
-        $response .= qq| $trigger="update( @{[ Jifty::JSON::objToJson( {actions => \@actions, fragments => \@fragments }, {singlequote => 1}) ]} );|;
-        $response .= qq|return false;"|;
+
+        my $update = "update( ". Jifty::JSON::objToJson( {actions => \@actions, fragments => \@fragments }, {singlequote => 1}) ." )";
+        $response .= $self->javascript_preempt ? qq| $trigger="return $update"| : qq| $trigger="$update; return true;"|;
     }
     return $response;
 }
+
+=head2 javascript_preempt
+
+Returns true if the the javascript's handlers should prevent the web
+browser's standard effects from happening; that is, for C<onclick>, it
+prevents buttons from submitting and the like.  The default is to
+return true, but this can be overridden.
+
+=cut
+
+sub javascript_preempt { return 1 };
 
 =head2 class
 

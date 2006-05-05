@@ -10,13 +10,15 @@ Jifty::Everything - Load all of the important Jifty modules at once.
 =cut
 
 use Jifty ();
+use Jifty::I18N ();
 use Jifty::Dispatcher ();
 use Jifty::Object ();
 use Jifty::Config ();
 use Jifty::Handle ();
 use Jifty::ClassLoader ();
 use Jifty::Util ();
-
+use Jifty::API ();
+use Jifty::DateTime ();
 use Jifty::Record ();
 use Jifty::Collection ();
 use Jifty::Action ();
@@ -32,11 +34,11 @@ use Jifty::LetMe ();
 
 use Jifty::Logger ();
 use Jifty::Handler ();
-use Jifty::Handler::Static ();
-use Jifty::MasonHandler ();
+use Jifty::View::Static::Handler ();
+use Jifty::View::Mason::Handler ();
 
-use Jifty::Model::Schema ();
-
+use Jifty::Model::Metadata ();
+use Jifty::Model::Session ();
 
 
 use Jifty::Request ();

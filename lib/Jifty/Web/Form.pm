@@ -3,7 +3,7 @@ use strict;
  
 package Jifty::Web::Form;
 
-use base qw/Jifty::Object Class::Accessor/;
+use base qw/Jifty::Object Class::Accessor::Fast/;
 
 __PACKAGE__->mk_accessors(qw(actions printed_actions name call is_open));
 
@@ -149,7 +149,7 @@ sub start {
     my %args = (@_);
 
     if ($self->is_open) {
-        Jifty->logger->warning("Trying to open a form when we already have one open");
+        $self->log->warn("Trying to open a form when we already have one open");
     }
 
     for (keys %args) {
@@ -196,7 +196,7 @@ sub end {
     my $self = shift;
 
     unless ($self->is_open) {
-        Jifty->logger->warning("Trying to close a form when we don't have one open");
+        $self->log->warn("Trying to close a form when we don't have one open");
     }
     Jifty->web->out( qq!<div class="hidden">\n! );
 
