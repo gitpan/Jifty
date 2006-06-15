@@ -31,13 +31,13 @@ Continuations are run after any actions have run.  When a continuation
 is run, it restores the request that it has saved away into it, and
 pulls into that request the values any return values that were
 specified when it was created.  The continuations code block, if any,
-is then called, and then the filled-in request is then run
-L<Jifty::Web/handle_request>.
+is then called, and then the filled-in request is then passed to the
+L<Jifty::Dispatcher>.
 
 =cut
 
 use Jifty::Everything;
-use Clone;
+use Storable 'dclone';
 
 use base qw/Class::Accessor::Fast/;
 
@@ -109,7 +109,7 @@ sub new {
 
     # We're cloning most of our attributes from a previous continuation
     if ($args{clone} and Jifty->web->session->get_continuation($args{clone})) {
-        $self = Clone::clone(Jifty->web->session->get_continuation($args{clone}));
+        $self = dclone(Jifty->web->session->get_continuation($args{clone}));
         for (grep {/^J:A/} keys %{$args{request}->arguments}) {
             $self->request->argument($_ => $args{request}->arguments->{$_});
         }
@@ -168,7 +168,7 @@ sub call {
           if $self->request->path =~ m{[^A-Za-z0-9\-_.!~*'()/?&;+]};
 
         # Clone our request
-        my $request = Clone::clone($self->request);
+        my $request = dclone($self->request);
         
         # Fill in return value(s) into correct part of $request
         $request->do_mapping;
@@ -178,7 +178,7 @@ sub call {
         # in.  For safety, monikers from the saved continuation
         # override those from the request prior to the call
         if (Jifty->web->response->results) {
-            $response = Clone::clone(Jifty->web->response);
+            $response = dclone(Jifty->web->response);
             my %results = $self->response->results;
             $response->result($_ => $results{$_}) for keys %results;
         }
@@ -204,23 +204,20 @@ sub call {
         my %results = $self->response->results;
         for (keys %results) {
             next if Jifty->web->response->result($_);
-            Jifty->web->response->result($_,Clone::clone($results{$_}));
+            Jifty->web->response->result($_,dclone($results{$_}));
         }
 
         # Run any code in the continuation
         $self->code->(Jifty->web->request)
           if $self->code;
 
-        # Enter the request in the continuation, and handle it
-        Jifty->web->request(Clone::clone($self->request));
-        Jifty->web->handle_request();
-
-        # Now we want to skip the rest of the
-        # Jifty::Web->handle_request that we were called from.  Pop up
-        # to the dispatcher
-        Jifty::Dispatcher::next_show();
+        # Enter the request in the continuation, and handle it.  This
+        # will possibly cause 'before' blocks to run more than once,
+        # but is slightly preferrable to them never running.
+        Jifty->web->request(dclone($self->request));
+        Jifty->handler->dispatcher->handle_request;
+        Jifty::Dispatcher::_abort;
     }
-
 }
 
 =head2 delete

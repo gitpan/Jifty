@@ -76,9 +76,14 @@ sub new {
         arguments  => {},
         sticky_on_success => 0,
         sticky_on_failure => 1,
+	current_user => undef,
         @_);
 
-    $self->_get_current_user;
+    if ($args{'current_user'}) {
+	$self->current_user($args{current_user});
+    } else {
+    	$self->_get_current_user();
+    }
 
     $self->moniker($args{'moniker'} || 'auto-'.Jifty->web->serial);
     $self->order($args{'order'});
@@ -129,6 +134,20 @@ requiring that the user enter a value for that field.
 See L<Jifty::Web::Form::Field> for the list of possible keys that each
 argument can have.
 
+In addition to the list there, you may use this additional key:
+
+=over
+
+=item ajax_canonicalizes
+
+This key takes a boolean value that determines if the value displayed in
+the form field is updated via AJAX with the result returned by this argument's
+L<canonicalize|Jifty::Manual::Glossary/canonicalize> function.
+
+Defaults to false.
+
+=back
+
 =cut
 
 sub arguments {
@@ -148,7 +167,10 @@ fail), C<run> calls L</take_action>, and finally L</cleanup>.
 sub run {
     my $self = shift;
     $self->log->debug("Running action");
-    return unless $self->result->success;
+    unless ($self->result->success) {
+        $self->log->debug("Not taking action, as it doesn't validate");
+        return;
+    }
     $self->log->debug("Taking action");
     $self->take_action;
     $self->cleanup;
@@ -323,6 +345,19 @@ sub _form_widget {
     return $self->{_private_form_fields_hash}{$arg_name};
 }
 
+=head2 hidden ARGUMENT VALUE
+
+A shortcut for specifying a form field C<ARGUMENT> which should render
+as a hidden form field, with the default value C<VALUE>.
+
+=cut
+
+sub hidden {
+    my $self = shift;
+    my ($arg, $value, @other) = @_;
+    $self->form_field( $arg, render_as => 'hidden', default_value => $value, @other);
+}
+
 =head2 order [INTEGER]
 
 Gets or sets the order that the action will be run in.  This should be
@@ -406,16 +441,49 @@ Returns nothing.
 sub button {
     my $self = shift;
     my %args = ( arguments => {},
-                 submit => $self,
+                 submit    => $self,
+                 register  => 0,
                  @_);
 
-    Jifty->web->form->register_action( $self );
-    Jifty->web->form->print_action_registration($self->moniker);
+    if ($args{register}) {
+        # If they ask us to register the action, do so
+        Jifty->web->form->register_action( $self );
+        Jifty->web->form->print_action_registration($self->moniker);
+    } elsif ( not Jifty->web->form->printed_actions->{ $self->moniker } ) {
+        # Otherwise, if we're not registered yet, do it in the button
+        $args{parameters}{ $self->register_name } = ref $self;
+        $args{parameters}{ $self->double_fallback_form_field_name($_) }
+            = $self->argument_value($_) || $self->arguments->{$_}->{'default_value'}
+            for grep { $self->arguments->{$_}{constructor} } keys %{ $self->arguments };
+    }
     $args{parameters}{$self->form_field_name($_)} = $args{arguments}{$_}
       for keys %{$args{arguments}};
 
     Jifty->web->link(%args);
 }
+
+=head3 return PARAMHASH
+
+Creates and renders a button, like L</button>, which additionally
+defaults to calling the current continuation.
+
+Takes an additional argument, C<to>, which can specify a default path
+to return to if there is no current continuation.
+
+=cut
+
+sub return {
+    my $self = shift;
+    my %args = (@_);
+    my $continuation = Jifty->web->request->continuation;
+    if (not $continuation and $args{to}) {
+        $continuation = Jifty::Continuation->new(request => Jifty::Request->new(path => $args{to}));
+    }
+    delete $args{to};
+
+    $self->button( call => $continuation, %args );
+}
+
 
 =head1 NAMING METHODS
 
@@ -507,6 +575,20 @@ sub error_div_id {
   return 'errors-' . $self->form_field_name($field_name);
 }
 
+=head2 warning_div_id ARGUMENT
+
+Turn one of this action's L<arguments|Jifty::Manual::Glossary/arguments> into
+the id for the div in which its warnings live; takes name of the field
+as an argument.
+
+=cut
+
+sub warning_div_id {
+  my $self = shift;
+  my $field_name = shift;
+  return 'warnings-' . $self->form_field_name($field_name);
+}
+
 
 =head1 VALIDATION METHODS
 
@@ -561,6 +643,9 @@ subroutine reference that attribute points points to.
 If it doesn't have a B<canonicalizer> attribute, but the action has a
 C<canonicalize_I<ARGUMENT>> function, also invoke that function.
 
+If neither of those are true, by default canonicalize dates using
+_canonicalize_date
+
 =cut
 
 # XXX TODO: This is named with an underscore to prevent infinite
@@ -583,9 +668,27 @@ sub _canonicalize_argument {
         $value = $field_info->{canonicalizer}->( $self, $value );
     } elsif ( $self->can($default_method) ) {
         $value = $self->$default_method( $value );
+    } elsif (   defined( $field_info->{render_as} )
+             && lc( $field_info->{render_as} ) eq 'date') {
+        $value = $self->_canonicalize_date( $value );
     }
 
     $self->argument_value($field => $value);
+}
+
+
+=head2 _canonicalize_date DATE
+
+Parses and returns the date using L<Time::ParseDate>.
+
+=cut
+
+sub _canonicalize_date {
+    my $self = shift;
+    my $val = shift;
+    return undef unless defined $val and $val =~ /\S/;
+    return undef unless my $obj = Jifty::DateTime->new_from_string($val);
+    return $obj->ymd;
 }
 
 =head2 _validate_arguments
@@ -678,7 +781,12 @@ sub _validate_argument {
 
 =head2 _autocomplete_argument ARGUMENT
 
-Get back a list of possible completions for C<ARGUMENT>.
+Get back a list of possible completions for C<ARGUMENT>.  The list
+should either be a list of scalar values or a list of hash references.
+Each hash reference must have a key named C<value>.  There can also
+additionally be a key named C<label> which, if present, will be used
+as the user visible label.  If C<label> is not present then the
+contents of C<value> will be used for the label.
 
 If the field has an attribute named B<autocompleter>, call the
 subroutine reference B<autocompleter> points to.
@@ -821,6 +929,27 @@ sub validation_error {
     return 0;
 }
 
+=head2 validation_warning ARGUMENT => WARNING TEXT
+
+Used to report a warning during validation.  Inside a validator you
+should write:
+
+  return $self->validation_warning( $field => "warning");
+
+..where C<$field> is the name of the argument which is at fault.
+
+=cut
+
+sub validation_warning {
+    my $self = shift;
+    my $field = shift;
+    my $warning = shift;
+  
+    $self->result->field_warning($field => $warning); 
+  
+    return 0;
+}
+
 =head2 validation_ok ARGUMENT
 
 Used to report that a field B<does> validate.  Inside a validator you
@@ -835,8 +964,18 @@ sub validation_ok {
     my $field = shift;
 
     $self->result->field_error($field => undef);
+    $self->result->field_warning($field => undef);
 
     return 1;
 }
+
+=head2 autogenerated
+
+Autogenerated Actions will always return true when this method is called. 
+"Regular" actions will return false.
+
+=cut
+
+sub autogenerated {0}
 
 1;

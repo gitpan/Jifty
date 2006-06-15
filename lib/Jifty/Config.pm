@@ -20,8 +20,6 @@ use Log::Log4perl;
 use Hash::Merge;
 Hash::Merge::set_behavior('RIGHT_PRECEDENT');
 
-require Module::Pluggable;
-
 use File::Basename();
 use base qw/Class::Accessor::Fast/;
 
@@ -79,6 +77,12 @@ framework will look for a site configuration file, specified in either
 the framework's C<SiteConfig> or the C<JIFTY_SITE_CONFIG> environment
 variable.
 
+After loading the site configuration file (if it exists), the
+framework will look for a test configuration file, specified in either
+the framework's C<TestConfig> or the C<JIFTY_TEST_CONFIG> environment
+variable.
+
+Values in the test configuration will clobber the site configuration.
 Values in the site configuration file clobber those in the vendor
 configuration file. Values in the vendor configuration file clobber
 those in the application configuration file.
@@ -132,6 +136,21 @@ sub load {
 
     $config = Hash::Merge::merge( $self->stash, $site );
     $self->stash($config);
+
+    my $test = $self->load_file(
+        Jifty::Util->absolute_path(
+            $self->framework('TestConfig') || $ENV{'JIFTY_TEST_CONFIG'}
+        )
+    );
+
+    $config = Hash::Merge::merge( $self->stash, $test );
+    $self->stash($config);
+
+
+
+
+
+
 
     # Merge guessed values in for anything we didn't explicitly define
     # Whatever's in the stash overrides anything we guess
@@ -213,9 +232,7 @@ sub guess {
         framework => {
             AdminMode        => 1,
             DevelMode        => 1,
-            ActionBasePath   => $app_class . "::Action",
             ApplicationClass => $app_class,
-            CurrentUserClass => $app_class . "::CurrentUser",
             ApplicationName  => $app_name,
             LogLevel         => 'INFO',
             Database         => {
@@ -230,12 +247,12 @@ sub guess {
             Mailer     => 'Sendmail',
             MailerArgs => [],
             L10N       => {
-                PoDir => "%share/po%",
+                PoDir => "share/po",
             },
+            Plugins    => [],
             Web        => {
                 Port => '8888',
                 BaseURL => 'http://localhost',
-                SessionDir  => "var/session",
                 DataDir     => "var/mason",
                 StaticRoot   => "share/web/static",
                 TemplateRoot => "share/web/templates",

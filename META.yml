@@ -12,11 +12,12 @@ no_index:
     - DB
 requires: 
   App::CLI: 0.03
+  CSS::Squish: 0.01
   Cache::Cache: 0
   Calendar::Simple: 0
   Class::Accessor: 0
   Class::Container: 0
-  Clone: 0
+  Class::Data::Inheritable: 0
   Compress::Zlib: 0
   DBD::SQLite: 1.11
   Data::Page: 0
@@ -39,8 +40,8 @@ requires:
   HTTP::Server::Simple::Recorder: 0
   Hash::Merge: 0
   Hook::LexWrap: 0
-  JSON::Syck: 0.12
-  Jifty::DBI: 0.16
+  JSON::Syck: 0.13
+  Jifty::DBI: 0.21
   LWP::UserAgent: 0
   Locale::Maketext::Extract: 0.20
   Locale::Maketext::Lexicon: 0.60
@@ -58,14 +59,15 @@ requires:
   Test::HTTP::Server::Simple: 0.02
   Test::More: 0.62
   Test::Pod::Coverage: 0
-  Test::WWW::Mechanize: 0
+  Test::WWW::Mechanize: 1.04
   UNIVERSAL::require: 0
   URI: 0
   WWW::Mechanize: 1.12
+  XML::Simple: 0
   XML::Writer: 0
   XML::XPath: 0
-  YAML::Syck: 0.44
+  YAML::Syck: 0.45
   perl: 5.8.3
   version: 0
 tests: t/*.t t/*/t/*.t
-version: 0.60507
+version: 0.60714

@@ -1,0 +1,19 @@
+<%init>
+Jifty->web->generate_css;
+
+use HTTP::Date ();
+
+if ( Jifty->handler->cgi->http('If-Modified-Since')
+        and $m->dhandler_arg eq Jifty->web->cached_css_digest . '.css' )
+{
+    Jifty->log->debug("Returning 304 for cached css");
+    $r->header_out( Status => 304 );
+    return;
+}
+
+$r->content_type("text/css");
+$r->header_out( 'Expires' => HTTP::Date::time2str(time + 31536000) );
+
+Jifty->web->out( Jifty->web->cached_css );
+return;
+</%init>

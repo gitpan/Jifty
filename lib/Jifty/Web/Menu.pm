@@ -3,7 +3,7 @@ package Jifty::Web::Menu;
 use base qw/Class::Accessor::Fast/;
 use URI;
 
-__PACKAGE__->mk_accessors(qw(label parent sort_order));
+__PACKAGE__->mk_accessors(qw(label parent sort_order link escape_label));
 
 =head2 new PARAMHASH
 
@@ -13,6 +13,14 @@ C<active>.  See the subroutines with the respective name below for
 each option's use.
 
 =cut
+
+sub new {
+    my $package = shift;
+    # Class::Accessor only wants a hashref;
+    $package->SUPER::new( ref($_[0]) eq 'HASH' ? @_ : {@_} );
+
+}
+
 
 =head2 label [STRING]
 
@@ -27,6 +35,14 @@ to null.
 
 Gets or sets the sort order of the item, as it will be displayed under
 the parent.  This defaults to adding onto the end.
+
+
+=head2 link
+
+Gets or set a Jifty::Web::Link object that represents this menu item. If
+you're looking to do complex ajaxy things with menus, this is likely
+the option you want.
+
 
 =head2 url
 
@@ -82,10 +98,11 @@ sub child {
                                                         sort_order => ($self->{children}{$key}{sort_order}
                                                                        || scalar values %{$self->{children}}),
                                                         label => $key,
+                                                        escape_label => 1,
                                                         @_
                                                        });
     # Activate it
-    my $url = $self->{children}{$key}->url;
+    if (my $url = $self->{children}{$key}->url) {
     # XXX TODO cleanup for mod_perl
     my $base_path = Jifty->web->request->path;
     chomp($base_path);
@@ -96,7 +113,7 @@ sub child {
     if ($url eq $base_path) {
         $self->{children}{$key}->active(1); 
     }
-
+	}
 
 }
 
@@ -144,6 +161,112 @@ sub children {
     my @kids = values %{$self->{children} || {}};
     @kids = sort {$a->sort_order <=> $b->sort_order} @kids;
     return wantarray ? @kids : \@kids;
+}
+
+
+=head2 render_as_menu
+
+Render this menu with HTML markup as multiple dropdowns, suitable for
+an application's menu
+
+=cut
+
+sub render_as_menu {
+    my $self = shift;
+    my @kids = $self->children;
+    Jifty->web->out(qq{<ul class="menu">});
+
+    for (@kids) {
+	$_->render_as_hierarchical_menu_item();
+    }
+    Jifty->web->out(qq{</ul>});
+    '';
+}
+
+
+=head2 render_as_context_menu
+
+Render this menu with html markup as an inline dropdown menu.
+
+
+=cut
+
+
+sub render_as_context_menu {
+	my $self = shift;
+    	Jifty->web->out( qq{<ul class="context_menu">});
+	$self->render_as_hierarchical_menu_item();
+	Jifty->web->out(qq{</ul>});
+	'';
+}
+
+=head2 render_as_hierarchical_menu_item
+
+Render an <li> for this item. suitable for use in a regular or contextual
+menu. Currently renders one level of submenu, if it exists.
+
+=cut
+
+sub render_as_hierarchical_menu_item {
+    my $self = shift;
+    my %args = (
+        class => '',
+        @_
+    );
+    my @kids = $self->children;
+    my $id   = Jifty->web->serial;
+    Jifty->web->out( qq{<li class="toplevel }
+            . ( $self->active ? 'open active' : 'closed' ) . qq{">}
+            . qq{<span class="title">} );
+    Jifty->web->out( $self->as_link );
+    Jifty->web->out(qq{</span>});
+    if (@kids) {
+        Jifty->web->out(
+            qq{<span class="expand"><a href="#" onClick="Jifty.ContextMenu.hideshow('}
+                . $id
+                . qq{'); return false;">+</a></span>}
+                . qq{<ul id="}
+                . $id
+                . qq{">} );
+        for (@kids) {
+            Jifty->web->out(qq{<li class="submenu }.($_->active ? 'active' : '' ).qq{">});
+
+            # We should be able to get this as a string.
+            # Either stringify the link object or output the label
+            # This is really icky. XXX TODO
+            Jifty->web->out( $_->as_link );
+            Jifty->web->out("</li>");
+        }
+        Jifty->web->out(qq{</ul>});
+    }
+    Jifty->web->out(qq{</li>});
+    '';
+
+}
+
+=head2 as_link
+
+Return this menu item as a C<Jifty::Web::Link>, either the one we were
+initialized with or a new one made from the C</label> and c</url>
+
+If there's no C</url> and no C</link>, renders just the label.
+
+=cut
+
+sub as_link {
+    my $self = shift;
+    # Stringifying $self->link may return '' and output something, so
+    # we need to be careful to not stringify it more than once, and to
+    # check it for defined-ness, not truth.
+    if ( defined (my $str = $self->link) ) {
+        return $str;
+    } elsif ( $self->url ) {
+        return Jifty->web->link( label => _( $self->label ),
+                                 url   => $self->url,
+                                 escape_label => $self->escape_label );
+    } else {
+        return _( $self->label );
+    }
 }
 
 1;

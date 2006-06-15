@@ -9,6 +9,16 @@ Jifty::Everything - Load all of the important Jifty modules at once.
 
 =cut
 
+use Cwd ();
+BEGIN {
+    # Cwd::cwd() insists doing `pwd`, which is a few hundres of shell
+    # outs just in the BEGIN time for Module::Pluggable to load things.
+    if ($^O ne 'MSWin32') {
+        require POSIX;
+        *Cwd::cwd = *POSIX::getcwd;
+    }
+}
+
 use Jifty ();
 use Jifty::I18N ();
 use Jifty::Dispatcher ();
@@ -63,7 +73,9 @@ use Jifty::Web::Form::Field ();
 use Jifty::Web::Menu ();
 
 use Module::Pluggable;
-Module::Pluggable->import(search_path => ['Jifty::Web::Form::Field'], require => 1);
+Module::Pluggable->import(search_path => ['Jifty::Web::Form::Field'],
+                          require     => 1,
+                          except      => qr/\.#/);
 __PACKAGE__->plugins;
 
 1;

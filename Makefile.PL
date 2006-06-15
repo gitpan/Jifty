@@ -8,8 +8,9 @@ requires('Cache::Cache'); #Cache::FileCache
 requires('Calendar::Simple');
 requires('Class::Accessor'); # Class::Accessor::Fast
 requires('Class::Container');
-requires('Clone');
+requires('Class::Data::Inheritable');
 requires('Compress::Zlib');
+requires('CSS::Squish' => 0.01 );
 requires('DBD::SQLite' => 1.11 );
 requires('Data::Page');
 requires('DateTime');
@@ -31,7 +32,7 @@ requires('HTTP::Server::Simple' => '0.10');  # HTTP::Server::Simple::CGI
 requires('HTTP::Server::Simple::Recorder');
 requires('Hash::Merge');
 requires('Hook::LexWrap');
-requires('Jifty::DBI' => '0.16' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
+requires('Jifty::DBI' => '0.21' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
 requires('Locale::Maketext::Extract' => '0.20');
 requires('Locale::Maketext::Lexicon' => '0.60');
 requires('Log::Log4perl');
@@ -45,26 +46,27 @@ requires('Params::Validate');
 requires('Pod::Simple'); #Pod::Simple::Text
 requires('String::Koremutake');
 requires('Test::Base' => 0.44);            # Test::Base::Filter
+requires('Test::HTTP::Server::Simple' => '0.02');
 requires('Test::HTML::Lint');
-requires('Test::HTTP::Server::Simple' => 0.02);
 requires('Test::More' => 0.62);
 requires('Test::Pod::Coverage');
-requires('Test::WWW::Mechanize');
+requires('Test::WWW::Mechanize' => 1.04);
 requires('UNIVERSAL::require');
 requires('URI');
 requires('WWW::Mechanize' => 1.12);
 requires('XML::Writer');
+requires('XML::Simple');
 requires('XML::XPath');
 requires('version');
 
 if (can_cc()) {
     # Always require the Syck bindings if a C compiler is available
-    requires('YAML::Syck' => 0.44);
-    requires('JSON::Syck' => 0.12);
+    requires('YAML::Syck' => 0.45);
+    requires('JSON::Syck' => 0.13);
 }
 else {
-    requires('YAML' => 0.35) unless can_use('YAML::Syck' => 0.44);
-    requires('JSON' => 0.01) unless can_use('JSON::Syck' => 0.12);
+    requires('YAML' => 0.35) unless can_use('YAML::Syck' => 0.45);
+    requires('JSON' => 0.01) unless can_use('JSON::Syck' => 0.13);
 }
 
 

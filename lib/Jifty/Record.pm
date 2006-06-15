@@ -84,14 +84,15 @@ sub create {
 }
 
 
-=head2 primary_key
+=head2 id
 
-Returns the default primary key for record columns: 'id'.
+Returns the record id value.
 This routine short-circuits a much heavier call up through Jifty::DBI
 
 =cut
 
-sub primary_key {'id'}
+sub _primary_key { 'id' }
+sub id { $_[0]->{'values'}->{'id'} }
 
 
 =head2 load_or_create
@@ -116,7 +117,7 @@ sub load_or_create {
 
 =head2 current_user_can RIGHT [, ATTRIBUTES]
 
-Should return true if the current user (C<$self->current_user>) is
+Should return true if the current user (C<< $self->current_user >>) is
 allowed to do I<RIGHT>.  Possible values for I<RIGHT> are:
 
 =over
@@ -218,7 +219,6 @@ sub _set {
     my $self = shift;
 
     unless ($self->check_update_rights(@_)) {
-        Jifty->log->logcluck("Permission denied");
         return (0, _('Permission denied'));
     }
     $self->SUPER::_set(@_);
@@ -243,7 +243,7 @@ sub _value {
 =head2 _collection_value METHOD
 
 A method ripped from the pages of Jifty::DBI::Record 
-so we could change the invocation method of hte collection generator to
+so we could change the invocation method of the collection generator to
 add a current_user argument.
 
 =cut
@@ -298,14 +298,13 @@ sub _to_record {
     my $column = $self->column($column_name);
     my $classname = $column->refers_to();
 
-    return unless defined $value;
     return undef unless $classname;
     return unless $classname->isa( 'Jifty::Record' );
 
     # XXX TODO FIXME we need to figure out the right way to call new here
     # perhaps the handle should have an initiializer for records/collections
     my $object = $classname->new(current_user => $self->current_user);
-    $object->load_by_cols(( $column->by || 'id')  => $value);
+    $object->load_by_cols(( $column->by || 'id')  => $value) if ($value);
     return $object;
 }
 

@@ -34,10 +34,11 @@ method to override if you wish to do custom setup work.
 sub setup {
     my $class = shift;
 
-    $Jifty::Config::postload = sub {
-        my $self = shift;
-        $self->stash(Hash::Merge::merge($self->stash, $class->test_config($self)));
-    };
+    my $test_config = File::Temp->new;
+    Jifty::YAML::DumpFile($test_config, $class->test_config(Jifty::Config->new));
+    # Invoking bin/jifty and friends will now have the test config ready.
+    $ENV{'JIFTY_TEST_CONFIG'} ||= $test_config;
+    Jifty::Test->builder->{test_config} = $test_config;
     {
         # Cache::Memcached stores things. And doesn't let them
         # expire from the cache easily. This is fine in production,
@@ -98,16 +99,28 @@ sub test_config {
 
 =head2 make_server
 
-Creates a new L<Jifty::Server> which C<ISA>
-L<Test::HTTP::Server::Simple> and returns it.
+Creates a new L<Jifty::Server> which C<ISA> L<Jifty::TestServer> and
+returns it.
 
 =cut
 
 sub make_server {
     my $class = shift;
 
-    require Test::HTTP::Server::Simple;
-    unshift @Jifty::Server::ISA, 'Test::HTTP::Server::Simple';
+    # XXX: Jifty::TestServer is not a Jifty::Server, it is actually
+    # server controller that invokes bin/jifty server. kill the
+    # unshift here once we fix all the tests expecting it to be
+    # jifty::server.
+    if ($ENV{JIFTY_TESTSERVER_PROFILE} ||
+        $ENV{JIFTY_TESTSERVER_COVERAGE} ||
+        $ENV{JIFTY_TESTSERVER_DBIPROF}) {
+        require Jifty::TestServer;
+        unshift @Jifty::Server::ISA, 'Jifty::TestServer';
+    }
+    else {
+        require Test::HTTP::Server::Simple;
+        unshift @Jifty::Server::ISA, 'Test::HTTP::Server::Simple';
+    }
 
     Log::Log4perl->get_logger("Jifty::Server")->less_logging(3);
     my $server = Jifty::Server->new;
@@ -177,7 +190,7 @@ END {
     return if $Test->{Original_Pid} != $$;
 
     # If all tests passed..
-    unless (grep {not $_} $Test->summary) {
+    unless ($Test->expected_tests != $Test->current_test or grep {not $_} $Test->summary) {
         # Clean up mailbox
         unlink mailbox();
 
@@ -191,6 +204,9 @@ END {
             Log::Log4perl->get_logger("SchemaTool")->more_logging(3);
         }
     }
+
+    # Unlink test file
+    undef $Test->{test_config} if $Test->{test_config};
 }
 
 1;

@@ -1,20 +1,61 @@
+060615 (15 June 2006)
+
+The following incompatible changes were made to Jifty. For a complete changelog,
+please see the "Changes" file.
+
+ * Removed the ActionBasePath and CurrentUserClass configuration
+   variables.  This breaks backwards compatibility.
+
+ * If you've overridden /_elements/javascript in your app, you'll want to 
+   take a look at the new stock version to see what has changed.
+
+ * The JS method document.getElementsBySelector() no longer exists.  Use 
+   cssQuery() instead.
+
+ * Jifty::Record now returns empty objects for related objects that can't be 
+   loaded, rather than undef
+
+
+ * The keybinding JS code is now a more proper library 
+   (Jifty.KeyBindings) and less intrusive.  If you've overridden the 
+   default /_elements/wrapper in your app, you'll want to make sure you get 
+   rid of the keybinding javascript (see the stock wrapper).  Just include 
+   <& /_elements/keybindings &> wherever you want the keybindings for a 
+   page to appear.
+
+ * This shouldn't be the cause of breakage, but the included rico.js is 
+   no longer a stock Rico build.  See the comments at the top of the file 
+   if you're interested.
+
+ * 'last_rule' now aborts only the current stage -- thus, last_rule                         
+   from a 'before' block will *NOT* prevent the RUN stage from happening!
+   This is a *BACKWARDS-INCOMPATIBILE CHANGE*, but fixes the dispatcher
+   to agree with its docs.
+ * 'abort' is the correct call to skip straight to the cleanup block.                       
+ * This allows the edit in place plugin to 'claim' its path and                             
+   protect it from access control in the app's 'before' blocks                                                                                                                              
+
+
+
 0.60507 (7 May 2006)
 
-* Pod fixes from Eric Wilhelm
-  lib/Jifty/Object.pm - removed incorrect '=for' directive
-  lib/Jifty/Web/Form/Field.pm - removed incorrect '=for' directive
-  lib/Jifty/Web/Form.pm - removed incorrect '=for' directive
-  
+  * Pod fixes from Eric Wilhelm
+    lib/Jifty/Object.pm - removed incorrect '=for' directive
+    lib/Jifty/Web/Form/Field.pm - removed incorrect '=for' directive
+    lib/Jifty/Web/Form.pm - removed incorrect '=for' directive
 
-* Better failure messages on when schema upgrades with SQLite fail from Alex Vandiver
-   * Be a little more explicit about SQLite's limitation, and a possible
-     (painful) workaround
- 
-* Update the inc tree to 0.62 for various fixes,
-   in particular improved share_dir compatibility. --Audrey Tang
+  * Better failure messages on when schema upgrades with SQLite fail
+    from Alex Vandiver
 
-* We were inconsistently using Jifty::Util::make_path as a subroutine. It's a class method.
-  This could break the stub generators and tutorial.  Thanks to Sean E. Millichamp
+  * Be a little more explicit about SQLite's limitation, and a possible
+    (painful) workaround
+
+  * Update the inc tree to 0.62 for various fixes,
+    in particular improved share_dir compatibility. --Audrey Tang
+
+  * We were inconsistently using Jifty::Util::make_path as a
+    subroutine. It's a class method.  This could break the stub
+    generators and tutorial.  Thanks to Sean E. Millichamp
 
 0.60505 - Cinco de Jifty! (5 May 2006)
 

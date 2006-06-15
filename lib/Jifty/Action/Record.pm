@@ -82,7 +82,6 @@ sub new {
         }
         $self->record->load_by_primary_keys(%given_pks) if %given_pks;
     }
-
     return $self;
 }
 
@@ -92,6 +91,11 @@ sub new {
 Overrides the L<Jifty::Action/arguments> method, to automatically
 provide a form field for every writable attribute of the underlying
 L</record>.
+
+This also creates built-in validation and autocompletion methods
+(validate_$fieldname and autocomplete_$fieldname) for action fields
+that are defined "validate" or "autocomplete". These methods can
+be overridden in any Action which inherits from this class.
 
 =cut
 
@@ -174,20 +178,27 @@ sub arguments {
       }
 
       # build up a validator sub if the column implements validation
-      if ( defined $column->validator && $column->validator ) {
+      # and we're not overriding it at the action level
+      my $validate_method = "validate_" . $field;
+
+      if ( ($column->validator ||  $self->record->can($validate_method)) and not $self->can($validate_method)) {
         $info->{ajax_validates} = 1;
         $info->{validator} = sub {
           my $self  = shift;
           my $value = shift;
-          my ( $is_valid, $message )
-            = &{ $column->validator }( $self->record, $value );
+          my ( $is_valid, $message );
+      	if ( $self->record->can($validate_method) ) {
+          ($is_valid, $message) =  $self->record->$validate_method($value);
+	 } else {
+          ( $is_valid, $message ) = &{ $column->validator }( $self->record, $value );
+	}
           if ($is_valid) {
             return $self->validation_ok($field);
           }
           else {
             unless ($message) {
               $self->log->error(
-                qq{_Schema validator for $field didn't explain why the value '$value' is invalid}
+                qq{Schema validator for $field didn't explain why the value '$value' is invalid}
               );
             }
             return (
@@ -199,7 +210,6 @@ sub arguments {
           }
         };
       }
-
       my $autocomplete_method = "autocomplete_" . $field;
       if ( $self->record->can($autocomplete_method) ) {
         $info->{'autocompleter'} ||= sub {
@@ -212,6 +222,7 @@ sub arguments {
 
       my $canonicalize_method = "canonicalize_" . $field;
       if ( $self->record->can($canonicalize_method) ) {
+        $info->{'ajax_canonicalizes'} = 1;
         $info->{'canonicalizer'} ||= sub {
           my ( $self, $value ) = @_;
           return $self->record->$canonicalize_method($value);
@@ -220,10 +231,7 @@ sub arguments {
       elsif ( defined $column->render_as
         and $column->render_as eq "Date" )
       {
-        $info->{'canonicalizer'} ||= sub {
-          my ( $self, $value ) = @_;
-          return _canonicalize_date( $self, $value );
-        };
+        $info->{'ajax_canonicalizes'} = 1;
       }
 
       # If we're hand-coding a render_as, hints or label, let's use it.
@@ -251,20 +259,6 @@ This defaults to only the writable fields of the object.
 sub possible_fields {
     my $self = shift;
     return $self->record->writable_attributes;
-}
-
-=head2 _canonicalize_date DATE
-
-Parses and returns the date using L<Time::ParseDate>.
-
-=cut
-
-sub _canonicalize_date {
-    my $self = shift;
-    my $val = shift;
-    return undef unless defined $val and $val =~ /\S/;
-    return undef unless my $obj = Jifty::DateTime->new_from_string($val);
-    return $obj->ymd;
 }
 
 =head2 take_action

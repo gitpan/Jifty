@@ -4,14 +4,23 @@ var Jifty = Class.create();
 /* Actions */
 var Action = Class.create();
 Action.prototype = {
-    // New takes the moniker, a string
+    // New takes the moniker (a string), and an optional array of form
+    // elements to additionally take into consideration
     initialize: function(moniker) {
         this.moniker = moniker;
 
+        // Extra form parameters
+        this.extras = $A();
+        if (arguments.length > 1) {
+            this.extras = arguments[1];
+        }
+
         this.register = $('J:A-' + this.moniker);  // Simple case -- no ordering information
         if (! this.register) {
-            // We need to go looking
-            var elements = document.getElementsByTagName('input');
+            // We need to go looking -- this also goes looking through this.extras, from above
+            var elements = $A(document.getElementsByTagName('input'));
+            for (var i = 0; i < this.extras.length; i++)
+                elements.push(this.extras[i]);
             for (var i = 0; i < elements.length; i++) {
                 if ((Form.Element.getMoniker(elements[i]) == this.moniker)
                  && (Form.Element.getType(elements[i]) == "registration")) {
@@ -29,14 +38,38 @@ Action.prototype = {
 
     // Returns an Array of all fields in this Action
     fields: function() {
-        var elements = new Array;
-        var possible = Form.getElements(this.form);
+	if(!this.cached_fields) {
+	    var elements = new Array;
+	    var possible = Form.getElements(this.form);
+	    // Also pull from extra query parameters
+	    for (var i = 0; i < this.extras.length; i++)
+		possible.push(this.extras[i]);
 
-        for (var i = 0; i < possible.length; i++) {
-            if (Form.Element.getMoniker(possible[i]) == this.moniker)
-                elements.push(possible[i]);
-        }
-        return elements;
+	    for (var i = 0; i < possible.length; i++) {
+		if (Form.Element.getMoniker(possible[i]) == this.moniker)
+		    elements.push(possible[i]);
+	    }
+	    this.cached_fields = elements;
+	}
+        return this.cached_fields;
+    },
+
+    buttons: function() {
+	var elements = new Array();
+	var possible = Form.getElements(this.form);
+	for(var i = 0; i < possible.length; i++) {
+	    if(possible[i].nodeName == 'INPUT' && possible[i].getAttribute("type") == 'submit') {
+		actions = Form.Element.buttonActions(possible[i]);
+		//If the button has no actions explicitly associated
+		//with it, it's associated with all the actions in the
+		//form
+		if(   actions.length == 0
+		   || actions.indexOf(this.moniker) >= 0) {
+		    elements.push(possible[i]);
+		}
+	    }
+	}
+	return elements;
     },
 
     getField: function(name) {
@@ -69,7 +102,7 @@ Action.prototype = {
         return false;
     },
 
-    // Return the action as a data strcture suitible to be JSON'd
+    // Return the action as a data structure suitable to be JSON'd
     data_structure: function() {
         var a = {};
         a['moniker'] = this.moniker;
@@ -80,7 +113,7 @@ Action.prototype = {
         for (var i = 0; i < fields.length; i++) {
             var f = fields[i];
 
-            if ((Form.Element.getType(f) != "registration") && Form.Element.getValue(f)) {
+            if ((Form.Element.getType(f) != "registration") && (Form.Element.getValue(f) != null)) {
                 if (! a['fields'][Form.Element.getField(f)])
                     a['fields'][Form.Element.getField(f)] = {};
                 a['fields'][Form.Element.getField(f)][Form.Element.getType(f)] = Form.Element.getValue(f);
@@ -105,21 +138,34 @@ Action.prototype = {
                     function (request) {
                         var response  = request.responseXML.documentElement;
                         for (var action = response.firstChild; action != null; action = action.nextSibling) {
-                            if ((action.nodeName != 'action') || (action.getAttribute("id") != id))
-                                continue;
-                            for (var field = action.firstChild; field != null; field = field.nextSibling) {
-                                // Possibilities for field.nodeName: it could be #text (whitespace),
-                                // or 'blank' (the field was blank, don't mess with the error div), or 'ok'
-                                // (clear the error div!) or 'error' (fill in the error div!)
-                                if (field.nodeName == 'error') {
-                                    var err_div = document.getElementById(field.getAttribute("id"));
-                                    if (err_div != null) {
-                                        err_div.innerHTML = field.firstChild.data;
+                            if ((action.nodeName == 'validationaction') && (action.getAttribute("id") == id)) {
+                                for (var field = action.firstChild; field != null; field = field.nextSibling) {
+                                    // Possibilities for field.nodeName: it could be #text (whitespace),
+                                    // or 'blank' (the field was blank, don't mess with the error div), or 'ok'
+                                    // (clear the error and warning div!) or 'error' (fill in the error div, clear 
+                                    // the warning div!) or 'warning' (fill in the warning div and clear the error div!)
+                                    if (field.nodeName == 'error' || field.nodeName == 'warning') {
+                                        var err_div = document.getElementById(field.getAttribute("id"));
+                                        if (err_div != null) {
+                                            err_div.innerHTML = field.firstChild.data;
+                                        }
+                                    } else if (field.nodeName == 'ok') {
+                                        var err_div = document.getElementById(field.getAttribute("id"));
+                                        if (err_div != null) {
+                                            err_div.innerHTML = '';
+                                        }
                                     }
-                                } else if (field.nodeName == 'ok') {
-                                    var err_div = document.getElementById(field.getAttribute("id"));
-                                    if (err_div != null) {
-                                        err_div.innerHTML = '';
+                                }
+                            } else if ((action.nodeName == 'canonicalizeaction') && (action.getAttribute("id") == id)) {
+                                for (var field = action.firstChild; field != null; field = field.nextSibling) {
+                                    // Possibilities for field.nodeName: it could be 'ignored', 'blank' or 'update'
+                                    if (field.nodeName == 'update') {
+                                        var field_name = field.getAttribute("name");
+                                        for (var form_number = 0 ; form_number < document.forms.length; form_number++) {
+                                            if (document.forms[form_number].elements[field_name] == null)
+                                                continue;
+                                            document.forms[form_number].elements[field_name].value = field.firstChild.data;
+                                        }
                                     }
                                 }
                             }
@@ -139,6 +185,16 @@ Action.prototype = {
             { parameters: this.serialize() }
         );
         hide_wait_message();
+    },
+
+    disable_input_fields: function() {
+	var disable = function() {
+            // Triggers https://bugzilla.mozilla.org/show_bug.cgi?id=236791
+            arguments[0].blur();
+            arguments[0].disabled = true;
+	};
+	this.fields().each(disable);
+	this.buttons().each(disable);
     }
 };
 
@@ -230,6 +286,9 @@ Object.extend(Form.Element, {
     getForm: function (element) {
         element = $(element);
 
+        if (element.virtualform)
+            return element.virtualform;
+
         if (element.form)
             return element.form;
 
@@ -237,10 +296,58 @@ Object.extend(Form.Element, {
             if (elt.nodeName == 'FORM') {
                 element.form = elt;
                 return elt;
-            }
-        }
+            } 
+       }
         return null;
+    },
+
+    buttonArguments: function(element) {
+        element = $(element);
+        if (!element)
+            return $H();
+
+        if (((element.nodeName != 'INPUT') || (element.getAttribute("type") != "submit"))
+         && ((element.nodeName != 'A')     || (! element.getAttribute("name"))))
+            return $H();
+
+        var extras = $H();
+
+        // Split other arguments out, if we're on a button
+        var pairs = element.getAttribute("name").split("|");
+        for (var i = 0; i < pairs.length; i++) {
+            var bits = pairs[i].split('=',2);
+            extras[bits[0]] = bits[1];
+        }
+        return extras;
+    },
+
+    buttonActions: function(element) {
+        element = $(element);
+	var actions = Form.Element.buttonArguments(element)['J:ACTIONS'];
+	if(actions) {
+	    return actions.split(",");
+	} else {
+	    return new Array();
+	}
+    },  
+
+    buttonFormElements: function(element) {
+        element = $(element);
+
+        var extras = $A();
+        var args = Form.Element.buttonArguments(element);
+        var keys = args.keys();
+        for (var i = 0; i < keys.length; i++) {
+            var e = document.createElement("input");
+            e.setAttribute("type", "hidden");
+            e.setAttribute("name", keys[i]);
+            e.setAttribute("value", args[keys[i]]);
+            e['virtualform'] = Form.Element.getForm(element);
+            extras.push(e);
+        }
+        return extras;
     }
+
 });
 
 // Form elements should AJAX validate if the CSS says so
@@ -251,9 +358,15 @@ Behaviour.register({
         } 
     },
     'input.date': function(e) {
-        if ( !Element.hasClassName( e, 'has-calendar-link' ) ) {
+        if ( !Element.hasClassName( e, 'has_calendar_link' ) ) {
             createCalendarLink(e);
-            Element.addClassName( e, 'has-calendar-link' );
+            Element.addClassName( e, 'has_calendar_link' );
+        }
+    },
+    'input.button_as_link': function(e) {
+        if ( !Element.hasClassName( e, 'is_button_as_link' ) ) {
+            buttonToLink(e);
+            Element.addClassName( e, 'is_button_as_link' );
         }
     }
 });
@@ -375,21 +488,26 @@ var current_args = $H();
 function update() {
     show_wait_message();
     var named_args = arguments[0];
+    var trigger    = arguments[1];
 
     // The YAML/JSON data structure that will be sent
     var request = $H();
 
     // Set request base path
-    request['path'] = document.URL;
+    request['path'] = '/__jifty/webservices/xml';
+
+    // Grab extra arguments (from a button)
+    var button_args = Form.Element.buttonFormElements(trigger);
 
     // Build actions structure
     request['actions'] = {};
     for (var i = 0; i < named_args['actions'].length; i++) {
         var moniker = named_args['actions'][i];
-        var a = new Action(moniker);
+        var a = new Action(moniker, button_args);
         if (a.register) {
             if (a.hasUpload())
                 return true;
+            a.disable_input_fields();
             request['actions'][moniker] = a.data_structure();
         }
     }
@@ -404,7 +522,7 @@ function update() {
         // Find where we are going to go
         var element = $('region-' + f['region']);
         if (f['element']) {
-            var possible = document.getElementsBySelector(f['element']);
+            var possible = cssQuery(f['element']);
             if (possible.length == 0)
                 element = null;
             else
@@ -443,6 +561,11 @@ function update() {
 
             // Make the region (for now)
             new Region(name, f['args'], f['path'], f['parent']);
+        } else if ((f['path'] != null) && f['toggle'] && (f['path'] == fragments[name].path)) {
+            // If they set the 'toggle' flag, and clicking wouldn't change the path
+            Element.update(element, '');
+            fragments[name].path = null;
+            continue;
         } else if (f['path'] == null) {
             // If they didn't know tha path, fill it in now
             f['path'] == fragments[name].path;
@@ -481,21 +604,24 @@ function update() {
                 for (var response_fragment = response.firstChild;
                      response_fragment != null;
                      response_fragment = response_fragment.nextSibling) {
-                    if (response_fragment.getAttribute("id") == f['region']) {
-                        var textContent;
-                        if (response_fragment.textContent) {
-                            textContent = response_fragment.textContent;
-                        } else {
-                            textContent = response_fragment.firstChild.nodeValue;
+                    if (response_fragment.nodeName == 'fragment') {
+                        if (response_fragment.getAttribute("id") == f['region']) {
+                            var textContent;
+                            if (response_fragment.textContent) {
+                                textContent = response_fragment.textContent;
+                            } else {
+                                textContent = response_fragment.firstChild.nodeValue;
+                            }
+                            // Once we find it, do the insertion
+                            if (insertion) {
+                                new insertion(element, textContent.stripScripts());
+                            } else {
+                                Element.update(element, textContent.stripScripts());
+                            }
+                            // We need to give the browser some "settle" time before we eval scripts in the body
+                            setTimeout((function() { this.evalScripts() }).bind(textContent), 10);
+			    Behaviour.apply(f['element']);
                         }
-                        // Once we find it, do the insertion
-                        if (insertion) {
-                            new insertion(element, textContent.stripScripts());
-                        } else {
-                            Element.update(element, textContent.stripScripts());
-                        }
-                        // We need to give the browser some "settle" time before we eval scripts in the body
-                        setTimeout((function() { this.evalScripts() }).bind(textContent), 10);
                     }
                 }
 
@@ -508,10 +634,19 @@ function update() {
                     (effect)($('region-'+f['region']), effect_args);
                 }
             }
+            for (var result = response.firstChild;
+                 result != null;
+                 result = result.nextSibling) {
+                if (result.nodeName == 'result') {
+                    for (var key = result.firstChild;
+			 key != null;
+			 key = key.nextSibling) {
+			show_action_result(result.getAttribute("moniker"),key);
+                    }
+                }
+            }
         } finally {
-            // Re-apply the Behavior stuff
-            Behaviour.apply();
-            // And make the wait message go away
+            // Make the wait message go away
             hide_wait_message();
         }
     };
@@ -573,7 +708,32 @@ function hide_wait_message (){
         new Effect.Fade('jifty-wait-message', {duration: 0.2});
 }
 
+function show_action_result() {
+    var popup = $('jifty-result-popup');
+    if(!popup) return;
 
+    var moniker = arguments[0];
+    var result = arguments[1];
+    var status = result.nodeName;
+    var text = result.textContent;
+    if(status != 'message' && status != 'error') return;
+
+    var node = document.createElement('div');
+    var node_id = 'result-' + moniker;
+    node.setAttribute('id', node_id);
+    node.setAttribute('class', 'result-' + status);
+    node.innerHTML = text;
+
+    if(popup.hasChildNodes()) {
+        popup.insertBefore(node, popup.firstChild);
+    } else {
+        popup.appendChild(node);
+    }
+    
+    setTimeout(function () {
+	    new Effect.Fade(node, {duration: 5.0});
+    }, 2000);
+}
 
 Jifty.Autocompleter = Class.create();
 Object.extend(Object.extend(Jifty.Autocompleter.prototype, Ajax.Autocompleter.prototype), {

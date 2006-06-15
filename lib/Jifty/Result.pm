@@ -19,7 +19,7 @@ use Jifty::Everything;
 
 use base qw/Jifty::Object Class::Accessor::Fast/;
 
-__PACKAGE__->mk_accessors(qw(failure action_class message error _content));
+__PACKAGE__->mk_accessors(qw(failure action_class message _content));
 
 
 =head2 new
@@ -106,7 +106,33 @@ name to error.
 
 sub field_errors {
     my $self = shift;
-    return %{$self->{field_errors}};
+    return %{$self->{field_errors} || {}};
+}
+
+=head2 field_warning FIELD [WARNING]
+
+Gets or sets the warning string for a specific field on the action.
+
+=cut
+
+sub field_warning {
+    my $self = shift;
+    my $field = shift;
+
+    $self->{field_warnings}{ $field } = shift if @_;
+    return $self->{field_warnings}{ $field };
+}
+
+=head2 field_warnings
+
+Returns a hash which maps L<argument|Jifty::Manual::Glossary/argument>
+name to warning.
+
+=cut
+
+sub field_warnings {
+    my $self = shift;
+    return %{$self->{field_warnings} || {}};
 }
 
 =head2 content [KEY [, VALUE]]

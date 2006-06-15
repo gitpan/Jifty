@@ -72,7 +72,7 @@ directory in a default Jifty application.  They're also the right way
 to enable L<Jifty::LetMe> actions.
 
 You can entirely stop processing with the C<redirect> and C<abort>
-directives.
+directives, though L</after> rules will still run.
 
 =item on
 
@@ -101,6 +101,34 @@ features in your application when they're more convenient.
 
 Each directive's code block runs in its own scope, but all share a
 common C<$Dispatcher> object.
+
+=cut
+
+=head1 Plugins and rule ordering
+
+By default, L<Jifty::Plugin> dispatcher rules are added in the order
+they are specified in the application's configuration file; that is,
+after all the plugin dispatchers have run in order, then the
+application's dispatcher runs.  It is possible to specify rules which
+should be reordered with respect to this rule, however.  This is done
+by using a variant on the C<before> and C<after> syntax:
+
+    before plugin NAME =>
+        RULE(S);
+    
+    after plugin NAME =>
+        RULE(S);
+
+C<NAME> may either be a string, which must match the plugin name
+exactly, or a regular expression, which is matched against the plugin
+name.  The rule will be placed at the first boundry that it matches --
+that is, given a C<before plugin qr/^Jifty::Plugin::Auth::/> and both
+a C<Jifty::Plugin::Auth::Basic> and a C<Jifty::Plugin::Auth::Complex>,
+the rules will be placed before the first.
+
+C<RULES> may either be a single C<before>, C<on>, C<under>, or
+C<after> rule to change the ordering of, or an array reference of
+rules to reorder.
 
 =cut
 
@@ -207,16 +235,15 @@ Break out from the current C<run> block and stop running rules in this stage.
 
 =head2 abort $code
 
-Abort the request.
+Abort the request; this skips straight to the cleanup stage.
 
 =head2 redirect $uri
 
 Redirect to another URI.
 
+=head2 plugin
 
-=head2 next_show
-
-INTERNAL MAGIC YOU SHOULD NOT USE THAT ALEX SHOULD RENAME ;)
+See L</Plugins and rule ordering>, above.
 
 =cut
 
@@ -228,6 +255,8 @@ our @EXPORT = qw<
     show dispatch abort redirect
 
     GET POST PUT HEAD DELETE OPTIONS
+
+    plugin
 
     get next_rule last_rule
 
@@ -263,6 +292,8 @@ sub HEAD ($)    { _qualify method => @_ }
 sub DELETE ($)  { _qualify method => @_ }
 sub OPTIONS ($) { _qualify method => @_ }
 
+sub plugin ($) { return { plugin => @_ } }
+
 =head2 import
 
 Jifty::Dispatcher is an L<Exporter>, that is, part of its role is to
@@ -284,7 +315,7 @@ sub import {
 
     no strict 'refs';
     no warnings 'once';
-    for (qw(RULES RULES_SETUP RULES_CLEANUP)) {
+    for (qw(RULES_RUN RULES_SETUP RULES_CLEANUP RULES_DEFERRED)) {
         @{ $pkg . '::' . $_ } = ();
     }
     if ( @args != @_ ) {
@@ -328,7 +359,9 @@ sub _push_rule($$) {
     my($pkg, $rule) = @_;
     my $op = $rule->[0];
     my $ruleset;
-    if ( $op eq 'before' ) {
+    if ( ($op eq "before" or $op eq "after") and ref $rule->[1] and ref $rule->[1] eq 'HASH' and $rule->[1]{plugin} ) {
+        $ruleset = 'RULES_DEFERRED';
+    } elsif ( $op eq 'before' ) {
         $ruleset = 'RULES_SETUP';
     } elsif ( $op eq 'after' ) {
         $ruleset = 'RULES_CLEANUP';
@@ -414,16 +447,38 @@ sub handle_request {
     local $HTML::Mason::Commands::m = undef;
     # Mason introduces a DIE handler that generates a mason exception
     # which in turn generates a backtrace. That's fine when you only
-    # do it once per request. But it's really, really painful when you do it
-    # often, as is the case with fragments
+    # do it once per request. But it's really, really painful when you
+    # do it often, as is the case with fragments
     local $SIG{__DIE__} = 'DEFAULT';
 
     eval {
         $Dispatcher->_do_dispatch( Jifty->web->request->path);
     };
     if ( my $err = $@ ) {
-        $self->log->warn(ref($err) . " " ."'$err'") if ( $err !~ /^LAST RULE/);
+        $self->log->warn(ref($err) . " " ."'$err'") if ( $err !~ /^ABORT/ );
     }
+}
+
+=head2 _handle_stage NAME, EXTRA_RULES
+
+Handles the all rules in the stage named C<NAME>.  Additionally, any
+other arguments passed after the stage C<NAME> are added to the end of
+the rules for that stage.
+
+This is the unit which calling L</last_rule> skips to the end of.
+
+=cut
+
+sub _handle_stage {
+    my ($self, $stage, @rules) = @_;
+
+    eval { $self->_handle_rules( [ $self->rules($stage), @rules ] ); };
+    if ( my $err = $@ ) {
+        $self->log->warn( ref($err) . " " . "'$err'" )
+            if ( $err !~ /^(LAST RULE|ABORT)/ );
+        return $err =~ /^ABORT/ ? 0 : 1;
+    }
+    return 1;
 }
 
 =head2 _handle_rules RULESET
@@ -490,18 +545,7 @@ sub _handle_rule {
 no warnings 'exiting';
 
 sub next_rule { next RULE }
-sub last_rule { 
-    
-    # Mason introduces a DIE handler that generates a mason exception
-    # which in turn generates a backtrace. That's fine when you only
-    # do it once per request. But it's really, really painful when you do it
-    # often, as is the case with fragments
-   
-      local $SIG{__DIE__} = 'IGNORE';
-
-    die "LAST RULE"; 
-}
-sub next_show { last HANDLE_WEB }
+sub last_rule { die "LAST RULE" }
 
 =head2 _do_under
 
@@ -637,7 +681,6 @@ sub _do_redirect {
     my ( $self, $path ) = @_;
     $self->log->debug("Redirecting to $path");
     Jifty->web->redirect($path);
-    last_rule;
 }
 
 =head2 _do_abort 
@@ -651,8 +694,10 @@ Don't display any page. just stop.
 sub _do_abort {
     my $self = shift;
     $self->log->debug("Aborting processing");
-    last_rule;
+    $self->_abort;
 }
+
+sub _abort { die "ABORT" }
 
 =head2 _do_show [PATH]
 
@@ -697,7 +742,6 @@ sub _do_show {
     # Set the request path
     request->path($path);
     $self->render_template(request->path);
-
 
     last_rule;
 }
@@ -744,23 +788,21 @@ sub _do_dispatch {
 
     $self->log->debug("Dispatching request to ".$self->{path});
 
-    eval {
-        $self->_handle_rules( [ $self->rules('SETUP') ] );
-        HANDLE_WEB: { Jifty->web->handle_request(); }
-        $self->_handle_rules( [ $self->rules('RUN'), 'show' ] );
-    };
-    if ( my $err = $@ ) {
-        $self->log->warn(ref($err) . " " ."'$err'") if ( $err !~ /^LAST RULE/);
+    # Setup -- we we don't abort out of setup, then run the
+    # actions and then the RUN stage.
+    if ($self->_handle_stage('SETUP')) {
+        # Run actions
+        Jifty->web->handle_request();
+
+        # Run, and show the page
+        $self->_handle_stage('RUN' => 'show');
     }
 
-    eval {
-        $self->_handle_rules( [ $self->rules('CLEANUP') ] );
-    };
-    if ( my $err = $@ ) {
-        $self->log->warn(ref($err) . " " ."'$err'") if ( $err !~ /^LAST RULE/);
-    }
+    # Cleanup
+    $self->_handle_stage('CLEANUP');
 
-    last_rule;
+    # Out to the next dispatcher's cleanup
+    $self->_abort;
 }
 
 =head2 _match CONDITION
@@ -814,7 +856,10 @@ sub _match {
             }
 
             # All precondition passed, get original condition literal
-            return $self->_match( $cond->{''} );
+            return $self->_match( $cond->{''} ) if $cond->{''};
+
+            # Or, if we don't have a literal, we win.
+            return 1;
         };
         if ( my $err = $@ ) {
             warn "$self _match failed: $err";
@@ -844,6 +889,12 @@ sub _match_method {
     lc( $self->{cgi}->method ) eq lc($method);
 }
 
+sub _match_plugin {
+    my ( $self, $plugin ) = @_;
+    warn "Deferred check shouldn't happen";
+    return 0;
+}
+
 =head2 _compile_condition CONDITION
 
 Takes a condition defined as a simple string ad return it as a regex
@@ -863,7 +914,7 @@ sub _compile_condition {
     $cond =~ s{/$}{};
 
     my $has_capture = ( $cond =~ / \\ [*?] /x);
-    if ($has_capture) {
+    if ($has_capture or $cond =~ / \\ [[{] /x) {
         $cond = $self->_compile_glob($cond);
     }
 
@@ -903,7 +954,9 @@ sub _compile_condition {
 
 Private function.
 
-Turns a metaexpression containing * and ? into a capturing perl regex pattern.
+Turns a metaexpression containing C<*> and C<?> into a capturing regex pattern.
+
+Also supports the non-capturing C<[]> and C<{}> notation.
 
 The rules are:
 
@@ -911,7 +964,7 @@ The rules are:
 
 =item *
 
-A C<*> between two C</> characthers, or between a C</> and end of string,
+A C<*> between two C</> characters, or between a C</> and end of string,
 should at match one or more non-slash characters:
 
     /foo/*/bar
@@ -933,6 +986,14 @@ Consecutive C<?> marks are captured together:
 
     /foo???bar      # One capture for ???
     /foo??*         # Two captures, one for ?? and one for *
+
+=item *
+
+Brackets such as C<[a-z]> denote character classes; they are not captured.
+
+=item *
+
+Braces such as C<{xxx,yyy}]> denote alternations; they are not captured.
 
 =back
 
@@ -958,7 +1019,40 @@ sub _compile_glob {
         # extra backslashes.
         ( (?: \\ \? )+ )
     }{([^/]{${ \( length($1)/2 ) }})}gx;
+    $glob =~ s{
+        # Brackets denote character classes
+        (
+            \\ \[           # opening
+            (?:             # one or more characters:
+                \\ \\ \\ \] # ...escaped closing bracket
+            |
+                \\ [^\]]    # ...escaped (but not the closing bracket)
+            |
+                [^\\]       # ...normal
+            )+
+            \\ \]           # closing
+        )
+    }{$self->_unescape($1)}egx;
+    $glob =~ s{
+        # Braces denote alternations
+        \\ \{ (         # opening (not part of expression)
+            (?:             # one or more characters:
+                \\ \\ \\ \} # ...escaped closing brace
+            |
+                \\ [^\}]    # ...escaped (but not the closing brace)
+            |
+                [^\\]       # ...normal
+            )+
+        ) \\ \}         # closing (not part of expression)
+    }{'(?:'.join('|', split(/\\,/, $1)).')'}egx;
     $glob;
+}
+
+sub _unescape {
+    my $self = shift;
+    my $text = shift;
+    $text =~ s{\\(.)}{$1}g;
+    return $text;
 }
 
 =head2 template_exists PATH
@@ -971,8 +1065,7 @@ sub template_exists {
     my $self = shift;
     my $template = shift;
 
-      return  Jifty->handler->mason->interp->comp_exists( $template);
-
+    return  Jifty->handler->mason->interp->comp_exists( $template);
 }
 
 
@@ -997,7 +1090,7 @@ sub render_template {
         # Save the request away, and redirect to an error page
         Jifty->web->response->error($err);
         my $c = Jifty::Continuation->new(
-            request  => Jifty->web->request,
+            request  => Jifty->web->request->top_request,
             response => Jifty->web->response,
             parent   => Jifty->web->request->continuation,
         );
@@ -1014,5 +1107,87 @@ sub render_template {
 
 }
 
+
+=head2 import_plugins
+
+Imports rules from L<Jifty/plugins> into the main dispatcher's space.
+
+=cut
+
+sub import_plugins {
+    my $self = shift;
+
+    # Find the deferred rules
+    my @deferred;
+    push @deferred, $_->dispatcher->rules('DEFERRED') for Jifty->plugins;
+    push @deferred, $self->rules('DEFERRED');
+
+    # XXX TODO: Examine @deferred and find rles that cannot fire
+    # because they match no plugins; they should become un-deferred in
+    # the appropriate group.  This is so 'before plugin qr/Auth/' runs
+    # even if we have no auth plugin
+
+    for my $stage (qw/SETUP RUN CLEANUP/) {
+        my @groups;
+        push @groups, {name => ref $_,  rules => [$_->dispatcher->rules($stage)]} for Jifty->plugins;
+        push @groups, {name => 'Jifty', rules => [$self->rules($stage)]};
+
+        my @left;
+        my @rules;
+        for (@groups) {
+            my $name        = $_->{name};
+            my @group_rules = @{$_->{rules}};
+
+            # XXX TODO: 'after' rules should possibly be placed after
+            # the *last* thing they could match
+            push @rules, $self->_match_deferred(\@deferred, before => $name, $stage);
+            push @rules, @group_rules;
+            push @rules, $self->_match_deferred(\@deferred, after => $name, $stage);
+        }
+
+        no strict 'refs';
+        @{ $self . "::RULES_$stage" } = @rules;
+    }
+    if (@deferred) {
+        warn "Leftover unmatched deferred rules: ".Jifty::YAML::Dump(\@deferred);
+    }
+}
+
+sub _match_deferred {
+    my $self = shift;
+    my ($deferred, $time, $name, $stage) = @_;
+    my %stages = (SETUP => "before", RUN => "on", CLEANUP => "after");
+    $stage = $stages{$stage};
+
+    my @matches;
+    for my $op (@{$deferred}) {
+        # Only care if we're on the correct side of the correct plugin
+        next unless $op->[0] eq $time;
+
+        # Regex or string match, appropriately
+        next unless (
+            ref $op->[1]{plugin}
+            ? ( $name =~ $op->[1]{plugin} )
+            : ( $op->[1]{plugin} eq $name ) );
+
+        # Find the list of subrules
+        my @subrules = ref $op->[2] eq "ARRAY" ? @{$op->[2]} : ($op->[2]);
+
+        # Only toplevel rules make sense (before, after, on)
+        warn "Invalid subrule ".$_->[0] for grep {$_->[0] !~ /^(before|on|after)$/} @subrules;
+        @subrules = grep {$_->[0] =~ /^(before|on|after)$/} @subrules;
+
+        # Only match if the stage matches
+        push @matches, grep {$_->[0] eq $stage} @subrules;
+        @subrules = grep {$_->[0] ne $stage} @subrules;
+
+        $op->[2] = [@subrules];
+    }
+
+    # Clean out any completely matched rules
+    @$deferred = grep {@{$_->[2]}} @$deferred;
+
+    return @matches;
+}
 
 1;

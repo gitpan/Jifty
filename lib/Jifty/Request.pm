@@ -3,8 +3,8 @@ use strict;
 
 package Jifty::Request;
 
-use base qw/Jifty::Object Class::Accessor::Fast Clone/;
-__PACKAGE__->mk_accessors(qw(is_subrequest arguments just_validating path _continuation));
+use base qw/Jifty::Object Class::Accessor::Fast/;
+__PACKAGE__->mk_accessors(qw(_top_request arguments just_validating path _continuation));
 
 use Jifty::JSON;
 use Jifty::YAML;
@@ -205,8 +205,8 @@ sub from_cgi {
     for my $splittable (@splittable_names) {
         delete $args{$splittable};
         for my $newarg (split /\|/, $splittable) {
-            # If there are multiple =s, you just lose.
-            my ($k, $v) = split /=/, $newarg;
+            # If your key has a '=', you may just lose
+            my ($k, $v) = split /=/, $newarg, 2;
             $args{$k} = $v;
             # The following breaks page regions and the like, sadly:
             #$args{$k} ? (ref $args{$k} ? [@{$args{$k}},$v] : [$args{$k}, $v] ) : $v;
@@ -370,7 +370,7 @@ sub webform_to_data_structure {
     my $active_actions;
     if (exists $args{'J:ACTIONS'}) {
         $active_actions = {};
-        $active_actions->{$_} = 1 for split ';', $args{'J:ACTIONS'};
+        $active_actions->{$_} = 1 for split '!', $args{'J:ACTIONS'};
     } # else $active_actions stays undef
 
     # Mapping from argument types to data structure names
@@ -435,7 +435,9 @@ sub continuation {
 =head2 call_continuation
 
 Calls the L<Jifty::Continuation> associated with this request, if
-there is one.
+there is one.  Returns true if the continuation was called
+successfully -- if calling the continuation requires a redirect, this
+function will throw an exception to its enclosing dispatcher.
 
 =cut
 
@@ -446,6 +448,7 @@ sub call_continuation {
     $self->log->debug("Calling continuation $cont");
     $self->continuation(Jifty->web->session->get_continuation($cont));
     $self->continuation->call;
+    return 1;
 }
 
 =head2 path
@@ -575,12 +578,13 @@ sub add_action {
         order => undef,
         active => 1,
         arguments => undef,
+        has_run => undef,
         @_
     );
 
     my $action = $self->{'actions'}->{ $args{'moniker'} } || Jifty::Request::Action->new;
 
-    for my $k (qw/moniker class order active/) {
+    for my $k (qw/moniker class order active has_run/) {
         $action->$k($args{$k}) if defined $args{$k};
     } 
     
@@ -705,10 +709,41 @@ sub do_mapping {
 
     for (keys %{$self->arguments}) {
         my ($key, $value) = Jifty::Request::Mapper->map(destination => $_, source => $self->arguments->{$_}, %args);
-        next unless $key ne $_;
+        next unless $key ne $_ or not defined $value or $value ne $self->argument($_);
         delete $self->arguments->{$_};
         $self->argument($key => $value);
     }
+    for ($self->state_variables) {
+        my ($key, $value) = Jifty::Request::Mapper->map(destination => $_->key, source => $_->value, %args);
+        next unless $key ne $_->key or not defined $value or $value ne $_->value;
+        $self->remove_state_variable($_->key);
+        $self->add_state_variable(key => $key, value => $value);
+    }
+}
+
+=head2 is_subrequest
+
+Returns true if this request is a subrequest.
+
+=cut
+
+sub is_subrequest {
+    my $self = shift;
+    return $self->_top_request ? 1 : undef;
+}
+
+=head2 top_request
+
+Returns the top-level request for this request; if this is a
+subrequest, this is the user-created request that the handler got
+originally.  Otherwise, returns itself;
+
+=cut
+
+sub top_request {
+    my $self = shift;
+    $self->_top_request(@_) if @_;
+    return $self->_top_request || $self;
 }
 
 package Jifty::Request::Action;

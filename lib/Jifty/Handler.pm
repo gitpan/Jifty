@@ -25,9 +25,24 @@ handlers.
 =cut
 
 use base qw/Class::Accessor::Fast/;
-use Hook::LexWrap qw(wrap);
 use Module::Refresh ();
-__PACKAGE__->mk_accessors(qw(mason dispatcher static_handler cgi apache));
+
+BEGIN {
+    # Creating a new CGI object breaks FastCGI in all sorts of painful
+    # ways.  So wrap the call and preempt it if we already have one
+    use CGI ();
+    *CGI::__jifty_real_new = \&CGI::new;
+    
+    no warnings qw(redefine);
+    *CGI::new = sub {
+	return Jifty->handler->cgi if Jifty->handler->cgi;
+	CGI::__jifty_real_new(@_);	
+    }
+};
+
+
+
+__PACKAGE__->mk_accessors(qw(mason dispatcher static_handler cgi apache stash));
 
 =head2 new
 
@@ -41,17 +56,15 @@ sub new {
     bless $self, $class;
 
     $self->create_cache_directories();
-
-    # Creating a new CGI object breaks FastCGI in all sorts of painful
-    # ways.  So wrap the call and preempt it if we already have one
-    use CGI;
-    wrap 'CGI::new', pre => sub {
-        $_[-1] = Jifty->handler->cgi if Jifty->handler->cgi;
-    };
+#    wrap 'CGI::new', pre => sub {
+#        $_[-1] = Jifty->handler->cgi if Jifty->handler->cgi;
+#    };
 
     $self->dispatcher(
         Jifty->config->framework('ApplicationClass') . "::Dispatcher" );
     Jifty::Util->require( $self->dispatcher );
+    $self->dispatcher->import_plugins;
+
     $self->mason( Jifty::View::Mason::Handler->new( $self->mason_config ) );
 
     $self->static_handler(Jifty::View::Static::Handler->new());
@@ -62,15 +75,14 @@ sub new {
 
 =head2 create_cache_directories
 
-Attempts to create our app's session storage and mason cache directories.
+Attempts to create our app's mason cache directory.
 
 =cut
 
 sub create_cache_directories {
     my $self = shift;
 
-    for ( Jifty->config->framework('Web')->{'SessionDir'},
-          Jifty->config->framework('Web')->{'DataDir'}) {
+    for ( Jifty->config->framework('Web')->{'DataDir'} ) {
         Jifty::Util->make_path( Jifty::Util->absolute_path($_) );
     }
 }
@@ -109,14 +121,17 @@ sub mason_config {
         %{ Jifty->config->framework('Web')->{'MasonConfig'} },
     );
 
+    for my $plugin (Jifty->plugins) {
+        my $comp_root = $plugin->template_root;
+        next unless $comp_root;
+        push @{ $config{comp_root} }, [ ref($plugin)."-".Jifty->web->serial => $comp_root ];
+    }
+
     # In developer mode, we want halos, refreshing and all that other good stuff. 
     if (Jifty->config->framework('DevelMode') ) {
         push @{$config{'plugins'}}, 'Jifty::Mason::Halo';
-            $config{static_source}        = 0;
-            $config{use_object_files}        = 0;
-            
-            
-
+        $config{static_source}    = 0;
+        $config{use_object_files} = 0;
     }
     return (%config);
         
@@ -161,6 +176,8 @@ sub handle_request {
     $self->cgi( $args{cgi} );
     $self->apache( HTML::Mason::FakeApache->new( cgi => $self->cgi ) );
 
+    # Build a new stash for the life of this request
+    $self->stash({});
     local $HTML::Mason::Commands::JiftyWeb = Jifty::Web->new();
     Jifty->web->request( Jifty::Request->new()->fill( $self->cgi ) );
 
@@ -168,6 +185,7 @@ sub handle_request {
     Jifty->web->setup_session;
     Jifty->web->session->set_cookie;
     Jifty->api->reset;
+    $_->new_request for Jifty->plugins;
 
     Jifty->log->debug( "Received request for " . Jifty->web->request->path );
 
@@ -197,6 +215,7 @@ sub cleanup_request {
     Jifty::Record->flush_cache if Jifty::Record->can('flush_cache');
     $self->cgi(undef);
     $self->apache(undef);
+    $self->stash(undef);
 }
 
 1;

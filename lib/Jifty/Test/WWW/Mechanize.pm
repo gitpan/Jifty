@@ -4,10 +4,13 @@ use warnings;
 package Jifty::Test::WWW::Mechanize;
 use base qw/Test::WWW::Mechanize/;
 
+$ENV{'http_proxy'} = ''; # Otherwise Test::WWW::Mechanize tries to go through your HTTP proxy
+
 use Test::HTML::Lint; # exports html_ok
 use HTTP::Cookies;
 use XML::XPath;
 use Hook::LexWrap;
+use List::Util qw(first);
 
 my $Test = Test::Builder->new;
 
@@ -47,7 +50,7 @@ sub moniker_for {
   for my $f ($self->forms) {
   INPUT: 
     for my $input ($f->inputs) {
-      if ($input->type eq "hidden" and $input->name =~ /^J:A-(.*)/ and $input->value eq $action) {
+      if ($input->type eq "hidden" and $input->name =~ /^J:A-(?:\d+-)?(.*)/ and $input->value eq $action) {
 
         my $moniker = $1;
 
@@ -129,7 +132,9 @@ sub action_form {
     my $i;
     for my $form ($self->forms) {
         $i++;
-        next unless $form->find_input("J:A-$moniker", "hidden");
+        next unless first {   $_->name =~ /J:A-(?:\d+-)?$moniker/
+                           && $_->type eq "hidden" }
+                        $form->inputs;
         next if grep {not $form->find_input("J:A:F-$_-$moniker")} @fields;
 
         $self->form_number($i); #select it, for $mech->submit etc
@@ -156,6 +161,47 @@ sub action_field_value {
     my $input = $action_form->find_input("J:A:F-$field-$moniker");
     return unless $input;
     return $input->value;
+}
+
+=head2 send_action CLASS ARGUMENT => VALUE, [ ... ]
+
+Sends a request to the server via the webservices API, and returns the
+L<Jifty::Result> of the action.  C<CLASS> specifies the class of the
+action, and all parameters thereafter supply argument keys and values.
+
+The URI of the page is unchanged after this; this is accomplished by
+using the "back button" after making the webservice request.
+
+=cut
+
+sub send_action {
+    my $self = shift;
+    my $class = shift;
+    my %args = @_;
+
+
+    my $uri = $self->uri->clone;
+    $uri->path("__jifty/webservices/yaml");
+
+    my $request = HTTP::Request->new(
+        POST => $uri,
+        [ 'Content-Type' => 'text/x-yaml' ],
+        Jifty::YAML::Dump(
+            {   path => $uri->path,
+                actions => {
+                    action => {
+                        moniker => 'action',
+                        class   => $class,
+                        fields  => \%args
+                    }
+                }
+            }
+        )
+    );
+    my $result = $self->request( $request );
+    my $content = eval { Jifty::YAML::Load($result->content)->{action} } || undef;
+    $self->back;
+    return $content;
 }
 
 # When it sees something like
@@ -311,7 +357,13 @@ sub current_user {
     my $session = $self->session;
     return undef unless $session;
 
-    return $session->get('user');
+    my $id = $session->get('user_id');
+    my $object = (Jifty->config->framework('ApplicationClass')."::CurrentUser")->new();
+    my $user = $session->get('user_ref')->new( current_user => $object );
+    $user->load_by_cols( id => $id );
+    $object->user_object($user);
+
+    return $object;
 }
 
 1;

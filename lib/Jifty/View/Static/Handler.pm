@@ -110,18 +110,15 @@ Returns undef if it can't find the file in either path.
 sub file_path {
     my $self    = shift;
     my $file    = shift;
-    my @options = (qw(StaticRoot DefaultStaticRoot));
+    my @options = map {Jifty->config->framework('Web')->{$_}} (qw(StaticRoot DefaultStaticRoot));
+    push @options, grep {$_} map {$_->static_root} Jifty->plugins;
 
     # Chomp a leading "/static" - should this be configurable?
     $file =~ s/^\/*?static//; 
 
     foreach my $path (@options) {
-
-        my $abspath = Jifty::Util->absolute_path(
-            Jifty->config->framework('Web')->{$path} . "/" . $file );
-
+        my $abspath = Jifty::Util->absolute_path( $path . "/" . $file );
         return $abspath if ( -f $abspath && -r $abspath );
-
     }
     return undef;
 
@@ -137,6 +134,17 @@ L<MIME::Types> to guess first. If that fails, it falls back to C<File::MMagic>.
 sub mime_type {
     my $self       = shift;
     my $local_path = shift;
+
+    # The key is the file extension, the value is the MIME type to send.
+    my %type_override = (
+        # MIME::Types returns application/javascript for .js, but Opera
+        # chokes on ajax-fetched JS that has a type other than the one below
+        # JSAN.js fetches JS via Ajax when it loads JSAN modules
+        'js' => 'application/x-javascript',
+    );
+
+    return ($type_override{$1})
+        if $local_path =~ /\.(.+)$/ and defined $type_override{$1};
 
     my $mimeobj   = $mime->mimeTypeOf($local_path);
     my $mime_type = (

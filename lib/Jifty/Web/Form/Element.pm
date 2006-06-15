@@ -17,8 +17,10 @@ the name of the javascript event handler, such as C<onclick>, with a
 set of arguments.
 
 The format of the arguments passed to C<onclick> (or any similar
-method) is a hash reference.  It takes a number of possible keys.  The
-most important is the mode of the fragment replacement, if any; it is
+method) is a hash reference or string Strings are inserted verbatim.
+
+Hash references can take a number of possible keys.  The most
+important is the mode of the fragment replacement, if any; it is
 specified by providing at most one of the following keys:
 
 =over
@@ -60,6 +62,12 @@ Removes the given C<REGION> from the page, permanently.
 The following options are also supported:
 
 =over
+
+=item toggle => BOOLEAN
+
+If set to true, then the link will possibly toggle the region to
+empty, if the region's current path is the same as the path the region
+is trying to be set to.
 
 =item region => REGION
 
@@ -103,6 +111,9 @@ use Jifty::JSON;
 =head2 handlers
 
 Currently, the only supported event handlers are C<onclick>.
+WARNING: if you use the onclick handler, make sure that your javascript
+is "return (function name);", or you may well get a very strange-looking
+error from your browser.
 
 =cut
 
@@ -136,7 +147,8 @@ sub javascript {
         my @fragments;
         my @actions;
 
-        for my $hook (ref $value eq "ARRAY" ? @{$value} : ($value)) {
+        for my $hook (grep {ref $_ eq "HASH"} (ref $value eq "ARRAY" ? @{$value} : ($value))) {
+
             my %args;
 
             # Submit action
@@ -168,7 +180,7 @@ sub javascript {
                     $self->log->debug("Can't find region ".$hook->{refresh});
                     @args{qw/mode path region/} = ('Replace', undef, $hook->{refresh});
                 }
-            } elsif ((exists $hook->{refresh_self} and Jifty->web->current_region) or ($hook->{args} and %{$hook->{args}})) {
+            } elsif ((exists $hook->{refresh_self} and Jifty->web->current_region) or (Jifty->web->current_region and $hook->{args} and %{$hook->{args}})) {
                 # If we just pass arguments, treat as a refresh_self
                 @args{qw/mode path region/} = ('Replace', Jifty->web->current_region->path, Jifty->web->current_region);
             } elsif (exists $hook->{delete}) {
@@ -187,8 +199,20 @@ sub javascript {
                 $args{region}  = $args{element} =~ /^#region-(\S+)/ ? "$1-".Jifty->web->serial : Jifty->web->serial;
             }
 
+            # Toggle functionality
+            $args{toggle} = 1 if $hook->{toggle};
+
             # Arguments
-            $args{args} = {Jifty::Request::Mapper->query_parameters( %{ $hook->{args} || {} } )};
+            $args{args} = $hook->{args} || {};
+
+            # We're going to pass complex query mapping structures
+            # as-is to the server, but we need to make sure we're not
+            # trying to pass around Actions, merely their monikers.
+            for my $key (keys %{$args{args}}) {
+                next unless ref $args{args}{$key} eq "HASH";
+                $args{args}{$key}{$_} = $args{args}{$key}{$_}->moniker
+                  for grep {ref $args{args}{$key}{$_}} keys %{$args{args}{$key}};
+            }
 
             # Effects
             $args{$_} = $hook->{$_} for grep {exists $hook->{$_}} qw/effect effect_args/;
@@ -196,8 +220,16 @@ sub javascript {
             push @fragments, \%args;
         }
 
-        my $update = "update( ". Jifty::JSON::objToJson( {actions => \@actions, fragments => \@fragments }, {singlequote => 1}) ." )";
-        $response .= $self->javascript_preempt ? qq| $trigger="return $update"| : qq| $trigger="$update; return true;"|;
+        my $string = join ";", (grep {not ref $_} (ref $value eq "ARRAY" ? @{$value} : ($value)));
+        if (@fragments or @actions) {
+            # Uniqify action monikers
+            my %uniq;
+            @actions = grep {not $uniq{$_}++} @actions;
+
+            my $update = "update( ". Jifty::JSON::objToJson( {actions => \@actions, fragments => \@fragments }, {singlequote => 1}) .", this );";
+            $string .= $self->javascript_preempt ? "return $update" : "$update; return true;";
+        }
+        $response .= qq| $trigger="$string"|;
     }
     return $response;
 }
@@ -240,7 +272,7 @@ sub render_key_binding {
     my $self = shift;
     my $key  = $self->key_binding;
     if ($key) {
-        Jifty->web->out( "<script><!--\naddKeyBinding(" . "'"
+        Jifty->web->out( "<script><!--\nJifty.KeyBindings.add(" . "'"
                 . uc($key) . "', "
                 . "'click', " . "'"
                 . $self->id . "'," . "'"

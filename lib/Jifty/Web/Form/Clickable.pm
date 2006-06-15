@@ -12,7 +12,7 @@ either a button or a link.
 
 =cut
 
-use base qw/Jifty::Web::Form::Element Class::Accessor::Fast/;
+use base 'Jifty::Web::Form::Element';
 
 =head2 accessors
 
@@ -25,10 +25,10 @@ L<Jifty::Web::Form::Element/accessors>.
 
 sub accessors {
     shift->SUPER::accessors,
-        qw(url escape_label tooltip continuation call returns submit preserve_state button);
+        qw(url escape_label tooltip continuation call returns submit preserve_state render_as_button render_as_link);
 }
 __PACKAGE__->mk_accessors(
-    qw(url escape_label tooltip continuation call returns submit preserve_state button)
+    qw(url escape_label tooltip continuation call returns submit preserve_state render_as_button render_as_link)
 );
 
 =head2 new PARAMHASH
@@ -97,17 +97,28 @@ A hash reference of query parameters that go on the link or button.
 These will end up being submitted exactly like normal query
 parameters.
 
-=item button
+=item as_button
 
 By default, Jifty will attempt to make the clickable into a link
 rather than a button, if there are no actions to run on submit.
-Providing a true value for C<button> forces L<generate> to produce a
-L<Jifty::Web::Form::Clickable::InlineButton> instead of a
-L<Jifty::Web::Form::Link>.  Note that providing a false value will
-B<not> guarantee that you get a link, as a button may be necessary
-based on the presence of the L</submit> parameter.
+Providing a true value for C<as_button> forces L<generate> to produce
+a L<Jifty::Web::Form::Clickable::InlineButton> instead of a
+L<Jifty::Web::Form::Link>.
+
+=item as_link
+
+Attempt to rework a button into displaying as a link -- note that this
+only works in javascript browsers.  Supplying B<both> C<as_button> and
+C<as_link> will work, and not as perverse as it might sound at first
+-- it allows you to make any simple GET request into a POST request,
+while still appearing as a link (a GET request).
 
 =item Anything from L<Jifty::Web::Form::Element>
+
+Note that this includes the C<onclick> parameter, which allows
+you to attach javascript to your Clickable object, but be careful
+that your Javascript looks like C<return someFunction();>, or you may
+get an unexpected error from your browser.
 
 =back
 
@@ -129,9 +140,12 @@ sub new {
         submit         => [],
         preserve_state => 0,
         parameters     => {},
-        button         => 0,
+        as_button      => 0,
+        as_link        => 0,
         @_,
     );
+    $args{render_as_button} = delete $args{as_button};
+    $args{render_as_link}   = delete $args{as_link};
 
     $self->{parameters} = {};
 
@@ -231,7 +245,6 @@ Sets the given HTTP paramter named C<KEY> to the given C<VALUE>.
 sub parameter {
     my $self = shift;
     my ( $key, $value ) = @_;
-    ($key, $value) = Jifty::Request::Mapper->query_parameters($key => $value);
     $self->{parameters}{$key} = $value;
 }
 
@@ -262,12 +275,13 @@ sub region_fragment {
     my $self = shift;
     my ( $region, $fragment ) = @_;
 
-    my $defaults = Jifty->web->get_region($region);
+    my $name = ref $region ? $region->qualified_name : $region;
+    my $defaults = Jifty->web->get_region($name);
 
     if ( $defaults and $fragment eq $defaults->default_path ) {
-        $self->state_variable( "region-$region" => undef, $fragment );
+        $self->state_variable( "region-$name" => undef, $fragment );
     } else {
-        $self->state_variable( "region-$region" => $fragment );
+        $self->state_variable( "region-$name" => $fragment );
     }
 }
 
@@ -282,14 +296,26 @@ sub region_argument {
     my $self = shift;
     my ( $region, $argument, $value ) = @_;
 
-    my $defaults = Jifty->web->get_region($region);
+    my $name = ref $region ? $region->qualified_name : $region;
+    my $defaults = Jifty->web->get_region($name);
 
     if ( $defaults and $value eq $defaults->default_argument($argument) ) {
-        $self->state_variable( "region-$region.$argument" => undef, $value );
+        $self->state_variable( "region-$name.$argument" => undef, $value );
     } else {
-        $self->state_variable( "region-$region.$argument" => $value );
+        $self->state_variable( "region-$name.$argument" => $value );
     }
 
+}
+
+# Query-map any complex structures
+sub _map {
+    my %args = @_;
+    for (keys %args) {
+        my ($key, $value) = Jifty::Request::Mapper->query_parameters($_ => $args{$_});
+        delete $args{$_};
+        $args{$key} = $value;
+    }
+    return %args;
 }
 
 =head2 parameters
@@ -316,7 +342,7 @@ sub parameters {
         %parameters = %{ $self->{parameters} };        
     }
 
-    %parameters = ( %{$self->{state_variable} || {}}, %parameters );
+    %parameters = _map( %{$self->{state_variable} || {}}, %parameters );
 
     $parameters{"J:CALL"} = $self->call
         if $self->call;
@@ -337,9 +363,13 @@ The hash of parameters as they would be needed on a POST request.
 sub post_parameters {
     my $self = shift;
 
-    my %parameters = ( %{ $self->{fallback} || {} }, $self->parameters );
+    my %parameters = ( _map( %{ $self->{fallback} || {} } ), $self->parameters );
 
     my ($root) = $ENV{'REQUEST_URI'} =~ /([^\?]*)/;
+
+    # Submit actions should only show up once
+    my %uniq;
+    $self->submit([grep {not $uniq{$_}++} @{$self->submit}]) if $self->submit;
 
     # Add a redirect, if this isn't to the right page
     if ( $self->url ne $root and not $self->returns ) {
@@ -348,10 +378,10 @@ sub post_parameters {
             arguments => { url => $self->url } );
         $parameters{ $redirect->register_name } = ref $redirect;
         $parameters{ $redirect->form_field_name('url') } = $self->url;
-        $parameters{"J:ACTIONS"} = join( ';', @{ $self->submit }, $redirect->moniker )
+        $parameters{"J:ACTIONS"} = join( '!', @{ $self->submit }, $redirect->moniker )
           if $self->submit;
     } else {
-        $parameters{"J:ACTIONS"} = join( ';', @{ $self->submit } )
+        $parameters{"J:ACTIONS"} = join( '!', @{ $self->submit } )
           if $self->submit;
     }
 
@@ -393,6 +423,12 @@ sub complete_url {
     return $url;
 }
 
+sub _defined_accessor_values {
+    my $self = shift;
+    return { map { my $val = $self->$_; defined $val ? ($_ => $val) : () } 
+        $self->SUPER::accessors };
+}
+
 =head2 as_link
 
 Returns the clickable as a L<Jifty::Web::Form::Link>, if possible.
@@ -404,14 +440,12 @@ better determine if a link or a button is more appropriate.
 sub as_link {
     my $self = shift;
 
-    my %args;
-    $args{$_} = $self->$_
-        for grep { defined $self->$_ } $self->SUPER::accessors;
+    my $args = $self->_defined_accessor_values;
     my $link = Jifty::Web::Form::Link->new(
-        %args,
-        escape_label => $self->escape_label,
-        url          => $self->complete_url,
-        @_
+        { %$args,
+          escape_label => $self->escape_label,
+          url          => $self->complete_url,
+          @_ }
     );
     return $link;
 }
@@ -428,13 +462,11 @@ appropriate.
 sub as_button {
     my $self = shift;
 
-    my %args;
-    $args{$_} = $self->$_
-        for grep { defined $self->$_ } $self->SUPER::accessors;
+    my $args = $self->_defined_accessor_values;
     my $field = Jifty::Web::Form::Field->new(
-        %args,
-        type => 'InlineButton',
-        @_
+        { %$args,
+          type => 'InlineButton',
+          @_ }
     );
     my %parameters = $self->post_parameters;
 
@@ -443,7 +475,8 @@ sub as_button {
         map      { $_ . "=" . $parameters{$_} }
             grep { defined $parameters{$_} } keys %parameters
     );
-    $field->name( join '|', keys %{ $args{parameters} } );
+    $field->name( join '|', keys %{ $args->{parameters} } );
+    $field->button_as_link($self->render_as_link);
 
     return $field;
 }
@@ -464,11 +497,20 @@ sub generate {
         next unless $value;
         my @hooks = ref $value eq "ARRAY" ? @{$value} : ($value);
         for my $hook (@hooks) {
-            $hook->{region} ||= Jifty->web->qualified_region;
+            next unless ref $hook eq "HASH";
+            $hook->{region} ||= $hook->{refresh} || Jifty->web->qualified_region;
             $hook->{args}   ||= {};
+            my $region = ref $hook->{region} ? $hook->{region} : Jifty->web->get_region( $hook->{region} );
 
-            $self->region_fragment( $hook->{region}, $hook->{replace_with} )
-                if $hook->{replace_with};
+            if ($hook->{replace_with}) {
+                # Toggle region if the toggle flag is set, and clicking wouldn't change path
+                if ($hook->{toggle} and $region and $hook->{replace_with} eq $region->path) {
+                    $self->region_fragment( $hook->{region}, "/__jifty/empty" )
+                } else {
+                    $self->region_fragment( $hook->{region}, $hook->{replace_with} )
+                }
+                
+            }
             $self->region_argument( $hook->{region}, $_ => $hook->{args}{$_} )
                 for keys %{ $hook->{args} };
             if ( $hook->{submit} ) {
@@ -480,7 +522,7 @@ sub generate {
         }
     }
 
-    return ( ( not( $self->submit ) || @{ $self->submit } || $self->button )
+    return ( ( not( $self->submit ) || @{ $self->submit } || $self->render_as_button )
         ? $self->as_button(@_)
         : $self->as_link(@_) );
 }

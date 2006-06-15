@@ -20,19 +20,37 @@ function updateParentField(field, value) {
 function createCalendarLink(input) {
     var e = $(input);
     if (e) {
-        var link = document.createElement('a');
-        link.setAttribute('href', '#');
-        link.setAttribute('onclick', "openCalWindow('"+e.id+"'); return false;");
-        link.setAttribute('class', 'calendar-link');
+        var link = document.createElement("a");
+        link.setAttribute("href", "javascript:openCalWindow('"+e.id+"')");
+        Element.addClassName(link, "calendar_link");
         
-        var text = document.createTextNode('Calendar');
-        link.appendChild(text);
+        var img = document.createElement("img");
+        img.setAttribute("src", "/static/images/silk/calendar.png");
+        img.setAttribute("border", 0);
+        link.appendChild(img);
         
-        var space = document.createTextNode(' ');
+        var space = document.createTextNode(" ");
         
         e.parentNode.insertBefore(link, e.nextSibling);
         e.parentNode.insertBefore(space, e.nextSibling);
         
+        return true;
+    }
+    return false;
+}
+
+function buttonToLink(input) {
+    var e = $(input);
+    if (e) {
+        var link = document.createElement("a");
+        link.setAttribute("href","#");
+        link.setAttribute("onclick",e.getAttribute("onclick"));
+        link.setAttribute("name",e.getAttribute("name"));
+        link['virtualform'] = Form.Element.getForm(e);
+        link.appendChild(document.createTextNode(e.getAttribute("value")));
+
+        e.parentNode.insertBefore(link, e.nextSibling);
+        e.parentNode.removeChild(e);
         return true;
     }
     return false;

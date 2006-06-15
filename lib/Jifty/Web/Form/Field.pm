@@ -41,11 +41,11 @@ aid in placing them in L<HTML::Mason> components.
 
 =cut
 
-use base qw/Jifty::Web::Form::Element Class::Accessor::Fast/;
+use base 'Jifty::Web::Form::Element';
 
 use Scalar::Util;
 use HTML::Entities;
-use overload '""' => sub {shift->render};
+use overload '""' => sub { shift->render};
 
 =head2 new
 
@@ -56,23 +56,20 @@ Should only be called from C<< $action->arguments >>.
 
 sub new {
     my $class = shift;
-    my $self = bless {}, $class;
-
-    my %args = (
-        type          => 'text',
+    my $self = $class->SUPER::new(
+      { type          => 'text',
         class         => '',
         input_name    => '',
         default_value => '',
         sticky_value  => '',
-        render_mode   => 'update',
-        @_,
-    );
+        render_mode   => 'update' });
+    my $args = ref($_[0]) ? $_[0] : {@_};
 
     my $subclass;
-    if ($args{render_as}) {
-        $subclass = ucfirst($args{render_as});
-    } elsif ($args{'type'}) {
-        $subclass = ucfirst($args{'type'});
+    if ($args->{render_as}) {
+        $subclass = ucfirst($args->{render_as});
+    } elsif ($args->{'type'}) {
+        $subclass = ucfirst($args->{'type'});
     }
     if ($subclass) { 
         $subclass = 'Jifty::Web::Form::Field::' . $subclass unless $subclass =~ /::/;
@@ -80,7 +77,7 @@ sub new {
     }
 
     for my $field ( $self->accessors() ) {
-        $self->$field( $args{$field} ) if exists $args{$field};
+        $self->$field( $args->{$field} ) if exists $args->{$field};
     }
 
     # If they key and/or value imply that this argument is going to be
@@ -173,12 +170,12 @@ sub input_name {
 # Otherwise, we should ask our action, how to turn our "name"
 # into a form input name.
 
-    $self->_input_name(@_)
-      || (
-          $self->action
-        ? $self->action->form_field_name( $self->name )
-        : ''
-      );
+    my $ret = $self->_input_name(@_);
+    return $ret if $ret;
+
+    my $action = $self->action;
+    return $action ? $self->action->form_field_name( $self->name )
+                   : '';
 }
 
 
@@ -279,9 +276,10 @@ sub current_value {
 =head2 render
 
 Outputs this form element in a span with class C<form_field>.  This
-outputs the label, the widget itself, any hints, and any errors, using
-L</render_label>, L</render_widget>, L</render_hints>,
-L</render_errors> respectively.  Returns an empty string.
+outputs the label, the widget itself, any hints, any errors, and any
+warnings using L</render_label>, L</render_widget>, L</render_hints>,
+L</render_errors>, and L</render_warnings>, respectively.  Returns an
+empty string.
 
 This is also what C<Jifty::Web::Form::Field>s do when stringified.
 
@@ -300,6 +298,7 @@ sub render {
         $self->render_key_binding();
         $self->render_hints();
         $self->render_errors();
+        $self->render_warnings();
     } elsif ($self->render_mode eq 'read'){ 
         $self->render_value();
     }
@@ -331,6 +330,7 @@ sub render_wrapper_start {
     my $self = shift;
     my @classes = qw(form_field);
     if ($self->mandatory) { push @classes, 'mandatory' }
+    if ($self->name)      { push @classes, 'argument-'.$self->name }
     Jifty->web->out('<div class="'.join(' ', @classes).'">' ."\n");
 }
 
@@ -376,7 +376,7 @@ an empty string.
 sub render_label {
     my $self = shift;
     Jifty->web->out(
-qq!<label class="label @{[$self->classes]}" for="@{[$self->input_name ]}">@{[_($self->label) ]}</label>\n!
+qq!<label class="label @{[$self->classes]}" for="@{[$self->element_id ]}">@{[_($self->label) ]}</label>\n!
     );
 
     return '';
@@ -485,7 +485,7 @@ subclasses commonly override this.  Returns an empty string.
 sub render_hints { 
     my $self = shift;
     Jifty->web->out(
-qq!<span class="hints @{[$self->classes]}">@{[$self->hints || '']}</span>\n!
+qq!<span class="hints @{[$self->classes]}">@{[_($self->hints) || '']}</span>\n!
     );
 
     return '';
@@ -507,6 +507,24 @@ sub render_errors {
 
     Jifty->web->out(
 qq!<span class="error @{[$self->classes]}" id="@{[$self->action->error_div_id($self->name)]}">@{[  $self->action->result->field_error( $self->name ) || '']}</span>\n!
+    );
+    return '';
+}
+
+=head2 render_warnings
+
+Outputs a <div> with any warnings for this action, even if there are
+none -- AJAX could fill it in.
+
+=cut
+
+sub render_warnings {
+    my $self = shift;
+
+    return unless $self->action;
+
+    Jifty->web->out(
+qq!<span class="warning @{[$self->classes]}" id="@{[$self->action->warning_div_id($self->name)]}">@{[  $self->action->result->field_warning( $self->name ) || '']}</span>\n!
     );
     return '';
 }
