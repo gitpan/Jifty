@@ -15,12 +15,12 @@ not run its Makefile.PL or Build.PL.
 Hash: SHA1
 
 SHA1 2271c6378627c220004a47808a3bc99a7feba787 AUTHORS
-SHA1 7af89b111ce3775af48b9a305cc30ec32f911bcd Changelog
+SHA1 f778d87093b2c2257c7617cdea4086ce5b320df6 Changelog
 SHA1 4babaaac002a6a1c4c6d2590891b71e22ca72cd5 Changes
-SHA1 4256434e8aa9398a95fa21e45ba22f2cf406d631 MANIFEST
+SHA1 0f088f98b0ab937ac9464b2c94b32feaf2224623 MANIFEST
 SHA1 3ad8481344a1d0ce2dc5726c1db8bea1917402de MANIFEST.SKIP
-SHA1 2cb271660bf8fa2c68e8d8a435b1102e829c990c META.yml
-SHA1 61a0fcca8b8bf4c27b8c777bc5db57b843b11174 Makefile.PL
+SHA1 1053f9796855a8e7e61c922349b173ace59a384a META.yml
+SHA1 cddf0f990a06c99fcfa247d6f41afb2b6c3a2d2a Makefile.PL
 SHA1 e395a2eabaf8faf8266dedc664c1eb52c6c589cf README
 SHA1 aaf8f7a1025fc97077072672f325e2a5f3c03a41 bin/build_par
 SHA1 d7982e7064c5ee2a98ea858ebf57664f50a26c40 bin/jifty
@@ -47,16 +47,6 @@ SHA1 805d3d3a498e63e69a8092f1b53fa0eacef60ff0 doc/talks/npw.2006.xul
 SHA1 966b3b5901ad3cd8d80b2eb803d56dcb26fefc1f doc/talks/npw.2006/Blog/META.yml
 SHA1 e13c8e74b8ad2a1c519c37154bc052bab7df7a2f doc/talks/npw.2006/Blog/Makefile.PL
 SHA1 bab0077c1352a4c99e9c3d48be04d72be21ec0cf doc/talks/npw.2006/Blog/bin/jifty
-SHA1 da39a3ee5e6b4b0d3255bfef95601890afd80709 doc/talks/npw.2006/Blog/blib/arch/.exists
-SHA1 da39a3ee5e6b4b0d3255bfef95601890afd80709 doc/talks/npw.2006/Blog/blib/arch/auto/Blog/.exists
-SHA1 da39a3ee5e6b4b0d3255bfef95601890afd80709 doc/talks/npw.2006/Blog/blib/bin/.exists
-SHA1 da39a3ee5e6b4b0d3255bfef95601890afd80709 doc/talks/npw.2006/Blog/blib/lib/.exists
-SHA1 b34a0d7261d44e505bdb65945b9ee09a78105d48 doc/talks/npw.2006/Blog/blib/lib/Blog/Model/Entry.pm
-SHA1 da39a3ee5e6b4b0d3255bfef95601890afd80709 doc/talks/npw.2006/Blog/blib/lib/auto/Blog/.exists
-SHA1 da39a3ee5e6b4b0d3255bfef95601890afd80709 doc/talks/npw.2006/Blog/blib/man1/.exists
-SHA1 da39a3ee5e6b4b0d3255bfef95601890afd80709 doc/talks/npw.2006/Blog/blib/man3/.exists
-SHA1 da39a3ee5e6b4b0d3255bfef95601890afd80709 doc/talks/npw.2006/Blog/blib/script/.exists
-SHA1 5a4b52d08e6cadcf49b9b8a0bef5ffe4b466885c doc/talks/npw.2006/Blog/blog
 SHA1 f429c0ec9bf17fb7f48b6744ade39a82bf59a25d doc/talks/npw.2006/Blog/etc/config.yml
 SHA1 e28cf2d3ba35f6ca3a448acc7bee191b7c390379 doc/talks/npw.2006/Blog/inc/Module/Install.pm
 SHA1 e7c1c86f57b6778f4bdc7fd8c1b950e60ef41bc0 doc/talks/npw.2006/Blog/inc/Module/Install/Base.pm
@@ -66,8 +56,8 @@ SHA1 8ac832baf4f9e8e72d3e8f103cee6e8a94ac80e1 doc/talks/npw.2006/Blog/inc/Module
 SHA1 0807e79d6dbfda4fcd3db0fc7df2e33e0cba263b doc/talks/npw.2006/Blog/inc/Module/Install/Metadata.pm
 SHA1 4da0a1fce2339cc3f8c296c7716480d2564d9470 doc/talks/npw.2006/Blog/inc/Module/Install/Win32.pm
 SHA1 9a903a1d178954ad864c7dcc98f9fa5c005d1553 doc/talks/npw.2006/Blog/inc/Module/Install/WriteAll.pm
-SHA1 09ee5088e741096ae1351d4f4503f29d9b5dd99b doc/talks/npw.2006/Blog/lib/Blog/Dispatcher.pm
-SHA1 619e160162f0c36d0680ef14004fcd0ac8dadbce doc/talks/npw.2006/Blog/lib/Blog/Model/Entry.pm
+SHA1 cca70e8c4681b8fc795fa41b0e18da303979e016 doc/talks/npw.2006/Blog/lib/Blog/Dispatcher.pm
+SHA1 3740a7ad07b0766d1fe0f1aea0165e91dd1f3e78 doc/talks/npw.2006/Blog/lib/Blog/Model/Entry.pm
 SHA1 da39a3ee5e6b4b0d3255bfef95601890afd80709 doc/talks/npw.2006/Blog/pm_to_blib
 SHA1 12b69b2eec0350496a21a6921ecaece2755ca7d0 doc/talks/npw.2006/Blog/share/web/templates/index.html
 SHA1 1d9f68e6693e85646617e037a50ca361dbc9691b doc/talks/npw.2006/Blog/share/web/templates/new_entry
@@ -115,11 +105,11 @@ SHA1 f49498cd0f5bcaccd1be89b1fc702eb95ea185e6 inc/Module/Install/Share.pm
 SHA1 4da0a1fce2339cc3f8c296c7716480d2564d9470 inc/Module/Install/Win32.pm
 SHA1 9a903a1d178954ad864c7dcc98f9fa5c005d1553 inc/Module/Install/WriteAll.pm
 SHA1 c17e8f3cf8ebe1eb4929fd2bd2fd530a9de1abd0 lib/Email/Send/Jifty/Test.pm
-SHA1 a8cb7f279636ba2d1221cb6aa45048f9b39e3067 lib/Jifty.pm
+SHA1 df3723b97dfb0d987200c6a94d200a8e8d77c332 lib/Jifty.pm
 SHA1 97b88e634644b2634bcd5c96d21a9fbb02bc135c lib/Jifty/API.pm
 SHA1 8dcd395e1c3ca13dd744ff9e6fef6520b521fa0e lib/Jifty/Action.pm
 SHA1 a6d9d87b4fa06cfab36f249a67946b45669dcee7 lib/Jifty/Action/Autocomplete.pm
-SHA1 242d428a86805515c4343d59716aac74a04574d5 lib/Jifty/Action/Record.pm
+SHA1 de9e7d35fee2b2869db89cf9ac91ea0637252589 lib/Jifty/Action/Record.pm
 SHA1 0d909072f18b64c0e09541142c1df5199792bd7a lib/Jifty/Action/Record/Create.pm
 SHA1 8417e5141d1e90c08a5359cc147d56590cd8af9b lib/Jifty/Action/Record/Delete.pm
 SHA1 36570d7212b7ae11909e9ca99845b4d66021799b lib/Jifty/Action/Record/Update.pm
@@ -168,7 +158,7 @@ SHA1 cf62ec426f70ee858b419962bfe09935ea976df3 lib/Jifty/Script/Schema.pm
 SHA1 d0c43aa75f74e910d66e5670d71f4ae535645aac lib/Jifty/Script/Server.pm
 SHA1 3fd6fc85409c817f55c9293c7a5b75fedf0c0e11 lib/Jifty/Server.pm
 SHA1 ea1c411be2edef35b1e06d35160515b9f1167308 lib/Jifty/Test.pm
-SHA1 b0e52be79fde9ab8dbf9d8eade10f44024cd1929 lib/Jifty/Test/WWW/Mechanize.pm
+SHA1 7d46fa2471b204601592b9f05269fc25e384d26b lib/Jifty/Test/WWW/Mechanize.pm
 SHA1 a5a8369a03ba70cc9086a123afeef29a770f90f0 lib/Jifty/TestServer.pm
 SHA1 7561e9fb302562617853fcc2a9be665a67ffc4d8 lib/Jifty/Upgrade.pm
 SHA1 cd2a8612b1b7204d321b80eea365036c29702fc2 lib/Jifty/Upgrade/Internal.pm
@@ -247,7 +237,7 @@ SHA1 4d44eff44dca8ddec98629e70ef7cb57a3347d36 share/web/static/js/cssquery/cssQu
 SHA1 a4e88de89162ef98d8ca4d763d31e67733176d1f share/web/static/js/cssquery/cssQuery.js
 SHA1 e72565db2119b617c9ca0af948956a399caa5720 share/web/static/js/dom-drag.js
 SHA1 a1d2c6292d656c275383b97aad6ca913b8a1b031 share/web/static/js/halo.js
-SHA1 2944ef108debb47ee70846daf4b8413e6152c76b share/web/static/js/jifty.js
+SHA1 7a210fe482baf8df7653b70c30df242a897ff49c share/web/static/js/jifty.js
 SHA1 5f49e5bd3eb2f4f5951597ed9fd68c07dc564c28 share/web/static/js/jifty_utils.js
 SHA1 49478568d1f258c9d061faa30c2181fd999b07f0 share/web/static/js/jsTrace.js
 SHA1 3b3493afbf46fc8afba58f541e338836bedbdd0b share/web/static/js/jsan/DOM/Events.js
@@ -364,7 +354,7 @@ SHA1 710c4b0faaea46f90a7b071e5396541a59ed0ff1 t/TestApp/t/config-Record
 -----BEGIN PGP SIGNATURE-----
 Version: GnuPG v1.4.3 (Darwin)
 
-iD8DBQFEkWcBEi9d9xCOQEYRAnEyAKCJXpa+WZYa3SayxoHsM2l/ltPDmwCfQeya
-gTGNaJw9YnKGKmw0ic5KW1w=
-=oNhL
+iD8DBQFEkqB8Ei9d9xCOQEYRAlwRAKCnTsHsRvpmlYEwDXNaTfnWN4geuwCePptr
+nBI2PS+cMFqMh30633g/sQA=
+=ZnNP
 -----END PGP SIGNATURE-----

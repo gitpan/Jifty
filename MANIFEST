@@ -25,16 +25,6 @@ doc/talks/new-entry.png
 doc/talks/npw.2006.xul
 doc/talks/npw.2006/blog.png
 doc/talks/npw.2006/Blog/bin/jifty
-doc/talks/npw.2006/Blog/blib/arch/.exists
-doc/talks/npw.2006/Blog/blib/arch/auto/Blog/.exists
-doc/talks/npw.2006/Blog/blib/bin/.exists
-doc/talks/npw.2006/Blog/blib/lib/.exists
-doc/talks/npw.2006/Blog/blib/lib/auto/Blog/.exists
-doc/talks/npw.2006/Blog/blib/lib/Blog/Model/Entry.pm
-doc/talks/npw.2006/Blog/blib/man1/.exists
-doc/talks/npw.2006/Blog/blib/man3/.exists
-doc/talks/npw.2006/Blog/blib/script/.exists
-doc/talks/npw.2006/Blog/blog
 doc/talks/npw.2006/Blog/etc/config.yml
 doc/talks/npw.2006/Blog/inc/Module/Install.pm
 doc/talks/npw.2006/Blog/inc/Module/Install/Base.pm
