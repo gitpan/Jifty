@@ -76,16 +76,21 @@ sub new {
         arguments  => {},
         sticky_on_success => 0,
         sticky_on_failure => 1,
-	current_user => undef,
+        current_user => undef,
         @_);
 
     if ($args{'current_user'}) {
-	$self->current_user($args{current_user});
+        $self->current_user($args{current_user});
     } else {
-    	$self->_get_current_user();
+        $self->_get_current_user();
     }
 
-    $self->moniker($args{'moniker'} || 'auto-'.Jifty->web->serial);
+    if ($args{'moniker'}) {
+        $self->moniker($args{'moniker'});
+    } else {
+        $self->moniker('auto-'.Jifty->web->serial);
+        $self->log->debug("Generating moniker auto-".Jifty->web->serial);
+    }
     $self->order($args{'order'});
     $self->argument_values( { %{ $args{'arguments'} } } );
     $self->result(Jifty->web->response->result($self->moniker) || Jifty::Result->new);
@@ -134,9 +139,17 @@ requiring that the user enter a value for that field.
 See L<Jifty::Web::Form::Field> for the list of possible keys that each
 argument can have.
 
-In addition to the list there, you may use this additional key:
+In addition to the list there, you may use these additional keys:
 
 =over
+
+=item constructor
+
+A boolean which, if set, indicates that the argument B<must> be
+present in the C<arguments> passed to create the action, rather than
+being expected to be set later.
+
+Defaults to false.
 
 =item ajax_canonicalizes
 
@@ -162,6 +175,9 @@ This routine, unsurprisingly, actually runs the action.
 If the result of the action is currently a success (validation did not
 fail), C<run> calls L</take_action>, and finally L</cleanup>.
 
+If you're writing your own actions, you probably want to override
+C<take_action> instead.
+
 =cut
 
 sub run {
@@ -169,6 +185,18 @@ sub run {
     $self->log->debug("Running action");
     unless ($self->result->success) {
         $self->log->debug("Not taking action, as it doesn't validate");
+
+        # dump field warnings and errors to debug log
+        foreach my $what (qw/warnings errors/) {
+            my $f = "field_" . $what;
+            my @r =
+                map {
+                    $_ . ": " . $self->result->{$f}->{$_}
+                } grep { $self->result->{$f}->{$_} }
+                    keys %{ $self->result->{$f} };
+            $self->log->debug("Action result $what:\n\t", join("\n\t", @r)) if (@r);
+        }
+
         return;
     }
     $self->log->debug("Taking action");
@@ -265,6 +293,22 @@ sub argument_value {
 }
 
 
+=head2 has_argument ARGUMENT
+
+Returns true if the action has been provided with an value for the
+given argument, including a default_value, and false if none was ever
+passed in.
+
+=cut
+
+sub has_argument {
+    my $self = shift;
+    my $arg = shift;
+
+    return exists $self->argument_values->{$arg};
+}
+
+
 =head2 form_field ARGUMENT
 
 Returns a L<Jifty::Web::Form::Field> object for this argument.  If
@@ -277,10 +321,15 @@ C<ARGUMENT>, returns C<undef>.
 sub form_field {
     my $self = shift;
     my $arg_name = shift;
-    $self->_form_widget( argument => $arg_name,
-                         render_mode => 'update',
-                         @_);
 
+    my $mode = (defined $self->arguments->{$arg_name}{'render_mode'}
+                    and $self->arguments->{$arg_name}{'render_mode'} eq 'read')
+                        ? 'read'
+                        : 'update';
+    
+    $self->_form_widget( argument => $arg_name,
+                         render_mode => $mode,
+                         @_);
 }
 
 

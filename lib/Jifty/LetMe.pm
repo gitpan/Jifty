@@ -19,6 +19,14 @@ Jifty::LetMe - A way to expose single-link URLs to your applications
 Create a new "LetMe" authentication object; it takes no parameters.
 It calls L</_init> to do any initialization.
 
+A LetMe is a way to provide a one-time-use URL for a particular purpose.
+All LetMe objects give you a way to validate someone's identity and to
+allow them a very small set of possible actions or page-access permissions.
+
+For example, you can put a LetMe URL in an email to a new user,
+so that when they click on the URL you know that their email address
+is valid.
+
 =cut
 
 sub new {
@@ -76,19 +84,7 @@ sub _user_from_email {
     return $currentuser_object_class->new( email => $email );
 }
 
-
-=head2 generate_checksum
-
-Returns an auth checksum for the current combination of
-
-    user
-    token
-    until
-
-=cut
-
-
-sub generate_checksum {
+sub _generate_digest {
     my $self = shift;
 
     # get user's generic secret
@@ -102,18 +98,55 @@ sub generate_checksum {
     my %args = %{$self->args};
     $digest->add( $_, $args{$_}) for sort keys %args;
     $digest->add( $self->until ) if ($self->until);
-    # only take the first 16 characters. we're rally just trying to
+    return $digest->hexdigest();
+}
+
+
+
+=head2 generate_checksum
+
+Returns an auth checksum for the current combination of
+
+    user
+    path
+    arguments
+    until
+
+=cut
+
+sub generate_checksum {
+    my $self = shift;
+
+    return substr( $self->_generate_digest, 0, 16 );
+}
+
+=head2 generate_koremutake_checksum
+
+Generate a slightly more pronouncable version of the checksum using
+L<String::Koremutake>.  Due to hex -> integer limitations, this is
+imporecise and may vary depending on the platform it is used on; as
+such, it is deprecated.
+
+=cut
+
+sub generate_koremutake_checksum {
+    my $self = shift;
+
+    # Only take the first 16 characters. We're really just trying to
     # get something reasonably short, memorable and unguessable. Also,
     # don't use Math::BigInt->new directly for simple computation,
     # because it insists exporting overload to us, which makes
-    # devel::cover and devel::dprof very sad.
+    # devel::cover and devel::dprof very sad.  This is deprecated in
+    # favor of generate_checksum, which returns a straight hex digest.
     my $integer_digest = Math::BigInt::Calc->_str(
         Math::BigInt::Calc->_from_hex(
-            substr( $digest->hexdigest(), 0, 16 )
+            substr( $self->_generate_digest, 0, 16 )
         )
     );
 
-    # koremutake it
+    # koremutake it.  This loses precision, since most perls can't
+    # deal with 64 bits with precision.  Thus, $integer_digest ends up
+    # being rounded, possibly in unpredicatable ways.
     my $k = String::Koremutake->new;
     return( $k->integer_to_koremutake($integer_digest));
 
@@ -208,7 +241,7 @@ sub as_url {
 By default, all "LetMe" actions live at URLs under '/let' inside your
 application.  Override this subroutine to change that.
 
-By default, it returns '/let'
+By default, it returns '/let/'
 
 =cut
 
@@ -259,7 +292,10 @@ actually do much input checking. You want to call "validate"
 
 sub _correct_checksum_provided {
     my $self = shift;
-    return undef unless ($self->checksum_provided eq $self->generate_checksum); 
+    return undef
+        unless ( $self->checksum_provided eq $self->generate_checksum )
+        or
+        ( $self->checksum_provided eq $self->generate_koremutake_checksum );
 
 }
 

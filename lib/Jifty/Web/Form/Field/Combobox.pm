@@ -61,4 +61,12 @@ EOF
     '';
 }
 
+=head2 render_autocomplete
+
+Never render anything for autocomplete.
+
+=cut
+
+sub render_autocomplete {''}
+
 1;

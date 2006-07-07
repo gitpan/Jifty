@@ -14,7 +14,7 @@ div.form_field {
     float: left;
 }
 
-div.form_field label.label {
+div.form_field label.label, div.form_field span.label {
     float: left;
     width: 15%;
     text-align: right;
@@ -50,6 +50,11 @@ input.text, input.date, input.password, textarea, select {
     border-bottom: 1px solid #ddd;
     background: #fff url(/static/images/css/fieldbg.gif) repeat-x top;
     padding: 0.2em;
+}
+
+form input.ajaxautocompletes {
+    background: #fff url(/static/images/css/fieldbg-autocomplete.gif) repeat-x top right;
+    padding-right: 18px;
 }
 
 input.date {

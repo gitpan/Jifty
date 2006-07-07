@@ -132,6 +132,8 @@ sub action_form {
 
     my $i;
     for my $form ($self->forms) {
+        no warnings 'uninitialized';
+
         $i++;
         next unless first {   $_->name =~ /J:A-(?:\d+-)?$moniker/
                            && $_->type eq "hidden" }
@@ -205,6 +207,44 @@ sub send_action {
     return $content;
 }
 
+=head2 fragment_request PATH ARGUMENT => VALUE, [ ... ]
+
+Makes a request for the fragment at PATH, using the webservices API,
+and returns the string of the result.
+
+=cut
+
+sub fragment_request {
+    my $self = shift;
+    my $path = shift;
+    my %args = @_;
+
+    my $uri = $self->uri->clone;
+    $uri->path("__jifty/webservices/xml");
+
+    my $request = HTTP::Request->new(
+        POST => $uri,
+        [ 'Content-Type' => 'text/x-yaml' ],
+        Jifty::YAML::Dump(
+            {   path => $uri->path,
+                fragments => {
+                    fragment => {
+                        name  => 'fragment',
+                        path  => $path,
+                        args  => \%args
+                    }
+                }
+            }
+        )
+    );
+    my $result = $self->request( $request );
+    use XML::Simple;
+    my $content = eval { XML::Simple::XMLin($result->content, SuppressEmpty => '')->{fragment}{content} } || '';
+    $self->back;
+    return $content;
+}
+
+
 # When it sees something like
 # http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd as a DOCTYPE, this will make
 # it open static/dtd/xhtml1-strict.dtd instead -- great for offline hacking!
@@ -269,9 +309,11 @@ L<Test::HTML::Lint>.
 sub get_html_ok {
     my $self = shift;
     $self->get(@_);
-    # TODO XXX FIXME play with $Test::Builder::Level to get errors reported from
-    # right place?
-    html_ok($self->content);
+    {
+        local $Test::Builder::Level = $Test::Builder::Level;
+        $Test::Builder::Level++;
+        html_ok($self->content);
+    }       
 } 
 
 =head2 submit_html_ok 
@@ -284,9 +326,11 @@ L<Test::HTML::Lint>.
 sub submit_html_ok {
     my $self = shift;
     $self->submit(@_);
-    # TODO XXX FIXME play with $Test::Builder::Level to get errors reported from
-    # right place?
-    html_ok($self->content);
+    {
+        local $Test::Builder::Level = $Test::Builder::Level;
+        $Test::Builder::Level++;
+        html_ok($self->content);
+    }
 } 
 
 =head2 follow_link_ok 
@@ -305,9 +349,11 @@ sub follow_link_ok {
 
     carp("Couldn't find link") unless
       $self->follow_link(@_);
-    # TODO XXX FIXME play with $Test::Builder::Level to get errors reported from
-    # right place?
-    html_ok($self->content);
+    {
+        local $Test::Builder::Level = $Test::Builder::Level;
+        $Test::Builder::Level++;
+        html_ok($self->content);
+    }
 } 
 
 =head2 session
@@ -341,7 +387,7 @@ sub continuation {
     return undef unless $session;
     
     my $id = shift;
-    ($id) = $self->uri =~ /J:C(?:ALL)?=([^&;]+)/ unless $id;
+    ($id) = $self->uri =~ /J:(?:C|CALL|RETURN)=([^&;]+)/ unless $id;
 
     return $session->get_continuation($id);
 }

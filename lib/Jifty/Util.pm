@@ -37,9 +37,47 @@ sub absolute_path {
     my $self = shift;
     my $path = shift || '';
 
+
     return $ABSOLUTE_PATH{$path} if (exists $ABSOLUTE_PATH{$path});
+    $path = $self->canonicalize_path($path);
     return $ABSOLUTE_PATH{$path} = File::Spec->rel2abs($path , Jifty::Util->app_root);
 } 
+
+
+=head2 canonicalize_path PATH
+
+Takes a "path" style /foo/bar/baz and returns a canonicalized (but not necessarily absolute)
+version of the path.
+
+=cut 
+
+sub canonicalize_path {
+    my $self = shift;
+    my $path = shift;
+
+    my @path = File::Spec->splitdir($path);
+
+    my @newpath;
+
+    for (@path)  {
+        # If we have an empty part and it's not the root, skip it.
+        if ( @newpath and ($_ =~ /^(?:\.|)$/)) {
+            next;
+        }
+        elsif( $_ ne '..')  {
+        push @newpath, $_ ;
+    } else {
+        pop @newpath;
+    }
+
+    }
+
+    
+    return File::Spec->catdir(@newpath);
+
+
+}
+
 
 =head2 jifty_root
 
@@ -190,8 +228,7 @@ sub require {
         return 0;
     }
 
-    my $path =  join('/', split(/::/,$class)).".pm";
-    return 1 if $INC{$path};
+    return 1 if $self->already_required($class);
 
     my $retval = $class->require;
     if ($UNIVERSAL::require::ERROR) {
@@ -208,6 +245,19 @@ sub require {
     }
 
     return 1;
+}
+
+=head2 already_required class
+
+Helper function to test whether a given class has already been require'd.
+
+=cut
+
+
+sub already_required {
+    my ($self, $class) = @_;
+    my $path =  join('/', split(/::/,$class)).".pm";
+    return ( $INC{$path} ? 1 : 0);
 }
 
 =head1 AUTHOR

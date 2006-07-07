@@ -168,7 +168,12 @@ sub start {
     }
 
     for (keys %args) {
-        $self->$_($args{$_}) if $self->can($_);
+        if ( $self->can($_) ) {
+            $self->$_($args{$_});
+        } else {
+			my (undef, $template, $line) = caller;
+            $self->log->warn("Unknown parameter to Jifty->web->form->start: $_ in $template line $line");
+        }
     }
 
     my $form_start = qq!<form method="post" action="$ENV{PATH_INFO}"!;
@@ -192,9 +197,9 @@ sub submit {
     my $self = shift;
 
     my $button = Jifty::Web::Form::Clickable->new(submit => undef, @_)->generate;
-    Jifty->web->out(qq{<span class="submit_button">});
+    Jifty->web->out(qq{<div class="submit_button">});
     $button->render_widget;
-    Jifty->web->out(qq{</span>});
+    Jifty->web->out(qq{</div>});
 
     return '';
 }

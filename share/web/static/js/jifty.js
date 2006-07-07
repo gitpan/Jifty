@@ -113,14 +113,30 @@ Action.prototype = {
         for (var i = 0; i < fields.length; i++) {
             var f = fields[i];
 
-            if ((Form.Element.getType(f) != "registration") && (Form.Element.getValue(f) != null)) {
+            if (   (Form.Element.getType(f) != "registration")
+		&& (Form.Element.getValue(f) != null)) {
                 if (! a['fields'][Form.Element.getField(f)])
                     a['fields'][Form.Element.getField(f)] = {};
-                a['fields'][Form.Element.getField(f)][Form.Element.getType(f)] = Form.Element.getValue(f);
+		var field = Form.Element.getField(f);
+		var type = Form.Element.getType(f);
+		    
+                a['fields'][field][type] = this._mergeValues(a['fields'][field][type],
+							     Form.Element.getValue(f));
             }
         }
 
         return a;
+    },
+
+    _mergeValues: function() {
+	var oldval = arguments[0];
+	var newval = arguments[1];
+	if(!oldval) return newval;
+	if(oldval.constructor != Array) {
+	    oldval = [oldval];
+	}
+	oldval.push(newval);
+	return oldval;
     },
 
     // Validate the action
@@ -352,10 +368,11 @@ Object.extend(Form.Element, {
 
 // Form elements should AJAX validate if the CSS says so
 Behaviour.register({
-    '.ajaxvalidation': function(elt) {
+    'input.ajaxvalidation, textarea.ajaxvalidation, input.ajaxcanonicalization, textarea.ajaxcanonicalization': function(elt) {
         elt.onblur = function () {
             Form.Element.validate(this);
-        } 
+        }
+	elt = null;	//Prevent IE from leaking memory
     },
     'input.date': function(e) {
         if ( !Element.hasClassName( e, 'has_calendar_link' ) ) {
@@ -584,73 +601,98 @@ function update() {
 
     // And when we get the result back..
     var onSuccess = function(transport, object) {
-        // In case there's no XML in the response, or what have you
-        try {
-            // Grab the XML response
-            var response = transport.responseXML.documentElement;
+        // Grab the XML response
+        var response = transport.responseXML.documentElement;
 
-            // For each fragment we requested
-            for (var i = 0; i < named_args['fragments'].length; i++) {
-                var f = named_args['fragments'][i];
-                var element = f['element'];
+        // For each fragment we requested
+        for (var i = 0; i < named_args['fragments'].length; i++) {
+            var f = named_args['fragments'][i];
+            var element = f['element'];
 
-                // Change insertion mode if need be
-                var insertion = null;
-                if (f['mode'] && (f['mode'] != 'Replace')) {
-                    insertion = eval('Insertion.'+f['mode']);
-                }
+            // Change insertion mode if need be
+            var insertion = null;
+            if (f['mode'] && (f['mode'] != 'Replace')) {
+                insertion = eval('Insertion.'+f['mode']);
+            }
 
-                // Loop through the result looking for it
-                for (var response_fragment = response.firstChild;
-                     response_fragment != null;
-                     response_fragment = response_fragment.nextSibling) {
-                    if (response_fragment.nodeName == 'fragment') {
-                        if (response_fragment.getAttribute("id") == f['region']) {
-                            var textContent;
-                            if (response_fragment.textContent) {
-                                textContent = response_fragment.textContent;
-                            } else {
-                                textContent = response_fragment.firstChild.nodeValue;
+            // Loop through the result looking for it
+            for (var response_fragment = response.firstChild;
+                 response_fragment != null;
+                 response_fragment = response_fragment.nextSibling) {
+                if (response_fragment.nodeName == 'fragment') {
+                    if (response_fragment.getAttribute("id") == f['region']) {
+                        // We found the right fragment
+                        var dom_fragment = fragments[f['region']];
+                        var new_dom_args = $H();
+
+                        for (var fragment_bit = response_fragment.firstChild;
+                             fragment_bit != null;
+                             fragment_bit = fragment_bit.nextSibling) {
+                            if (fragment_bit.nodeName == 'argument') {
+                                // First, update the fragment's arguments
+                                // with what the server actually used --
+                                // this is needed in case there was
+                                // argument mapping going on
+                                var textContent = '';
+                                if (fragment_bit.textContent) {
+                                    textContent = fragment_bit.textContent;
+                                } else if (fragment_bit.firstChild) {
+                                    textContent = fragment_bit.firstChild.nodeValue;
+                                }
+                                new_dom_args[fragment_bit.getAttribute("name")] = textContent;
+                            } else if (fragment_bit.nodeName == 'content') {
+                                var textContent = '';
+                                if (fragment_bit.textContent) {
+                                    textContent = fragment_bit.textContent;
+                                } else if (fragment_bit.firstChild) {
+                                    textContent = fragment_bit.firstChild.nodeValue;
+                                }
+
+                                // Once we find it, do the insertion
+                                if (insertion) {
+                                    new insertion(element, textContent.stripScripts());
+                                } else {
+                                    Element.update(element, textContent.stripScripts());
+                                }
+                                // We need to give the browser some "settle" time before we eval scripts in the body
+                                setTimeout((function() { this.evalScripts() }).bind(textContent), 10);
+                                Behaviour.apply(f['element']);
                             }
-                            // Once we find it, do the insertion
-                            if (insertion) {
-                                new insertion(element, textContent.stripScripts());
-                            } else {
-                                Element.update(element, textContent.stripScripts());
-                            }
-                            // We need to give the browser some "settle" time before we eval scripts in the body
-                            setTimeout((function() { this.evalScripts() }).bind(textContent), 10);
-			    Behaviour.apply(f['element']);
                         }
+                        dom_fragment.setArgs(new_dom_args);
                     }
                 }
+            }
 
-                // Also, set us up the effect
-                if (f['effect']) {
+            // Also, set us up the effect
+            if (f['effect']) {
+                try {
                     var effect = eval('Effect.'+f['effect']);
                     var effect_args  = f['effect_args'] || {};
-                    if (f['is_new'])
-                        Element.hide($('region-'+f['region']));
-                    (effect)($('region-'+f['region']), effect_args);
-                }
-            }
-            for (var result = response.firstChild;
-                 result != null;
-                 result = result.nextSibling) {
-                if (result.nodeName == 'result') {
-                    for (var key = result.firstChild;
-			 key != null;
-			 key = key.nextSibling) {
-			show_action_result(result.getAttribute("moniker"),key);
+                    if (effect) {
+                        if (f['is_new'])
+                            Element.hide($('region-'+f['region']));
+                        (effect)($('region-'+f['region']), effect_args);
                     }
+                } catch ( e ) {
+                    // Don't be sad if the effect doesn't exist
                 }
             }
-        } finally { }
+        }
+        for (var result = response.firstChild;
+             result != null;
+             result = result.nextSibling) {
+            if (result.nodeName == 'result') {
+                for (var key = result.firstChild;
+                     key != null;
+                     key = key.nextSibling) {
+                    show_action_result(result.getAttribute("moniker"),key);
+                }
+            }
+        }
     };
     var onFailure = function(transport, object) {
-        if (request['actions'].keys().length > 0) {
-            alert('No response from server!');
-        }
+        alert('No response from server!');
     };
 
     // Build variable structure
@@ -720,7 +762,22 @@ function show_action_result() {
     var moniker = arguments[0];
     var result = arguments[1];
     var status = result.nodeName;
-    var text = result.textContent;
+
+    if (status == 'field') {
+        // If this is a field, it has kids which are <error> or <message> -- loop through them
+        for (var key = result.firstChild;
+             key != null;
+             key = key.nextSibling) {
+            show_action_result(moniker,key);
+        }
+        return;
+    }
+
+    /* This is a workaround for Safari, which does not support textContent */
+    var text = result.textContent
+                    ? result.textContent
+                    : (result.firstChild ? result.firstChild.nodeValue : '');
+
     if(status != 'message' && status != 'error') return;
 
     var node = document.createElement('div');
@@ -736,8 +793,8 @@ function show_action_result() {
     }
     
     setTimeout(function () {
-	    new Effect.Fade(node, {duration: 5.0});
-    }, 2000);
+	    new Effect.Fade(node, {duration: 3.0});
+    }, 3500);
 }
 
 Jifty.Autocompleter = Class.create();
@@ -747,8 +804,7 @@ Object.extend(Object.extend(Jifty.Autocompleter.prototype, Ajax.Autocompleter.pr
     this.action = Form.Element.getAction(this.field);
     this.url    = '/__jifty/autocomplete.xml';
 
-
-    this.baseInitialize(this.field, $(div));
+    this.baseInitialize(this.field, $(div), { minChars: "0" });
   },
 
   getUpdatedChoices: function() {

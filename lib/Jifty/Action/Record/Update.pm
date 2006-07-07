@@ -33,6 +33,12 @@ sub arguments {
     my $self = shift;
     my $arguments = $self->SUPER::arguments(@_);
 
+    for my $column ( $self->record->columns ) {
+        if ( not $column->writable and $column->readable ) {
+            $arguments->{$column->name}{'render_mode'} = 'read';
+        }
+    }
+
     for my $pk (@{ $self->record->_primary_keys }) {
         $arguments->{$pk}{'constructor'} = 1;
         $arguments->{$pk}{'mandatory'} = 1;
@@ -59,7 +65,7 @@ sub _validate_arguments {
     my $self = shift;
 
     $self->_validate_argument($_) for grep {
-        exists $self->argument_values->{$_}
+        $self->has_argument($_)
             or $self->arguments->{$_}->{constructor}
     } $self->argument_names;
 
@@ -80,7 +86,7 @@ sub take_action {
 
     for my $field ( $self->argument_names ) {
         # Skip values that weren't submitted
-        next unless exists $self->argument_values->{$field};
+        next unless $self->has_argument($field);
 
         my $column = $self->record->column($field);
 

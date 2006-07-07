@@ -99,6 +99,11 @@ Jifty.KeyBindings = {
         }
         
         if ( dl.hasChildNodes() ) {
+            var label = document.createElement("div");
+            label.setAttribute("class", "keybindings_label");
+            label.appendChild( document.createTextNode("Hotkeys:") );
+            
+            e.appendChild( label );
             e.appendChild( dl );
             Element.addClassName(e, 'keybindings-written');
         
@@ -108,4 +113,4 @@ Jifty.KeyBindings = {
     }
 }
 
-Behaviour.register({ "div#keybindings": Jifty.KeyBindings.writeLegend });
+Behaviour.register({ "#keybindings": Jifty.KeyBindings.writeLegend });

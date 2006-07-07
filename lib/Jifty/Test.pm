@@ -8,6 +8,7 @@ use Jifty::Server;
 use Jifty::Script::Schema;
 use Email::LocalDelivery;
 use Email::Folder;
+use File::Path;
 
 =head2 import_extra
 
@@ -27,14 +28,15 @@ sub import_extra {
 
 Merges the L</test_config> into the default configuration, resets the
 database, and resets the fake "outgoing mail" folder.  This is the
-method to override if you wish to do custom setup work.
+method to override if you wish to do custom setup work, such as insert
+test data into your database.
 
 =cut
 
 sub setup {
     my $class = shift;
 
-    my $test_config = File::Temp->new;
+    my $test_config = File::Temp->new( UNLINK => 0 );
     Jifty::YAML::DumpFile($test_config, $class->test_config(Jifty::Config->new));
     # Invoking bin/jifty and friends will now have the test config ready.
     $ENV{'JIFTY_TEST_CONFIG'} ||= $test_config;
@@ -53,6 +55,9 @@ sub setup {
     }
     my $root = Jifty::Util->app_root;
     unshift @INC, "$root/lib" if ($root);
+
+    # Mason's disk caching sometimes causes false tests
+    rmtree(["$root/var/mason"], 0, 1);
 
     Jifty->new( no_handle => 1 );
 
@@ -76,6 +81,18 @@ by appending a 'test', as well as setting the port to a random port
 between 10000 and 15000.
 
 It is passed the current configuration.
+
+You can override this to provide application-specific test
+configuration, e.g:
+
+    sub test_config {
+        my $class = shift;
+        my ($config) = @_;
+        my $hash = $class->SUPER::test_config($config);
+        $hash->{framework}{LogConfig} = "etc/log-test.conf"
+    
+        return $hash;
+    }
 
 =cut
 
@@ -206,7 +223,7 @@ END {
     }
 
     # Unlink test file
-    undef $Test->{test_config} if $Test->{test_config};
+    unlink $Test->{test_config} if $Test->{test_config};
 }
 
 1;

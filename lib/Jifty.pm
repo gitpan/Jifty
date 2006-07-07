@@ -5,7 +5,7 @@ package Jifty;
 use encoding 'utf8';
 # Work around the fact that Time::Local caches thing on first require
 BEGIN { local $ENV{'TZ'} = "GMT";  require Time::Local;}
-$Jifty::VERSION = '0.60616';
+$Jifty::VERSION = '0.60706';
 
 =head1 NAME
 
@@ -70,7 +70,10 @@ use vars qw/$HANDLE $CONFIG $LOGGER $HANDLER $API @PLUGINS/;
 
 This class method instantiates a new C<Jifty> object. This object
 deals with configuration files, logging and database handles for the
-system.  Most of the time, the server will call this for you to set up
+system.  Before this method returns, it calls the application's C<start>
+method (i.e. C<MyApp->start>) to handle any application-specific startup.
+
+Most of the time, the server will call this for you to set up
 your C<Jifty> object.  If you are writing command-line programs that
 want to use your libraries (as opposed to web services) you will need
 to call this yourself.
@@ -116,8 +119,6 @@ sub new {
     push @Jifty::Record::ISA, Jifty->config->framework('Database')->{'RecordBaseClass'};
 
     __PACKAGE__->logger( Jifty::Logger->new( $args{'logger_component'} ) );
-    # Get a classloader set up
-    Jifty::ClassLoader->new(base => Jifty->config->framework('ApplicationClass'))->require;
 
     # Set up plugins
     my @plugins;
@@ -125,18 +126,27 @@ sub new {
         my $class = "Jifty::Plugin::".(keys %{$plugin})[0];
         my %options = %{ $plugin->{(keys %{$plugin})[0]} };
         Jifty::Util->require($class);
+        Jifty::ClassLoader->new(base => $class)->require;
         push @plugins, $class->new(%options);
     }
+
+    # Get a classloader set up
+    Jifty::ClassLoader->new(base => Jifty->config->framework('ApplicationClass'))->require;
+
     __PACKAGE__->plugins(@plugins);
     __PACKAGE__->handler(Jifty::Handler->new());
     __PACKAGE__->api(Jifty::API->new());
 
+    # Let's get the database rocking and rolling
+    __PACKAGE__->setup_database_connection(%args);
 
-   # Let's get the database rocking and rolling
-   __PACKAGE__->setup_database_connection(%args);
-
-
-
+    # Call the application's start method to let it do anything
+    # application specific for startup
+    my $app = Jifty->config->framework('ApplicationClass');
+    
+    $app->start()
+        if $app->can('start');
+    
 }
 
 =head2 config

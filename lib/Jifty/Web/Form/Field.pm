@@ -45,7 +45,7 @@ use base 'Jifty::Web::Form::Element';
 
 use Scalar::Util;
 use HTML::Entities;
-use overload '""' => sub { shift->render};
+use overload '""' => sub { shift->render}, bool => sub { 1 };
 
 =head2 new
 
@@ -65,16 +65,9 @@ sub new {
         render_mode   => 'update' });
     my $args = ref($_[0]) ? $_[0] : {@_};
 
-    my $subclass;
-    if ($args->{render_as}) {
-        $subclass = ucfirst($args->{render_as});
-    } elsif ($args->{'type'}) {
-        $subclass = ucfirst($args->{'type'});
-    }
-    if ($subclass) { 
-        $subclass = 'Jifty::Web::Form::Field::' . $subclass unless $subclass =~ /::/;
-        bless $self, $subclass if Jifty::Util->require($subclass);
-    }
+    my $subclass = ucfirst($args->{render_as} || $args->{type} || 'text');
+    $subclass = 'Jifty::Web::Form::Field::' . $subclass unless $subclass =~ /::/;
+    bless $self, $subclass if Jifty::Util->require($subclass);
 
     for my $field ( $self->accessors() ) {
         $self->$field( $args->{$field} ) if exists $args->{$field};
@@ -107,8 +100,8 @@ C<new>.  Subclasses should extend this list.
 
 =cut
 
-sub accessors { shift->SUPER::accessors(), qw(name label input_name type sticky sticky_value default_value action mandatory ajax_validates autocompleter preamble hints render_mode length _element_id); }
-__PACKAGE__->mk_accessors(qw(name _label _input_name type sticky sticky_value default_value _action mandatory ajax_validates autocompleter preamble hints render_mode length _element_id));
+sub accessors { shift->SUPER::accessors(), qw(name label input_name type sticky sticky_value default_value action mandatory ajax_validates ajax_canonicalizes autocompleter preamble hints render_mode length _element_id); }
+__PACKAGE__->mk_accessors(qw(name _label _input_name type sticky sticky_value default_value _action mandatory ajax_validates ajax_canonicalizes autocompleter preamble hints render_mode length _element_id));
 
 =head2 name [VALUE]
 
@@ -141,7 +134,28 @@ Gets or sets the default value for the form.
 
 Gets or sets the value for the form field that was submitted in the last action.
 
-=cut
+=head2 mandatory [VALUE]
+
+A boolean indicating that the argument B<must> be present when the
+user submits the form.
+
+=head2 ajax_validates [VALUE]
+
+A boolean value indicating if user input into an HTML form field for
+this argument should be L<validated|Jifty::Manual::Glossary/validate>
+via L<AJAX|Jifty::Manual::Glossary/AJAX> as the user fills out the
+form, instead of waiting until submit. Arguments will B<always> be
+validated before the action is run, whether or not they also
+C<ajax_validate>.
+
+=head2 ajax_canonicalizes [VALUE]
+
+A boolean value indicating if user input into an HTML form field for
+this argument should be L<canonicalized|Jifty::Manual::Glossary/canonicalize>
+via L<AJAX|Jifty::Manual::Glassary/AJAX> as the user fills out the
+form, instead of waiting until submit.  Arguments will B<always> be
+canonicalized before the action is run, whether or not they also
+C<ajax_canonicalize>
 
 =head2 id 
 
@@ -375,9 +389,15 @@ an empty string.
 
 sub render_label {
     my $self = shift;
-    Jifty->web->out(
+    if ( $self->render_mode eq 'update' ) {
+        Jifty->web->out(
 qq!<label class="label @{[$self->classes]}" for="@{[$self->element_id ]}">@{[_($self->label) ]}</label>\n!
-    );
+        );
+    } else {
+        Jifty->web->out(
+            qq!<span class="label @{[$self->classes]}">@{[_($self->label) ]}</span>\n!
+        );
+    }
 
     return '';
 }
@@ -408,11 +428,15 @@ sub render_widget {
 
 =head2 other_widget_properties
 
-If your widget subclass has other properties it wants to insert into the html of the main widget and you haven't subclassed render_widget,
+If your widget subclass has other properties it wants to insert into the html
+of the main widget and you haven't subclassed render_widget then you can just
+subclass this.
 
-just stick them in your local sub render_widget.
+If you have subclassed render_widget then just stick them in your local sub
+render_widget.
 
-We use this for marking password fields as not-autocomplete
+We use this for marking password fields as not-autocomplete so the browser does
+not try to use its form autocompletion on them.
 
 
 =cut
@@ -427,7 +451,12 @@ Returns the "class=" line for our widget. Optionally takes extra classes to appe
 
 sub _widget_class {
     my $self = shift;
-    my @classes = ('widget', $self->classes, ($self->ajax_validates ? ' ajaxvalidation' : ''),@_);
+    my @classes = ( 'widget',
+                    $self->classes,
+                    ( $self->ajax_validates     ? ' ajaxvalidation' : '' ),
+                    ( $self->ajax_canonicalizes ? ' ajaxcanonicalization' : '' ),
+                    ( $self->autocompleter      ? ' ajaxautocompletes' : '' ),
+                    @_ );
 
     return qq! class="!. join(' ',@classes).  qq!"!
 
@@ -464,7 +493,7 @@ sub render_autocomplete {
     my $self = shift;
     return unless($self->autocompleter);
     Jifty->web->out(
-qq!<div class="autocomplete" id="@{[$self->element_id]}-autocomplete" style="display:none;border:1px solid black;background-color:white;"></div>\n
+qq!<div class="autocomplete" id="@{[$self->element_id]}-autocomplete" style="display: none;"></div>\n
         <script type="text/javascript">
           new Jifty.Autocompleter('@{[$self->element_id]}','@{[$self->element_id]}-autocomplete')
         </script>

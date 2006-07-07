@@ -7,10 +7,11 @@ requires('App::CLI' => 0.03 ); # App::CLI::Command::Help App::CLI::Command
 requires('Cache::Cache'); #Cache::FileCache
 requires('Calendar::Simple');
 requires('Class::Accessor'); # Class::Accessor::Fast
+requires('Class::Accessor::Named'); 
 requires('Class::Container');
 requires('Class::Data::Inheritable');
 requires('Compress::Zlib');
-requires('CSS::Squish' => 0.01 );
+requires('CSS::Squish' => 0.05 );
 requires('DBD::SQLite' => 1.11 );
 requires('Data::Page');
 requires('DateTime');
@@ -28,7 +29,7 @@ requires('HTML::Mason' => 1.3101);           # HTML::Mason::Exceptions HTML::Mas
 requires('HTML::Mason::Plugin');
 requires('HTTP::Cookies');
 requires('HTTP::Date');
-requires('HTTP::Server::Simple' => '0.10');  # HTTP::Server::Simple::CGI
+requires('HTTP::Server::Simple' => '0.20');  # HTTP::Server::Simple::CGI
 requires('HTTP::Server::Simple::Recorder');
 requires('Hash::Merge');
 requires('Hook::LexWrap');
@@ -36,7 +37,7 @@ requires('Jifty::DBI' => '0.21' );            # Jifty::DBI::Collection Jifty::DB
 requires('Locale::Maketext::Extract' => '0.20');
 requires('Locale::Maketext::Lexicon' => '0.60');
 requires('Log::Log4perl');
-requires('LWP::UserAgent');
+requires('LWP::UserAgent'); # Net::HTTP
 requires('MIME::Types');
 requires('Module::CoreList');
 requires('Module::Install::Admin' => '0.50');

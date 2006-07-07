@@ -49,7 +49,7 @@ sub run {
         $self->create_all_tables();
     } elsif ( $self->{'setup_tables'} ) {
         $self->upgrade_jifty_tables();
-        $self->upgrade_appliction_tables();
+        $self->upgrade_application_tables();
     } else {
         print "Done.\n";
     }
@@ -266,23 +266,23 @@ sub upgrade_jifty_tables {
 
     my $appv = version->new( $Jifty::VERSION );
 
-    $self->upgrade_tables( "Jifty" => $dbv, $appv, "Jifty::Upgrade::Internal" );
+    return unless $self->upgrade_tables( "Jifty" => $dbv, $appv, "Jifty::Upgrade::Internal" );
     Jifty::Model::Metadata->store( jifty_db_version => $appv );
 }
 
-=head2 upgrade_appliction_tables
+=head2 upgrade_application_tables
 
 Upgrade the application's tables.
 
 =cut
 
-sub upgrade_appliction_tables {
+sub upgrade_application_tables {
     my $self = shift;
     my $dbv = version->new( Jifty::Model::Metadata->load( 'application_db_version' ) );
     my $appv
         = version->new( Jifty->config->framework('Database')->{'Version'} );
 
-    $self->upgrade_tables( $self->{_application_class} => $dbv, $appv );
+    return unless $self->upgrade_tables( $self->{_application_class} => $dbv, $appv );
     Jifty::Model::Metadata->store( application_db_version => $appv );
 }
 
@@ -311,13 +311,13 @@ sub upgrade_tables {
         return;
     }
     $log->info(
-        "Gerating SQL to upgrade $baseclass $dbv database to $appv"
+        "Generating SQL to upgrade $baseclass $dbv database to $appv"
     );
 
     # Figure out what versions the upgrade knows about.
+    Jifty::Util->require($upgradeclass) or return;
     my %UPGRADES;
     eval {
-        Jifty::Util->require($upgradeclass);
         $UPGRADES{$_} = [ $upgradeclass->upgrade_to($_) ]
             for grep { $appv >= version->new($_) and $dbv < version->new($_) }
             $upgradeclass->versions();
@@ -418,6 +418,7 @@ sub upgrade_tables {
         $log->info("Upgraded to version $appv");
         Jifty->handle->commit;
     }
+    return 1;
 }
 
 

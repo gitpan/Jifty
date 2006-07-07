@@ -18,14 +18,50 @@ use CSS::Squish;
 use Digest::MD5 qw(md5_hex);
 use base qw/Class::Accessor::Fast Class::Data::Inheritable Jifty::Object/;
 
-use vars qw/$SERIAL/;
+use vars qw/$SERIAL @JS_INCLUDES/;
 
 __PACKAGE__->mk_accessors(
     qw(next_page request response session temporary_current_user _current_user)
 );
 
 __PACKAGE__->mk_classdata($_)
-    for qw(cached_css cached_css_digest cached_css_mtime);
+    for qw(cached_css        cached_css_digest
+           cached_javascript cached_javascript_digest javascript_libs);
+
+__PACKAGE__->javascript_libs([qw(
+    jsan/JSAN.js
+    setup_jsan.js
+    jsan/Upgrade/Array/push.js
+    jsan/DOM/Events.js
+    json.js
+    prototype.js
+    cssquery/cssQuery.js
+    cssquery/cssQuery-level2.js
+    cssquery/cssQuery-level3.js
+    cssquery/cssQuery-standard.js
+    behaviour.js
+    scriptaculous/builder.js
+    scriptaculous/effects.js
+    scriptaculous/controls.js
+    formatDate.js
+    jifty.js
+    jifty_utils.js
+    jifty_smoothscroll.js
+    calendar.js
+    dom-drag.js
+    halo.js
+    combobox.js
+    key_bindings.js
+    context_menu.js
+    bps_util.js
+    rico.js
+    yui/yahoo.js
+    yui/dom.js
+    yui/event.js
+    yui/calendar.js
+    app.js
+    app_behaviour.js
+)]);
 
 =head1 METHODS
 
@@ -114,7 +150,7 @@ sub serial {
     # We don't use a lexical for the serial number, because then it
     # would be reset on module refresh
     $SERIAL ||= 0;
-    return join( "S", ++$SERIAL, $$ );    # Start at 1.
+    return join('', "S", ++$SERIAL, $$ );    # Start at 1.
 }
 
 =head2 SESSION MANAGEMENT
@@ -220,13 +256,13 @@ passes all of these criteria, the action is fit to be run.
 
 Before they are run, however, the request has a chance to be
 interrupted and saved away into a continuation, to be resumed at some
-later point.  This is handled by L</save_continuation>.
+later point.  This is handled by L<Jifty::Request/save_continuation>.
 
 If the continuation isn't being saved, then C<handle_request> goes on
 to run all of the actions.  If all of the actions are successful, it
 looks to see if the request wished to call any continuations, possibly
 jumping back and re-running a request that was interrupted in the
-past.  This is handled by L</call_continuation>.
+past.  This is handled by L<Jifty::Request/call_continuation>.
 
 For more details about continuations, see L<Jifty::Continuation>.
 
@@ -262,7 +298,7 @@ sub handle_request {
 
         push @valid_actions, $request_action;
     }
-    $self->save_continuation;
+    $self->request->save_continuation;
 
     unless ( $self->request->just_validating ) {
         for my $request_action (@valid_actions) {
@@ -306,7 +342,6 @@ sub handle_request {
             $self->request->do_mapping;
         }
     }
-    $self->session->set_cookie();
 
     # If there's a continuation call, don't do the rest of this
     return if $self->response->success and $self->request->call_continuation;
@@ -372,6 +407,7 @@ sub new_action {
         class     => undef,
         moniker   => undef,
         arguments => {},
+        current_user => $self->current_user,
         @_
     );
 
@@ -406,7 +442,7 @@ sub new_action {
 
     my $action;
     # XXX TODO bullet proof
-    eval { $action = $class->new( %args, arguments => {%arguments}, current_user => $self->current_user ); };
+    eval { $action = $class->new( %args, arguments => {%arguments} ); };
     if ($@) {
         my $err = $@;
         $self->log->fatal($err);
@@ -512,29 +548,40 @@ Redirect to the next page. If you pass this method a parameter, it
 redirects to that URL rather than B<next_page>.
 
 It creates a continuation of where you want to be, and then calls it.
+If you want to redirect to a parge with parameters, pass in a
+L<Jifty::Web::Form::Clickable> object.
 
 =cut
 
 sub redirect {
     my $self = shift;
     my $page = shift || $self->next_page;
+    $page = Jifty::Web::Form::Clickable->new( url => $page )
+      unless ref $page and $page->isa("Jifty::Web::Form::Clickable");
+
+    warn "Don't include GET paramters in the redirect URL -- use a Jifty::Web::Form::Clickable instead.  See L<Jifty::Web/redirect>" if $page->url =~ /\?/;
+
+    my %overrides = ( @_ );
+    $page->parameter($_ => $overrides{$_}) for keys %overrides;
 
     my @actions = Jifty->web->request->actions;
 
-    if (   $self->response->results
+    # To submit a Jifty::Action::Redirect, we don't need to serialize a continuation,
+    # unlike any other kind of actions.
+    if (  (grep { not $_->action_class->isa('Jifty::Action::Redirect') }
+                values %{{ $self->response->results }})
         or $self->request->state_variables
         or $self->{'state_variables'}
         or $self->request->continuation
-        or @actions )
+        or grep { $_->active and not $_->class->isa('Jifty::Action::Redirect') } @actions )
     {
         my $request = Jifty::Request->new();
-        $request->path($page);
         $request->add_state_variable( key => $_->key, value => $_->value )
           for $self->request->state_variables;
         $request->add_state_variable( key => $_, value => $self->{'state_variables'}->{$_} )
           for keys %{ $self->{'state_variables'} };
         for (@actions) {
-            $request->add_action(
+            my $new_action = $request->add_action(
                 moniker   => $_->moniker,
                 class     => $_->class,
                 order     => $_->order,
@@ -542,19 +589,24 @@ sub redirect {
                 has_run   => $_->has_run,
                 arguments => $_->arguments,
             );
+            # Clear out filehandles, which don't go thorugh continuations well
+            $new_action->arguments->{$_} = ''
+              for grep {ref $new_action->arguments->{$_} eq "Fh"}
+                keys %{$new_action->arguments || {}};
         }
+        my %parameters = ($page->parameters);
+        $request->argument($_ => $parameters{$_}) for keys %parameters;
+        $request->path($page->url);
+
         $request->continuation($self->request->continuation);
         my $cont = Jifty::Continuation->new(
             request  => $request,
             response => $self->response,
             parent   => $self->request->continuation,
         );
-        if ($page =~ /\?/) {
-            $page .= "&";
-        } else {
-            $page .= "?";
-        }
-        $page .="J:CALL=" . $cont->id;
+        $page = $page->url."?J:RETURN=" . $cont->id;
+    } else {
+        $page = $page->complete_url;
     }
     $self->_redirect($page);
 }
@@ -583,87 +635,6 @@ sub _redirect {
     # Mason abort, or dispatcher abort out of here
     $self->mason->abort if $self->mason;
     Jifty::Dispatcher::_abort;
-}
-
-=head3 save_continuation
-
-Saves the current request and response if we've been asked to.  If we
-save the continuation, we redirect to the next page -- the call to
-C<save_continuation> never returns.
-
-=cut
-
-sub save_continuation {
-    my $self = shift;
-
-    my %args = %{ $self->request->arguments };
-    my $clone = delete $self->request->arguments->{'J:CLONE'};
-    my $create = delete $self->request->arguments->{'J:CREATE'};
-    if ( $clone or $create ) {
-
-        # Saving a continuation
-        my $c = Jifty::Continuation->new(
-            request  => $self->request,
-            response => $self->response,
-            parent   => $self->request->continuation,
-            clone    => $clone,
-        );
-
-# XXX Only if we're cloning should we do the following check, I think??  Cloning isn't a stack push, so it works out
-        if ( $clone
-            and $self->request->just_validating
-            and $self->response->failure )
-        {
-
-# We don't get to redirect to the new page; redirect to the same page, new cont
-            $self->_redirect(
-                $self->request->path . "?J:C=" . $c->id );
-        } else {
-
-            # Set us up with the new continuation
-            $self->_redirect( Jifty::Web->url . $args{'J:PATH'}
-                    . ( $args{'J:PATH'} =~ /\?/ ? "&" : "?" ) . "J:C="
-                    . $c->id );
-        }
-
-    }
-}
-
-=head3 multipage START_URL, ARGUMENTS
-
-B<Note>: This API is very much not finalized.  Don't use it yet!
-
-Create a multipage action.  The first argument is the URL of the start
-of the multipage action -- the user will be redirected there if they
-try to enter the multipage action on any other page.  The rest of the
-arguments are passed to L<Jifty::Request/add_action> to create the
-multipage action.
-
-=cut
-
-sub multipage {
-    my $self = shift;
-    my ( $start, %args ) = @_;
-
-    my $request_action = Jifty->web->caller->action( $args{moniker} );
-
-    unless ($request_action) {
-        my $request = Jifty::Request->new();
-        $request->argument(
-            'J:CALL' => Jifty->web->request->continuation->id )
-            if Jifty->web->request->continuation;
-        $request->path("/");
-        $request->add_action(%args);
-        my $cont = Jifty::Continuation->new( request => $request );
-        Jifty->web->redirect( $start . "?J:C=" . $cont->id );
-    }
-
-    my $action = Jifty->web->new_action_from_request($request_action);
-    $action->result(
-        Jifty->web->request->continuation->response->result( $args{moniker} )
-        )
-        if Jifty->web->request->continuation->response;
-    return $action;
 }
 
 =head3 caller
@@ -709,10 +680,11 @@ sub tangent {
         $clickable->state_variable( $_ => $self->{'state_variables'}{$_} )
             for keys %{ $self->{'state_variables'} };
 
-        my $request = Jifty::Request->new(path => Jifty->web->request->path)
-          ->from_webform(%{Jifty->web->request->arguments}, $clickable->get_parameters);
+        my $request = Jifty->web->request->clone;
+        my %clickable = $clickable->get_parameters;
+        $request->argument($_ => $clickable{$_}) for keys %clickable;
         local Jifty->web->{request} = $request;
-        Jifty->web->handle_request();
+        Jifty->web->request->save_continuation;
     }
 }
 
@@ -792,6 +764,8 @@ sub render_messages {
 
         my $plural = $type . "s";
         $self->out(qq{<div id="$plural">});
+        $self->out(qq[<a id="dismiss_$plural" href="#"
+                         onclick="Effect.DropOut(this.parentNode); return false;">]._('Dismiss').qq[</a>]);
         foreach my $moniker ( @monikers ) {
             if ( $results{$moniker}->$type() ) {
                 $self->out( qq{<div class="$type $moniker">}
@@ -875,6 +849,198 @@ sub page_navigation {
     return $self->{page_navigation};
 }
 
+=head3 include_css
+
+Returns a C<< <link> >> tag for the compressed CSS
+
+=cut
+
+sub include_css {
+    my $self = shift;
+    
+    if ( Jifty->config->framework('DevelMode') ) {
+        $self->out(
+            '<link rel="stylesheet" type="text/css" '
+            . 'href="/static/css/main.css" />'
+        );
+    }
+    else {
+        $self->generate_css;
+    
+        $self->out(
+            '<link rel="stylesheet" type="text/css" href="/__jifty/css/'
+            . __PACKAGE__->cached_css_digest . '.css" />'
+        );
+    }
+    
+    return '';
+}
+
+=head3 generate_css
+
+Checks if the compressed CSS is generated, and if it isn't, generates
+and caches it.
+
+=cut
+
+sub generate_css {
+    my $self = shift;
+    
+    if (not defined __PACKAGE__->cached_css_digest
+            or Jifty->config->framework('DevelMode'))
+    {
+        Jifty->log->debug("Generating CSS...");
+        
+        my $app   = File::Spec->catdir(
+                        Jifty->config->framework('Web')->{'StaticRoot'},
+                        'css'
+                    );
+
+        my $jifty = File::Spec->catdir(
+                        Jifty->config->framework('Web')->{'DefaultStaticRoot'},
+                        'css'
+                    );
+
+        my $file = Jifty::Util->absolute_path(
+                        File::Spec->catpath( '', $app, 'main.css' )
+                   );
+
+        if ( not -e $file ) {
+            $file = Jifty::Util->absolute_path(
+                         File::Spec->catpath( '', $jifty, 'main.css' )
+                    );
+        }
+
+        CSS::Squish->roots( Jifty::Util->absolute_path( $app ), $jifty );
+        
+        my $css = CSS::Squish->concatenate( $file );
+
+        __PACKAGE__->cached_css( $css );
+        __PACKAGE__->cached_css_digest( md5_hex( $css ) );
+    }
+}
+
+=head3 include_javascript
+
+Returns a C<< <script> >> tag for the compressed Javascript.
+
+Your application specific javascript goes in
+F<share/web/static/js/app.js>.  This will be automagically included if
+it exists.
+
+If you want to add javascript behaviour to your page using CSS
+selectors then put your behaviour rules in
+F<share/web/static/js/app_behaviour.js> which will also be
+automagically included if it exists.  The C<behaviour.js> library is
+included by Jifty.  For more information on C<behaviour.js> see
+L<http://bennolan.com/behaviour/>.
+
+However if you want to include other javascript libraries you need to
+add them to the javascript_libs array of your application.  Do this in
+the C<start> sub of your main application class.  For example if your application is Foo then in L<lib/Foo.pm>
+
+ sub start {
+   Jifty->web->javascript_libs([
+ 			       @{ Jifty->web->javascript_libs },
+ 			       "yourJavascriptLib.js",
+ 			      ]);
+ }
+
+Jifty will look for javascript libraries under share/web/static/js/ by
+default.
+
+=cut
+
+sub include_javascript {
+    my $self  = shift;
+    
+    if ( Jifty->config->framework('DevelMode') ) {
+        for my $file ( @{ __PACKAGE__->javascript_libs } ) {
+            $self->out(
+                qq[<script type="text/javascript" src="/static/js/$file"></script>\n]
+            );
+        }
+    }
+    else {
+        $self->generate_javascript;
+    
+        $self->out(
+            qq[<script type="text/javascript" src="/__jifty/js/]
+            . __PACKAGE__->cached_javascript_digest . qq[.js"></script>]
+        );
+    }
+    
+    return '';
+}
+
+=head3 generate_javascript
+
+Checks if the compressed JS is generated, and if it isn't, generates
+and caches it.
+
+=cut
+
+sub generate_javascript {
+    my $self = shift;
+    
+    if (not defined __PACKAGE__->cached_javascript_digest
+            or Jifty->config->framework('DevelMode'))
+    {
+        Jifty->log->debug("Generating JS...");
+        
+        my @roots = (
+            Jifty::Util->absolute_path(
+                File::Spec->catdir(
+                    Jifty->config->framework('Web')->{'StaticRoot'},
+                    'js'
+                )
+            ),
+
+            Jifty::Util->absolute_path(
+                File::Spec->catdir(
+                    Jifty->config->framework('Web')->{'DefaultStaticRoot'},
+                    'js'
+                )
+            ),
+        );
+        
+        my $js = "";
+
+        for my $file ( @{ __PACKAGE__->javascript_libs } ) {
+            my $include;
+        
+            for my $root (@roots) {
+                my @spec = File::Spec->splitpath( $root, 1 );
+                my $path = File::Spec->catpath( @spec[0,1], $file );
+                
+                if ( -e $path ) {
+                    $include = $path;
+                    last;
+                }
+            }
+
+            if ( defined $include ) {
+                my $fh;
+
+                if ( open $fh, '<', $include ) {
+                    $js .= "/* Including '$file' */\n\n";
+                    $js .= $_ while <$fh>;
+                    $js .= "\n/* End of '$file' */\n\n";
+                }
+                else {
+                    $js .= "\n/* Unable to open '$file': $! */\n";
+                }
+            }
+            else {
+                $js .= "\n/* Unable to find '$file' */\n";
+            }
+        }
+
+        __PACKAGE__->cached_javascript( $js );
+        __PACKAGE__->cached_javascript_digest( md5_hex( $js ) );
+    }
+}
+
 =head2 STATE VARIABLES
 
 =head3 get_variable NAME
@@ -900,6 +1066,8 @@ Behind the scenes, these variables get serialized into every link or
 form that is marked as 'state preserving'.  See
 L<Jifty::Web::Form::Clickable>.
 
+Passing C<undef> as a value will remove the variable
+
 =cut
 
 sub set_variable {
@@ -907,7 +1075,11 @@ sub set_variable {
     my $name  = shift;
     my $value = shift;
 
-    $self->{'state_variables'}->{$name} = $value;
+    if (!defined($value)) {
+        delete $self->{'state_variables'}->{$name};
+    } else {
+        $self->{'state_variables'}->{$name} = $value;
+    }
 
 }
 
@@ -927,6 +1099,18 @@ sub state_variables {
         for keys %{ $self->{'state_variables'} };
 
     return %vars;
+}
+
+=head3 clear_state_variables
+
+Remove all the state variables to be serialized for the next request.
+
+=cut
+
+sub clear_state_variables {
+    my $self = shift;
+
+    $self->{'state_variables'} = {};
 }
 
 =head2 REGIONS
@@ -990,65 +1174,6 @@ placed in the current region.
 sub qualified_region {
     my $self = shift;
     return join( "-", map { $_->name } @{ $self->{'region_stack'} || [] }, @_ );
-}
-
-=head3 include_css
-
-Returns a C<< <link> >> tag for the compressed CSS
-
-=cut
-
-sub include_css {
-    my $self = shift;
-    
-    if ( Jifty->config->framework('DevelMode') ) {
-        $self->out(
-            '<link rel="stylesheet" type="text/css" '
-            . 'href="/static/css/main.css" />'
-        );
-    }
-    else {
-        $self->generate_css;
-    
-        $self->out(
-            '<link rel="stylesheet" type="text/css" href="/__jifty/css/'
-            . __PACKAGE__->cached_css_digest . '.css" />'
-        );
-    }
-    
-    return '';
-}
-
-=head3 generate_css
-
-Checks if the compressed CSS is generated, and if it isn't, generates
-and caches it.
-
-=cut
-
-sub generate_css {
-    my $self = shift;
-    
-    if (not defined __PACKAGE__->cached_css_digest
-            or Jifty->config->framework('DevelMode'))
-    {
-        Jifty->log->debug("Generating CSS...");
-        
-        my $css_dir = File::Spec->catdir(
-                           Jifty->config->framework('Web')->{'StaticRoot'},
-                           'css'
-                      );
-
-         my $css = CSS::Squish->concatenate(
-                      Jifty::Util->absolute_path(
-                          File::Spec->catpath( '', $css_dir, 'main.css' )
-                      )
-                   );
-
-         __PACKAGE__->cached_css( $css );
-        __PACKAGE__->cached_css_digest( md5_hex( $css ) );
-        __PACKAGE__->cached_css_mtime( time );
-    }
 }
 
 1;
