@@ -123,9 +123,9 @@ sub fill {
     # Check it for something appropriate
     if ($data) {
         if ($ct eq "text/x-json") {
-            return $self->from_data_structure(Jifty::JSON::jsonToObj($data));
+            return $self->from_data_structure(eval{Jifty::JSON::jsonToObj($data)});
         } elsif ($ct eq "text/x-yaml") {
-            return $self->from_data_structure(Jifty::YAML::Load($data));
+            return $self->from_data_structure(eval{Jifty::YAML::Load($data)});
         }
     }
 
@@ -147,7 +147,7 @@ sub from_data_structure {
     my $self = shift;
     my $data = shift;
 
-    $self->path($data->{path});
+    $self->path(Jifty::Util->canonicalize_path($data->{path} || "/"));
     $self->just_validating($data->{validating}) if $data->{validating};
 
     if (ref $data->{continuation} eq "HASH") {
@@ -220,7 +220,6 @@ sub from_cgi {
 
     my $path = $cgi->path_info;
     $path =~ s/\?.*//;
-    $path = Jifty::Util->canonicalize_path($path);
     $self->path( $path );
 
     use HTML::Mason::Utils;
@@ -536,6 +535,12 @@ sub return_from_continuation {
     $self->log->debug("Returning from continuation ".$self->continuation->id);
     return $self->continuation->return;
 }
+
+=head2 path
+
+Returns the path that was requested
+
+=cut
 
 =head2 just_validating
 
