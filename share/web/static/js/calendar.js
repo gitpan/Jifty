@@ -33,6 +33,7 @@ Jifty.Calendar = {
         if ( wrap ) {
             wrap.style.display = "block";
             Jifty.Calendar.openCalendar = wrapId;
+            Jifty.Utils.scrollToShow( wrapId );
             return;
         }
 
@@ -40,8 +41,9 @@ Jifty.Calendar = {
         wrap.setAttribute( "id", wrapId );
         
         wrap.style.position = "absolute";
-        wrap.style.left     = Jifty.Utils.findPosX( input );
-        wrap.style.top      = Jifty.Utils.findPosY( input ) + input.offsetHeight;
+        wrap.style.left     = Jifty.Utils.findRelativePosX( input ) + "px";
+        wrap.style.top      = Jifty.Utils.findRelativePosY( input ) + input.offsetHeight + "px";
+        wrap.style.zIndex   = 40;
         
         input.parentNode.insertBefore( wrap, input.nextSibling );
 
@@ -66,13 +68,14 @@ Jifty.Calendar = {
         cal.render();
         
         Jifty.Calendar.openCalendar = wrapId;
+        Jifty.Utils.scrollToShow( wrapId );
         /*Jifty.Calendar.preventStutter = wrapId;*/
     },
 
     openCalendar: "",
 
     hideOpenCalendar: function() {
-        if ( Jifty.Calendar.openCalendar ) {
+        if ( Jifty.Calendar.openCalendar && $( Jifty.Calendar.openCalendar ) ) {
             $( Jifty.Calendar.openCalendar ).style.display = "none";
 
             /* Get the input's ID */

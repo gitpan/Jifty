@@ -74,8 +74,10 @@ L<Jifty::Continuation> object or the C<id> of such.
 
 Passing this parameter implies the creation of a continuation when the
 link is clicked.  It takes an anonymous hash of return location to
-where the return value is pulled from.  See L<Jifty::Request::Mapper>
-for details.
+where the return value is pulled from -- that is, the same structure
+the C<parameters> method takes.
+
+See L<Jifty::Request::Mapper/query_parameters> for details.
 
 =item submit
 
@@ -492,9 +494,12 @@ parameters.
 
 =cut
 
+## XXX TODO: This code somewhat duplicates hook-handling logic in
+## Element.pm, in terms of handling shortcuts like
+## 'refresh_self'. Some of the logic should probably be unified.
+
 sub generate {
     my $self = shift;
-
     for my $trigger ( $self->handlers ) {
         my $value = $self->$trigger;
         next unless $value;
@@ -506,9 +511,16 @@ sub generate {
             my $region = ref $hook->{region} ? $hook->{region} : Jifty->web->get_region( $hook->{region} );
 
             if ($hook->{replace_with}) {
+                my $currently_shown = '';
+                if ($region) {
+
+                my $state_var = Jifty->web->request->state_variable("region-".$region->qualified_name);
+                $currently_shown = $state_var->value if ($state_var);
+                } 
                 # Toggle region if the toggle flag is set, and clicking wouldn't change path
-                if ($hook->{toggle} and $region and $hook->{replace_with} eq $region->path) {
-                    $self->region_fragment( $hook->{region}, "/__jifty/empty" )
+                if ($hook->{toggle} and $hook->{replace_with} eq $currently_shown) {
+                    $self->region_fragment( $hook->{region}, "/__jifty/empty" );
+#                    Jifty->web->request->remove_state_variable('region-'.$region->qualified_name);
                 } else {
                     $self->region_fragment( $hook->{region}, $hook->{replace_with} )
                 }

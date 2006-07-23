@@ -162,6 +162,9 @@ sub from_data_structure {
         my %arguments;
         for my $arg (keys %{$a->{fields} || {}}) {
             if (ref $a->{fields}{$arg}) {
+                # Double-fallback exists for historical reasons only;
+                # Jifty applications after July 10th, 2006 should
+                # never generate them.
                 for my $type (qw/doublefallback fallback value/) {
                     $arguments{$arg} = $a->{fields}{$arg}{$type}
                       if exists $a->{fields}{$arg}{$type};
@@ -425,7 +428,10 @@ sub webform_to_data_structure {
         $active_actions->{$_} = 1 for split '!', $args{'J:ACTIONS'};
     } # else $active_actions stays undef
 
-    # Mapping from argument types to data structure names
+
+    # Mapping from argument types to data structure names;
+    # Double-fallback exists for historical reasons only; Jifty
+    # applications after July 10th, 2006 should never generate them.
     my %types = ("J:A:F:F:F" => "doublefallback", "J:A:F:F" => "fallback", "J:A:F" => "value");
 
     # The "sort" here is key; it ensures that action registrations
@@ -501,7 +507,7 @@ sub save_continuation {
     );
 
     # Set us up with the new continuation
-    Jifty->web->_redirect( Jifty::Web->url . $path
+    Jifty->web->_redirect( Jifty->web->url(path => $path)
                       . ( $path =~ /\?/ ? "&" : "?" ) . "J:C="
                       . $c->id );
 }
@@ -963,10 +969,9 @@ which also sets the action's run order.
 
 The action's arguments are specified with query arguments of the form
 C<J:A:F-I<argumentname>-I<moniker>>.  To cope with checkboxes and the
-like (which don't submit anything when left unchecked) we provide two
-levels of fallback, which are checked if the first doesn't exist:
-C<J:A:F:F-I<argumentname>-I<moniker>> and
-C<J:A:F:F:F-I<argumentname>-I<moniker>>.
+like (which don't submit anything when left unchecked) we provide a
+level of fallback, which is checked if the first doesn't exist:
+C<J:A:F:F-I<argumentname>-I<moniker>>.
 
 =head3 state variables
 
@@ -977,8 +982,9 @@ the state parameter.
 
 The current continuation set by passing the parameter C<J:C>, which is
 set to the id of the continuation.  To create a new continuation, the
-parameter C<J:CREATE> is passed.  Calling a continuation is a ssimple
-as passing C<J:CALL> with the id of the continuation to call.
+parameter C<J:CREATE> is passed.  Calling a continuation is a simple
+as passing C<J:CALL> with the id of the continuation to call; this
+will redirect to the appropriate url, with L<J:RETURN> set.
 
 =head3 request options
 

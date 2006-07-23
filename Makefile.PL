@@ -21,6 +21,7 @@ requires('Email::LocalDelivery');
 requires('Email::Send' => '1.99_01'); # Email::Send::Jifty::Test
 requires('Email::Simple');
 requires('Email::Simple::Creator');
+requires('Exporter::Lite');
 requires('File::Find::Rule');
 requires('File::MMagic');
 requires('File::ShareDir');
@@ -43,8 +44,12 @@ requires('Module::CoreList');
 requires('Module::Install::Admin' => '0.50');
 requires('Module::Pluggable' => '2.95');
 requires('Module::Refresh' => '0.09');
+requires('Module::ScanDeps');
+requires('Object::Declare' => '0.13');
+requires('PAR::Dist::FromCPAN');
 requires('Params::Validate');
 requires('Pod::Simple'); #Pod::Simple::Text
+requires('Scalar::Defer' => '0.06');
 requires('String::Koremutake');
 requires('Test::Base' => 0.44);            # Test::Base::Filter
 requires('Test::HTTP::Server::Simple' => '0.02');
@@ -63,11 +68,11 @@ requires('version');
 if (can_cc()) {
     # Always require the Syck bindings if a C compiler is available
     requires('YAML::Syck' => 0.45);
-    requires('JSON::Syck' => 0.13);
+    requires('JSON::Syck' => 0.14);
 }
 else {
     requires('YAML' => 0.35) unless can_use('YAML::Syck' => 0.45);
-    requires('JSON' => 0.01) unless can_use('JSON::Syck' => 0.13);
+    requires('JSON' => 0.01) unless can_use('JSON::Syck' => 0.14);
 }
 
 

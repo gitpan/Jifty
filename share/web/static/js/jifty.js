@@ -114,7 +114,8 @@ Action.prototype = {
             var f = fields[i];
 
             if (   (Form.Element.getType(f) != "registration")
-		&& (Form.Element.getValue(f) != null)) {
+		&& (Form.Element.getValue(f) != null)
+                && (!Jifty.Placeholder.hasPlaceholder(f))) {
                 if (! a['fields'][Form.Element.getField(f)])
                     a['fields'][Form.Element.getField(f)] = {};
 		var field = Form.Element.getField(f);
@@ -204,13 +205,19 @@ Action.prototype = {
     },
 
     disable_input_fields: function() {
-	var disable = function() {
+        var disable = function() {
             // Triggers https://bugzilla.mozilla.org/show_bug.cgi?id=236791
             arguments[0].blur();
             arguments[0].disabled = true;
-	};
-	this.fields().each(disable);
-	this.buttons().each(disable);
+        };
+        this.fields().each(disable);
+        this.buttons().each(disable);
+    },
+
+    enable_input_fields: function() {
+        var enable = function() { arguments[0].disabled = false; };
+        this.fields().each( enable );
+        this.buttons().each( enable );
     }
 };
 
@@ -229,6 +236,13 @@ Object.extend(Form, {
         }
         
         return elements;
+    },
+
+    clearPlaceholders: function(element) {
+        var elements = Form.getElements(element);
+        for(var i = 0; i < elements.length; i++) {
+            Jifty.Placeholder.clearPlaceholder(elements[i]);
+        }
     }
 });
 
@@ -283,8 +297,6 @@ Object.extend(Form.Element, {
             return "value";
         } else if (/^J:A:F:F-/.test(element.name)) {
             return "fallback";
-        } else if (/^J:A:F:F:F-/.test(element.name)) {
-            return "doublefallback";
         } else {
             return null;
         }
@@ -584,7 +596,7 @@ function update() {
             fragments[name].path = null;
             continue;
         } else if (f['path'] == null) {
-            // If they didn't know tha path, fill it in now
+            // If they didn't know the path, fill it in now
             f['path'] == fragments[name].path;
         }
 
@@ -692,7 +704,17 @@ function update() {
         }
     };
     var onFailure = function(transport, object) {
-        alert('No response from server!');
+        hide_wait_message_now();
+        
+        alert("Unable to connect to server.\n\nTry again in a few minutes.");
+
+	Jifty.failedRequest = transport;
+
+        var keys = request["actions"].keys();
+        for ( var i = 0; i < keys.length; i++ ) {
+            var a = new Action( request["actions"][ keys[i] ].moniker );
+            a.enable_input_fields();
+        }
     };
 
     // Build variable structure
@@ -755,6 +777,11 @@ function hide_wait_message (){
         new Effect.Fade('jifty-wait-message', {duration: 0.2});
 }
 
+function hide_wait_message_now() {
+    if ($('jifty-wait-message'))
+        Element.hide('jifty-wait-message');
+}
+
 function show_action_result() {
     var popup = $('jifty-result-popup');
     if(!popup) return;
@@ -783,17 +810,28 @@ function show_action_result() {
     var node = document.createElement('div');
     var node_id = 'result-' + moniker;
     node.setAttribute('id', node_id);
-    node.setAttribute('class', 'result-' + status);
+    node.setAttribute('class', 'popup_notification result-' + status);
     node.innerHTML = text;
+        
+    var wrap1 = document.createElement("div");
+    wrap1.setAttribute("class", "dropshadow_wrap1");
+    var wrap2 = document.createElement("div");
+    wrap2.setAttribute("class", "dropshadow_wrap2");
+    var wrap3 = document.createElement("div");
+    wrap3.setAttribute("class", "dropshadow_wrap3");
+
+    wrap1.appendChild(wrap2);
+    wrap2.appendChild(wrap3);
+    wrap3.appendChild(node);
 
     if(popup.hasChildNodes()) {
-        popup.insertBefore(node, popup.firstChild);
+        popup.insertBefore(wrap1, popup.firstChild);
     } else {
-        popup.appendChild(node);
+        popup.appendChild(wrap1);
     }
     
     setTimeout(function () {
-	    new Effect.Fade(node, {duration: 3.0});
+           new Effect.Fade(wrap1, {duration: 3.0});
     }, 3500);
 }
 
@@ -805,7 +843,44 @@ Object.extend(Object.extend(Jifty.Autocompleter.prototype, Ajax.Autocompleter.pr
     this.url    = '/__jifty/autocomplete.xml';
 
     Event.observe(this.field, "focus", this.onFocus.bindAsEventListener(this));
-    this.baseInitialize(this.field, $(div), { minChars: "0" });
+    this.baseInitialize(this.field, $(div), {
+        minChars: "0",
+        beforeShow: this.beforeShow,
+        beforeHide: this.beforeHide,
+        frequency: 0.1,
+        onShow: this.onShow,
+	onHide: this.onHide,
+	afterUpdateElement: this.afterUpdate
+    });
+  },
+
+  onShow: function(element, update) {
+      if(!update.style.position || update.style.position=='absolute') {
+        update.style.position = 'absolute';
+        Position.clone(element, update, {setHeight: false, offsetTop: element.offsetHeight});
+      }
+      Element.show( update );
+  },
+
+  onHide: function(element, update) {
+      Element.hide( update );
+  },
+
+  beforeShow: function(obj) {
+    /* Prevents the race for canonicalization and updating
+       via autocomplete */
+    if ( obj.element.onblur ) {
+        obj.element._onblur = obj.element.onblur;
+        obj.element.onblur  = null;
+    }
+  },
+
+  beforeHide: function(obj) {
+    /* Restore onblur and config option */
+    if ( obj.element._onblur ) {
+        obj.element.onblur  = obj.element._onblur;
+        obj.element._onblur = null;
+    }
   },
 
   onFocus: function(event) {
@@ -816,6 +891,10 @@ Object.extend(Object.extend(Jifty.Autocompleter.prototype, Ajax.Autocompleter.pr
         clearTimeout(this.observer);
     
     this.onObserverEvent();
+  },
+
+  afterUpdate: function(field, selection) {
+     Form.Element.validate(field);
   },
   
   getUpdatedChoices: function() {
@@ -841,6 +920,55 @@ Object.extend(Object.extend(Jifty.Autocompleter.prototype, Ajax.Autocompleter.pr
                        );
   }
 
+
+});
+
+Jifty.Placeholder = Class.create();
+Object.extend(Jifty.Placeholder.prototype, {
+  element: null,
+  text: null,
+
+  initialize: function(element, text) {
+     this.element = $(element);
+     this.text = text;
+     Event.observe(element, 'focus', this.onFocus.bind(this));
+     Event.observe(element, 'blur', this.onBlur.bind(this));
+     this.onBlur();
+
+     var form = Form.Element.getForm(element);
+     
+     if(form && !form.hasPlaceholders) {
+         form.hasPlaceholders = true;
+         Event.observe(form, 'submit',
+                       function () { Form.clearPlaceholders(form); } );
+     }
+  },
+
+  onBlur: function() {
+     if(this.element.value == '') {
+       Element.addClassName(this.element, 'placeholder');
+       this.element.value = this.text;
+     }
+  },
+
+  onFocus: function() {
+     Jifty.Placeholder.clearPlaceholder(this.element);
+  }
+
+});
+
+Object.extend(Jifty.Placeholder, {
+
+   hasPlaceholder: function(elt) {
+     return Element.hasClassName(elt, 'placeholder');
+  },
+            
+  clearPlaceholder: function(elt) {
+     if(Jifty.Placeholder.hasPlaceholder(elt)) {
+       elt.value = '';
+       Element.removeClassName(elt, 'placeholder');
+     }
+  }
 
 });
 
