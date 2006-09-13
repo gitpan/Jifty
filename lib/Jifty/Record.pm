@@ -63,6 +63,12 @@ sub create {
 
     foreach my $key ( keys %attribs ) {
         my $attr = $attribs{$key};
+        my $method = "canonicalize_$key";
+        my $func = $self->can($method) or next;
+        $attribs{$key} = $self->$func( $attr);
+    }
+    foreach my $key ( keys %attribs ) {
+        my $attr = $attribs{$key};
         my $method = "validate_$key";
         my $func = $self->can($method) or next;
         my ( $val, $msg ) = $func->($self, $attr);
@@ -240,6 +246,22 @@ sub _value {
     $value;
 }
 
+=head2 as_superuser
+
+Returns a copy of this object with the current_user set to the
+superuser. This is a convenient way to duck around ACLs if you have
+code that needs to for some reason or another.
+
+=cut
+
+sub as_superuser {
+    my $self = shift;
+
+    my $clone = $self->new(current_user => $self->current_user->superuser);
+    $clone->load($self->id);
+    return $clone;
+}
+
 
 =head2 _collection_value METHOD
 
@@ -284,10 +306,22 @@ sub delete {
     $self->SUPER::delete(@_); 
 }
 
+=head2 _brief_description
+
+When displaying a list of records, Jifty can display a friendly value 
+rather than the column's unique id.  Out of the box, Jifty always
+tries to display the 'name' field from the record. You can override this
+method to return the name of a method on your record class which will
+return a nice short human readable description for this record.
+
+=cut
+
+sub _brief_description {'name'}
+
 =head2 _to_record
 
-This is the SB function that is called when you fetch a value which C<REFERENCES> a
-Record class.  The only change from the SB code is the arguments to C<new>.
+This is the Jifty::DBI function that is called when you fetch a value which C<REFERENCES> a
+Record class.  The only change from the Jifty::DBI code is the arguments to C<new>.
 
 =cut
 

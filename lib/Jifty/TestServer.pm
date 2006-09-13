@@ -2,11 +2,11 @@ package Jifty::TestServer;
 
 use strict;
 use warnings;
-use Cwd 'abs_path';
+use File::Spec;
 use Test::Builder;
 my $Tester = Test::Builder->new;
 
-my $INC = [map { abs_path($_) } @INC ];
+my $INC = [grep { defined } map { File::Spec->rel2abs($_) } @INC ];
 my @perl = ($^X, map { "-I$_" } @$INC);
 
 =head1 NAME
@@ -52,7 +52,7 @@ sub started_ok {
         $ENV{"PERL_DPROF_OUT_FILE_NAME"} = $profile_file;
     }
     if (my $coverage = $ENV{JIFTY_TESTSERVER_COVERAGE}) {
-        push @extra, '-MDevel::Cover';
+        push @extra, '-MDevel::Cover'.($coverage =~ m/,/ ? "=$coverage" : '');
     }
 
     exec(@perl, @extra, '-MJifty::Util', '-MJifty::Script',

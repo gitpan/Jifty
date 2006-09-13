@@ -63,8 +63,15 @@ sub new {
     );
     my $self = $class->SUPER::new(%args);
 
+
     my $record_class = $self->record_class;
     Jifty::Util->require($record_class);
+
+    if (ref $args{'record'} && !$args{'record'}->isa($record_class)) {
+        Carp::confess($args{'record'}." isn't a $record_class");
+    }
+
+
 
     # Set up record
     if ( ref $record_class ) {
@@ -146,9 +153,14 @@ sub arguments {
                 $info->{default_value} = $current_value if $self->record->id;
             }
 
-	    ##################
-	    my $render_as = $column->render_as;
-	    $render_as = defined $render_as ? lc($render_as) : '';
+            # 
+            #  if($field =~ /^(.*)_id$/ && $self->record->column($1)) {
+            #    $column = $self->record->column($1);
+            #}
+
+            ##################
+            my $render_as = $column->render_as;
+            $render_as = defined $render_as ? lc($render_as) : '';
 
             if ( defined (my $valid_values = $column->valid_values)) {
                 $info->{valid_values} = [ @$valid_values ];
@@ -171,7 +183,9 @@ sub arguments {
 
                 $field_info->{ $field . "_confirm" } = {
                     render_as => 'Password',
+                    virtual => '1',
                     validator => $same,
+                    sort_order => ($column->sort_order +.01),
                     mandatory => 0
                 };
             }
@@ -185,17 +199,21 @@ sub arguments {
                     );
                     $collection->unlimit;
 
-                    # XXX This assumes a ->name and a ->id method
+                    my $method = $refers_to->_brief_description();
+
                     $info->{valid_values} = [
-                        {   display_from => $refers_to->can('name')
-                            ? "name"
-                            : "id",
+                        {   display_from => $refers_to->can($method) ? $method : "id",
                             value_from => 'id',
                             collection => $collection
                         }
                     ];
 
                     $info->{render_as} = 'Select';
+                } else {
+                    # No need to generate arguments for
+                    # JDBI::Collections, as we can't do anything
+                    # useful with them yet, anyways.
+                    next;
                 }
             }
 
@@ -291,7 +309,7 @@ Jifty::Action::Record::Create, ::Update, or ::Delete
 sub take_action {
     my $self = shift;
     $self->log->fatal(
-        "Use one of the Jifty::Action::Record subclasses, ::Create, ::Update or ::Delete"
+        "Use one of the Jifty::Action::Record subclasses, ::Create, ::Update or ::Delete or ::Search"
     );
 }
 

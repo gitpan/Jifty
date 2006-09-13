@@ -7,22 +7,39 @@ package Jifty::Action;
 
 Jifty::Action - The ability to Do Things in the framework
 
+=head1 SYNOPSIS
+
+  package MyApp::Action::Foo;
+  use base qw/MyApp::Action Jifty::Action/;
+  
+  sub take_action {
+    ...
+  }
+  
+  1;
+
 =head1 DESCRIPTION
 
-C<Jifty::Action> is the meat of the L<Jifty> framework; it controls
-how form elements interact with the underlying model.  See also
-L<Jifty::Action::Record> for data-oriented actions, L<Jifty::Result>
-for how to return values from actions.
+C<Jifty::Action> is the superclass for all actions in Jifty.
+Action classes form the meat of the L<Jifty> framework; they
+control how form elements interact with the underlying model.
+
+See also L<Jifty::Action::Record> for data-oriented actions, 
+L<Jifty::Result> for how to return values from actions.
+
+See Jifty::Action::Schema;
 
 =cut
 
 
 use base qw/Jifty::Object Class::Accessor::Fast Class::Data::Inheritable/;
 
-__PACKAGE__->mk_accessors(qw(moniker argument_values order result sticky_on_success sticky_on_failure));
+__PACKAGE__->mk_accessors(qw(moniker argument_values values_from_request order result sticky_on_success sticky_on_failure));
 __PACKAGE__->mk_classdata(qw/PARAMS/);
 
 =head1 COMMON METHODS
+
+These common methods are designed to 
 
 =head2 new 
 
@@ -65,6 +82,15 @@ A boolean value that determines if the form fields are
 L<sticky|Jifty::Manual::Glossary/sticky> when the action succeeds.  Defaults
 to false.
 
+=begin private
+
+=item request_arguments
+
+A hashref of arguments passed in as part of the
+L<Jifty::Request>. Internal use only.
+
+=end private
+
 =back
 
 =cut
@@ -75,6 +101,7 @@ sub new {
     my %args = (
         order      => undef,
         arguments  => {},
+        request_arguments => {},
         sticky_on_success => 0,
         sticky_on_failure => 1,
         current_user => undef,
@@ -93,7 +120,15 @@ sub new {
         $self->log->debug("Generating moniker auto-".Jifty->web->serial);
     }
     $self->order($args{'order'});
-    $self->argument_values( { %{ $args{'arguments'} } } );
+
+    $self->argument_values( { %{ $args{'request_arguments' } }, %{ $args{'arguments'} } } );
+
+    # Keep track of whether arguments came from the request, or were
+    # programmatically set elsewhere
+    $self->values_from_request({});
+    $self->values_from_request->{$_} = 1 for keys %{ $args{'request_arguments' } };
+    $self->values_from_request->{$_} = 0 for keys %{ $args{'arguments' } };
+    
     $self->result(Jifty->web->response->result($self->moniker) || Jifty::Result->new);
     $self->result->action_class(ref($self));
 
@@ -106,7 +141,7 @@ sub new {
 =head2 arguments
 
 B<Note>: this API is now deprecated in favour of the declarative syntax
-offered by L<Jifty::Action::Schema>.
+offered by L<Jifty::Param::Schema>.
 
 This method, along with L</take_action>, is the most commonly
 overridden method.  It should return a hash which describes the
@@ -156,7 +191,7 @@ C<take_action> instead.
 
 sub run {
     my $self = shift;
-    $self->log->debug("Running action");
+    $self->log->debug("Running action ".ref($self) . " " .$self->moniker);
     unless ($self->result->success) {
         $self->log->debug("Not taking action, as it doesn't validate");
 
@@ -211,8 +246,7 @@ sub check_authorization { 1; }
 
 =head2 setup
 
-Whatever the action needs to do to set itself up, it can do it by
-overriding C<setup>.  C<setup> is expected to return a true value, or
+.  C<setup> is expected to return a true value, or
 L</run> will skip all other actions.
 
 By default, does nothing.
@@ -262,7 +296,10 @@ sub argument_value {
     my $self = shift;
     my $arg = shift;
 
-    $self->argument_values->{$arg} = shift if @_;
+    if(@_) {
+        $self->values_from_request->{$arg} = 0;
+        $self->argument_values->{$arg} = shift;
+    }
     return $self->argument_values->{$arg};
 }
 
@@ -330,30 +367,41 @@ sub _form_widget {
                  render_mode => 'update',
                  @_);
 
-
-    my $arg_name = $args{'argument'}. '!!' .$args{'render_mode'};
+    my $field = $args{'argument'};
+    
+    my $arg_name = $field. '!!' .$args{'render_mode'};
 
     if ( not exists $self->{_private_form_fields_hash}{$arg_name} ) {
 
-        my $field_info = $self->arguments->{$args{'argument'}};
+        my $field_info = $self->arguments->{$field};
 
         my $sticky = 0;
-        $sticky = 1 if $self->sticky_on_failure and (!Jifty->web->response->result($self->moniker) or $self->result->failure);
-        $sticky = 1 if $self->sticky_on_success and (Jifty->web->response->result($self->moniker) and $self->result->success);
+        # Check stickiness iff the values came from the request
+        if($self->values_from_request->{$field} && Jifty->web->response->result($self->moniker)) {
+            $sticky = 1 if $self->sticky_on_failure and $self->result->failure;
+            $sticky = 1 if $self->sticky_on_success and $self->result->success;
+        }
 
         # $sticky can be overrided per-parameter
         $sticky = $field_info->{sticky} if defined $field_info->{sticky};
 
         if ($field_info) {
             # form_fields overrides stickiness of what the user last entered.
+            my $default_value;
+            $default_value = $field_info->{'default_value'}
+              if exists $field_info->{'default_value'};
+            $default_value = $self->argument_value($field)
+              if $self->has_argument($field) && !$self->values_from_request->{$field};
+            
             $self->{_private_form_fields_hash}{$arg_name}
                 = Jifty::Web::Form::Field->new(
                 %$field_info,
-                action       => $self,
-                name         => $args{'argument'},
-                sticky       => $sticky,
-                sticky_value => $self->argument_value($args{'argument'}),
-                render_mode  => $args{'render_mode'},
+                action        => $self,
+                name          => $field,
+                sticky        => $sticky,
+                sticky_value  => $self->argument_value($field),
+                default_value => $default_value,
+                render_mode   => $args{'render_mode'},
                 %args
                 );
 
@@ -685,7 +733,7 @@ sub _canonicalize_argument {
 
 =head2 _canonicalize_date DATE
 
-Parses and returns the date using L<Time::ParseDate>.
+Parses and returns the date using L<Jifty::DateTime::new_from_string>.
 
 =cut
 
@@ -797,7 +845,7 @@ contents of C<value> will be used for the label.
 If the field has an attribute named B<autocompleter>, call the
 subroutine reference B<autocompleter> points to.
 
-If the action doesn't have an explicit B<autocomplete> attribute, but
+If the field doesn't have an explicit B<autocompleter> attribute, but
 does have a C<autocomplete_I<ARGUMENT>> function, invoke that
 function.
 

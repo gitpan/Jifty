@@ -25,10 +25,10 @@ L<Jifty::Web::Form::Element/accessors>.
 
 sub accessors {
     shift->SUPER::accessors,
-        qw(url escape_label tooltip continuation call returns submit preserve_state render_as_button render_as_link);
+        qw(url escape_label tooltip continuation call returns submit target preserve_state render_as_button render_as_link);
 }
 __PACKAGE__->mk_accessors(
-    qw(url escape_label tooltip continuation call returns submit preserve_state render_as_button render_as_link)
+    qw(url escape_label tooltip continuation call returns submit target preserve_state render_as_button render_as_link)
 );
 
 =head2 new PARAMHASH
@@ -115,6 +115,12 @@ C<as_link> will work, and not as perverse as it might sound at first
 -- it allows you to make any simple GET request into a POST request,
 while still appearing as a link (a GET request).
 
+=item target
+
+For things that start off as links, give them an html C<target> attribute.
+
+=cut
+
 =item Anything from L<Jifty::Web::Form::Element>
 
 Note that this includes the C<onclick> parameter, which allows
@@ -128,58 +134,51 @@ get an unexpected error from your browser.
 
 sub new {
     my $class = shift;
-    my $self  = bless {}, $class;
-
     my ($root) = $ENV{'REQUEST_URI'} =~ /([^\?]*)/;
 
     my %args = (
-        url            => $root,
-        label          => 'Click me!',
-        tooltip        => '',
-        class          => '',
-        escape_label   => 1,
-        continuation   => Jifty->web->request->continuation,
-        submit         => [],
-        preserve_state => 0,
         parameters     => {},
         as_button      => 0,
         as_link        => 0,
         @_,
     );
+
     $args{render_as_button} = delete $args{as_button};
     $args{render_as_link}   = delete $args{as_link};
 
-    $self->{parameters} = {};
+    my $self = $class->SUPER::new({
+        class          => '',
+        label          => 'Click me!',
+        url            => $root,
+        escape_label   => 1,
+        tooltip        => '',
+        continuation   => Jifty->web->request->continuation,
+        submit         => [],
+        preserve_state => 0,
+        parameters     => {},
+    }, \%args);
 
     for (qw/continuation call/) {
-        $args{$_} = $args{$_}->id if $args{$_} and ref $args{$_};
+        $self->{$_} = $self->{$_}->id if $self->{$_} and ref $self->{$_};
     }
 
-    if ( $args{submit} ) {
-        $args{submit} = [ $args{submit} ] unless ref $args{submit} eq "ARRAY";
-        $args{submit}
-            = [ map { ref $_ ? $_->moniker : $_ } @{ $args{submit} } ];
-
-        # If they have an onclick, add any and all submit actions to the onclick's submit list
-        if ($args{onclick}) {
-            $args{onclick} = [ (ref $args{onclick} eq "ARRAY" ? @{ $args{onclick} } : $args{onclick}), map { submit => $_ }, @{$args{submit}} ];
-        }
-    }
-
-    for my $field ( $self->accessors() ) {
-        $self->$field( $args{$field} ) if exists $args{$field};
+    if ( $self->{submit} ) {
+        $self->{submit} = [ $self->{submit} ] unless ref $self->{submit} eq "ARRAY";
+        $self->{submit}
+            = [ map { ref $_ ? $_->moniker : $_ } @{ $self->{submit} } ];
     }
 
     # Anything doing fragment replacement needs to preserve the
     # current state as well
     if ( grep { $self->$_ } $self->handlers or $self->preserve_state ) {
-        for ( Jifty->web->request->state_variables ) {
-            if ( $_->key =~ /^region-(.*?)\.(.*)$/ ) {
-                $self->region_argument( $1, $2 => $_->value );
-            } elsif ( $_->key =~ /^region-(.*)$/ ) {
-                $self->region_fragment( $1, $_->value );
+        my %state_vars = Jifty->web->state_variables;
+        while ( my ($key,  $val) = each %state_vars ) {
+            if ( $key =~ /^region-(.*?)\.(.*)$/ ) {
+                $self->region_argument( $1, $2 => $val );
+            } elsif ( $key =~ /^region-(.*)$/ ) {
+                $self->region_fragment( $1, $val );
             } else {
-                $self->state_variable( $_->key => $_->value );
+                $self->state_variable( $key => $val );
             }
         }
     }
@@ -450,6 +449,7 @@ sub as_link {
         { %$args,
           escape_label => $self->escape_label,
           url          => $self->complete_url,
+          target       => $self->target,
           @_ }
     );
     return $link;
@@ -503,11 +503,11 @@ sub generate {
     for my $trigger ( $self->handlers ) {
         my $value = $self->$trigger;
         next unless $value;
-        my @hooks = ref $value eq "ARRAY" ? @{$value} : ($value);
+        my @hooks = @{$value};
         for my $hook (@hooks) {
             next unless ref $hook eq "HASH";
             $hook->{region} ||= $hook->{refresh} || Jifty->web->qualified_region;
-            $hook->{args}   ||= {};
+
             my $region = ref $hook->{region} ? $hook->{region} : Jifty->web->get_region( $hook->{region} );
 
             if ($hook->{replace_with}) {
@@ -531,8 +531,7 @@ sub generate {
             if ( $hook->{submit} ) {
                 $self->{submit} ||= [];
                 $hook->{submit} = [ $hook->{submit} ] unless ref $hook->{submit} eq "ARRAY";
-                push @{ $self->{submit} },
-                    map { ref $_ ? $_->moniker : $_ } @{ $hook->{submit} };
+                push @{ $self->{submit} }, @{ $hook->{submit} };
             }
         }
     }

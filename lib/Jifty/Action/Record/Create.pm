@@ -32,8 +32,8 @@ sub arguments {
     
     my $args = $self->SUPER::arguments;
     for my $arg (keys %{$args}) {
-        next unless $self->record->column($arg);
-        $args->{$arg}{default_value} = $self->record->column($arg)->default
+        my $column = $self->record->column($arg) or next;
+        $args->{$arg}{default_value} = $column->default
           if not $args->{$arg}->{default_value};
     }
     return $args;
@@ -57,7 +57,8 @@ sub take_action {
     my $record = $self->record;
 
     my %values;
-    for (grep { defined $self->argument_value($_) } $self->argument_names) {
+    # Virtual arguments aren't really ever backed by data structures. they're added by jifty for things like confirmations
+    for (grep { defined $self->argument_value($_) && !$self->arguments->{$_}->{virtual} } $self->argument_names) {
         $values{$_} = $self->argument_value($_);
         if (ref $values{$_} eq "Fh") { # CGI.pm's "lightweight filehandle class"
             local $/;
@@ -71,7 +72,7 @@ sub take_action {
 
     # Handle errors?
     unless ( $record->id ) {
-        $self->result->error(_("An error occurred.  Try again later"));
+        $self->result->error($msg || _("An error occurred.  Try again later"));
         $self->log->error(_("Create of %1 failed: %2", ref($record), $msg));
         return;
     }

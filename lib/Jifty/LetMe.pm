@@ -96,7 +96,7 @@ sub _generate_digest {
     $digest->add( $user->auth_token );
     $digest->add( $self->path );
     my %args = %{$self->args};
-    $digest->add( $_, $args{$_}) for sort keys %args;
+    $digest->add( Encode::encode_utf8($_), Encode::encode_utf8($args{$_})) for sort keys %args;
     $digest->add( $self->until ) if ($self->until);
     return $digest->hexdigest();
 }
@@ -164,7 +164,7 @@ into
       token => 'update_task/23'
       until => 20050101,
       checksum_provided => bekidrikufryvagygefuba
- 
+
 =cut
 
 sub from_token {
@@ -173,13 +173,13 @@ sub from_token {
 
     my @atoms = split('/',$token);
 
-    $self->email( URI::Escape::uri_unescape( shift @atoms ) );
+    $self->email( Jifty::I18N->maybe_decode_utf8(URI::Escape::uri_unescape( shift @atoms )) );
     $self->path( shift @atoms );
     $self->checksum_provided( pop @atoms );
 
-    my %args = @atoms;
+    my %args = map { Jifty::I18N->maybe_decode_utf8(URI::Escape::uri_unescape($_)) } @atoms;
     $self->until( delete $args{until} ) if $args{until};
-    
+
     $self->args(\%args);
 }
 
@@ -205,7 +205,7 @@ for passing in a URL
 
 sub as_encoded_token {
     my $self = shift;
-    $self->_generate_token( email => URI::Escape::uri_escape($self->email) );
+    $self->_generate_token( email => URI::Escape::uri_escape_utf8($self->email) );
 }
 
 sub _generate_token {
@@ -214,7 +214,7 @@ sub _generate_token {
     return join ('/', 
         $args{'email'},
         $self->path,
-        %{$self->args},
+        (map {URI::Escape::uri_escape_utf8($_)} %{$self->args}),
         (defined $self->until ? ( 'until', $self->until ) : () ), #?
         $self->generate_checksum  
         );

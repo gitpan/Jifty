@@ -38,38 +38,38 @@ Action.prototype = {
 
     // Returns an Array of all fields in this Action
     fields: function() {
-	if(!this.cached_fields) {
-	    var elements = new Array;
-	    var possible = Form.getElements(this.form);
-	    // Also pull from extra query parameters
-	    for (var i = 0; i < this.extras.length; i++)
-		possible.push(this.extras[i]);
+        if(!this.cached_fields) {
+            var elements = new Array;
+            var possible = Form.getElements(this.form);
+            // Also pull from extra query parameters
+            for (var i = 0; i < this.extras.length; i++)
+                possible.push(this.extras[i]);
 
-	    for (var i = 0; i < possible.length; i++) {
-		if (Form.Element.getMoniker(possible[i]) == this.moniker)
-		    elements.push(possible[i]);
-	    }
-	    this.cached_fields = elements;
-	}
+            for (var i = 0; i < possible.length; i++) {
+                if (Form.Element.getMoniker(possible[i]) == this.moniker)
+                    elements.push(possible[i]);
+            }
+            this.cached_fields = elements;
+        }
         return this.cached_fields;
     },
 
     buttons: function() {
-	var elements = new Array();
-	var possible = Form.getElements(this.form);
-	for(var i = 0; i < possible.length; i++) {
-	    if(possible[i].nodeName == 'INPUT' && possible[i].getAttribute("type") == 'submit') {
-		actions = Form.Element.buttonActions(possible[i]);
-		//If the button has no actions explicitly associated
-		//with it, it's associated with all the actions in the
-		//form
-		if(   actions.length == 0
-		   || actions.indexOf(this.moniker) >= 0) {
-		    elements.push(possible[i]);
-		}
-	    }
-	}
-	return elements;
+        var elements = new Array();
+        var possible = Form.getElements(this.form);
+        for(var i = 0; i < possible.length; i++) {
+            if(possible[i].nodeName == 'INPUT' && possible[i].getAttribute("type") == 'submit') {
+                actions = Form.Element.buttonActions(possible[i]);
+                //If the button has no actions explicitly associated
+                //with it, it's associated with all the actions in the
+                //form
+                if(   actions.length == 0
+                   || actions.indexOf(this.moniker) >= 0) {
+                    elements.push(possible[i]);
+                }
+            }
+        }
+        return elements;
     },
 
     getField: function(name) {
@@ -114,15 +114,16 @@ Action.prototype = {
             var f = fields[i];
 
             if (   (Form.Element.getType(f) != "registration")
-		&& (Form.Element.getValue(f) != null)
-                && (!Jifty.Placeholder.hasPlaceholder(f))) {
+                && (Form.Element.getValue(f) != null)
+                && (!Jifty.Placeholder.hasPlaceholder(f)))
+            {
                 if (! a['fields'][Form.Element.getField(f)])
                     a['fields'][Form.Element.getField(f)] = {};
-		var field = Form.Element.getField(f);
-		var type = Form.Element.getType(f);
-		    
+                var field = Form.Element.getField(f);
+                var type = Form.Element.getType(f);
+                    
                 a['fields'][field][type] = this._mergeValues(a['fields'][field][type],
-							     Form.Element.getValue(f));
+                                                             Form.Element.getValue(f));
             }
         }
 
@@ -130,14 +131,14 @@ Action.prototype = {
     },
 
     _mergeValues: function() {
-	var oldval = arguments[0];
-	var newval = arguments[1];
-	if(!oldval) return newval;
-	if(oldval.constructor != Array) {
-	    oldval = [oldval];
-	}
-	oldval.push(newval);
-	return oldval;
+        var oldval = arguments[0];
+        var newval = arguments[1];
+        if(!oldval) return newval;
+        if(oldval.constructor != Array) {
+            oldval = [oldval];
+        }
+        oldval.push(newval);
+        return oldval;
     },
 
     // Validate the action
@@ -206,9 +207,13 @@ Action.prototype = {
 
     disable_input_fields: function() {
         var disable = function() {
-            // Triggers https://bugzilla.mozilla.org/show_bug.cgi?id=236791
-            arguments[0].blur();
-            arguments[0].disabled = true;
+	    var elt = arguments[0];
+	    // Disabling hidden elements seems to  make IE sad for some reason
+	    if(elt.type != 'hidden') {
+		// Triggers https://bugzilla.mozilla.org/show_bug.cgi?id=236791
+		elt.blur();
+		elt.disabled = true;
+	    }
         };
         this.fields().each(disable);
         this.buttons().each(disable);
@@ -304,8 +309,21 @@ Object.extend(Form.Element, {
 
     // Validates the action this form element is part of
     validate: function (element) {
-        Form.Element.getAction(element).validate();
+            if(!Element.hasClassName(element, 'validation_disabled')) {
+                Form.Element.getAction(element).validate();
+            }
     },
+
+    // Temporarily disable validation
+            disableValidation: function(element) {
+            Element.addClassName(element, 'validation_disabled');
+        },
+
+            //Reenable validation            
+            enableValidation: function(element) {
+            Element.removeClassName(element, 'validation_disabled');
+        },
+
 
     // Look up the form that this element is part of -- this is sometimes
     // more complicated than you'd think because the form may not exist
@@ -351,12 +369,12 @@ Object.extend(Form.Element, {
 
     buttonActions: function(element) {
         element = $(element);
-	var actions = Form.Element.buttonArguments(element)['J:ACTIONS'];
-	if(actions) {
-	    return actions.split(",");
-	} else {
-	    return new Array();
-	}
+        var actions = Form.Element.buttonArguments(element)['J:ACTIONS'];
+        if(actions) {
+            return actions.split(",");
+        } else {
+            return new Array();
+        }
     },  
 
     buttonFormElements: function(element) {
@@ -374,17 +392,47 @@ Object.extend(Form.Element, {
             extras.push(e);
         }
         return extras;
+    },
+
+    /* Someday Jifty may have the concept of "default"
+       buttons.  For now, this clicks the first button that will
+       submit the action associated with the form element.
+     */
+    clickDefaultButton: function(element) {
+        var action = Form.Element.getAction( element );
+        if ( action ) {
+            var buttons = action.buttons();
+            for ( var i = 0; i < buttons.length; i++ ) {
+                var b = buttons[i];
+                if ( Form.Element.buttonActions( b ).indexOf( action.moniker ) >= 0 ) {
+                    b.click();
+                    return true;
+                }
+            }
+        }
+        return false;
+    },
+
+    handleEnter: function(event) {
+        /* Trap "Enter" */
+        if (    event.keyCode == 13
+             && !event.metaKey && !event.altKey && !event.ctrlKey )
+        {
+            if ( Form.Element.clickDefaultButton( event.target ) )
+                event.preventDefault();
+        }
     }
 
 });
 
+JSAN.use("DOM.Events");
+
 // Form elements should AJAX validate if the CSS says so
 Behaviour.register({
     'input.ajaxvalidation, textarea.ajaxvalidation, input.ajaxcanonicalization, textarea.ajaxcanonicalization': function(elt) {
-        elt.onblur = function () {
-            Form.Element.validate(this);
-        }
-	elt = null;	//Prevent IE from leaking memory
+        DOM.Events.addListener(elt, "blur", function () {
+                Form.Element.validate(elt);
+            });
     },
     'input.date': function(e) {
         if ( !Element.hasClassName( e, 'has_calendar_link' ) ) {
@@ -397,15 +445,34 @@ Behaviour.register({
             buttonToLink(e);
             Element.addClassName( e, 'is_button_as_link' );
         }
+    },
+    "input.date, input.text": function(e) {
+        /* XXX TODO: Figure out how to make our enter handler detect
+           when the autocomplete is active so we can use it on autocompleted
+           fields
+         */
+        if (   !Element.hasClassName( e, "jifty_enter_handler_attached" )
+            && !Element.hasClassName( e, "ajaxautocompletes" ) )
+        {
+            /* Do not use keydown as the event, it will not work as expected in Safari */
+            DOM.Events.addListener( e, "keypress", Form.Element.handleEnter );
+            Element.addClassName( e, "jifty_enter_handler_attached" );
+        }
+    },
+    "#messages, #errors": function(e) {
+        if (   !Element.hasClassName( e, "jifty_enter_handler_attached" ) ) {
+            e.innerHTML= 
+              '<a  href="#" id="dismiss_'+e.id+'" title="Dismiss" onmousedown="this.onfocus=this.blur;" onmouseup="this.onfocus=window.clientInformation?null:window.undefined" onclick="Effect.Fade(this.parentNode); return false;">Dismiss</a>' + e.innerHTML;
+
+            Element.addClassName( e, "jifty_enter_handler_attached" );
+        }
     }
 });
-
 
 
 /* Regions */
 // Keep track of the fragments on the page
 var fragments = $H();
-
 var Region = Class.create();
 Region.prototype = {
     initialize: function(name, args, path, parent) {
@@ -515,6 +582,10 @@ var current_args = $H();
 //     - 'mode' is one of 'Replace', or the name of a Prototype Insertion
 //     - 'effect' is the name of a Prototype Effect
 function update() {
+    // If we don't have XMLHttpRequest, bail and fallback on full-page
+    // loads
+    if(!Ajax.getTransport()) return true;
+
     show_wait_message();
     var named_args = arguments[0];
     var trigger    = arguments[1];
@@ -530,13 +601,15 @@ function update() {
 
     // Build actions structure
     request['actions'] = $H();
-    for (var i = 0; i < named_args['actions'].length; i++) {
-        var moniker = named_args['actions'][i];
+    for (var moniker in named_args['actions']) {
+        var disable = named_args['actions'][moniker];
         var a = new Action(moniker, button_args);
         if (a.register) {
             if (a.hasUpload())
                 return true;
-            a.disable_input_fields();
+            if(disable) {
+                a.disable_input_fields();
+            }
             request['actions'][moniker] = a.data_structure();
         }
     }
@@ -668,7 +741,7 @@ function update() {
                                 }
                                 // We need to give the browser some "settle" time before we eval scripts in the body
                                 setTimeout((function() { this.evalScripts() }).bind(textContent), 10);
-                                Behaviour.apply(f['element']);
+                                Behaviour.apply(element);
                             }
                         }
                         dom_fragment.setArgs(new_dom_args);
@@ -705,10 +778,10 @@ function update() {
     };
     var onFailure = function(transport, object) {
         hide_wait_message_now();
-        
+
         alert("Unable to connect to server.\n\nTry again in a few minutes.");
 
-	Jifty.failedRequest = transport;
+        Jifty.failedRequest = transport;
 
         var keys = request["actions"].keys();
         for ( var i = 0; i < keys.length; i++ ) {
@@ -810,20 +883,20 @@ function show_action_result() {
     var node = document.createElement('div');
     var node_id = 'result-' + moniker;
     node.setAttribute('id', node_id);
-    node.setAttribute('class', 'popup_notification result-' + status);
+    node.className = "popup_notification result-" + status;
     node.innerHTML = text;
-        
+    
     var wrap1 = document.createElement("div");
-    wrap1.setAttribute("class", "dropshadow_wrap1");
+    wrap1.className = "dropshadow_wrap1";
     var wrap2 = document.createElement("div");
-    wrap2.setAttribute("class", "dropshadow_wrap2");
+    wrap2.className = "dropshadow_wrap2";
     var wrap3 = document.createElement("div");
-    wrap3.setAttribute("class", "dropshadow_wrap3");
+    wrap3.className = "dropshadow_wrap3";
 
     wrap1.appendChild(wrap2);
     wrap2.appendChild(wrap3);
     wrap3.appendChild(node);
-
+    
     if(popup.hasChildNodes()) {
         popup.insertBefore(wrap1, popup.firstChild);
     } else {
@@ -849,8 +922,8 @@ Object.extend(Object.extend(Jifty.Autocompleter.prototype, Ajax.Autocompleter.pr
         beforeHide: this.beforeHide,
         frequency: 0.1,
         onShow: this.onShow,
-	onHide: this.onHide,
-	afterUpdateElement: this.afterUpdate
+        onHide: this.onHide,
+        afterUpdateElement: this.afterUpdate
     });
   },
 
@@ -945,7 +1018,11 @@ Object.extend(Jifty.Placeholder.prototype, {
   },
 
   onBlur: function() {
-     if(this.element.value == '') {
+     /* On browser back/forward, the placeholder text will be remembered
+        for the field, so we want to add the class if the value is the same
+        as the placeholder text.  This does have the effect of making it
+        impossible to submit a field with the same value as the placeholder. */
+     if (this.element.value == '' || this.element.value == this.text) {
        Element.addClassName(this.element, 'placeholder');
        this.element.value = this.text;
      }

@@ -6,7 +6,9 @@ use base qw/Test::WWW::Mechanize/;
 
 $ENV{'http_proxy'} = ''; # Otherwise Test::WWW::Mechanize tries to go through your HTTP proxy
 
-use Test::HTML::Lint; # exports html_ok
+use Jifty::YAML;
+use HTML::Lint;
+use Test::HTML::Lint qw();
 use HTTP::Cookies;
 use XML::XPath;
 use Hook::LexWrap;
@@ -14,6 +16,12 @@ use List::Util qw(first);
 use Carp;
 
 my $Test = Test::Builder->new;
+
+# XXX TODO: We're leaving out FLUFF errors because it complains about non-standard
+# attributes such as "autocomplete" on <form> elements.  There should be a better
+# way to fix this.
+my $lint = HTML::Lint->new( only_types => [HTML::Lint::Error::STRUCTURE,
+                                           HTML::Lint::Error::HELPER] );
 
 =head1 NAME
 
@@ -46,6 +54,17 @@ Finds the moniker of the first action of type I<ACTION> whose
 If there is only one action of type ACTION, be sure not to pass
 any more arguments to this method, or the method will return undef.
 
+NOTE that if you're using this in a series of different pages or forms, 
+you'll need to run it again for each new form:
+
+    $mech->fill_in_action_ok($mech->moniker_for('MyApp::Action::UpdateInfo'), 
+                             owner_id => 'someone');
+    $mech->submit_html_ok(value => 'Save');  
+
+    is($mech->action_field_value($mech->moniker_for("MyApp::Action::UpdateInfo"),
+			     'owner_id'), 
+       'someone',
+       "Owner was reassigned properly to owner 'someone'");
 
 =cut
 
@@ -67,6 +86,17 @@ sub moniker_for {
         }
 
         return $1;
+      }
+    }
+    # if we've gotten to this point, there were no hidden fields with a moniker,
+    # possibly a form with only its continuation-marking hidden field.
+    # Fall back to a submit field with similar attributes.
+    for my $input ($f->inputs) {
+	if ($input->type eq "submit" and $input->name =~ /$action/
+	    and $input->name =~ /J:ACTIONS=([^|]+)\|/ ) {
+	  $input->name =~ /J:ACTIONS=([^|]+)\|/;
+	  my $moniker = $1;
+	  return $moniker;
       }
     }
   }
@@ -143,6 +173,22 @@ sub action_form {
         $i++;
         next unless first {   $_->name =~ /J:A-(?:\d+-)?$moniker/
                            && $_->type eq "hidden" }
+                        $form->inputs;
+        next if grep {not $form->find_input("J:A:F-$_-$moniker")} @fields;
+
+        $self->form_number($i); #select it, for $mech->submit etc
+        return $form;
+    } 
+
+    # A fallback for forms that don't have any named fields except their
+    # submit button. Could stand to be refactored.
+    $i = 0;
+    for my $form ($self->forms) {
+        no warnings 'uninitialized';
+
+        $i++;
+        next unless first {   $_->name =~ /J:A-(?:\d+-)?$moniker/
+                           && $_->type eq "submit" }
                         $form->inputs;
         next if grep {not $form->find_input("J:A:F-$_-$moniker")} @fields;
 
@@ -318,9 +364,26 @@ sub get_html_ok {
     {
         local $Test::Builder::Level = $Test::Builder::Level;
         $Test::Builder::Level++;
-        html_ok($self->content);
-    }       
-} 
+        Test::HTML::Lint::html_ok( $lint, $self->content, "html_ok for ".$self->uri );
+    }
+}
+
+=head2 html_ok [STRING]
+
+Tests the current C<content> using L<Test::HTML::Lint>.  If passed a string,
+tests against that instead of the current content.
+
+=cut 
+
+sub html_ok {
+    my $self    = shift;
+    my $content = shift || $self->content;
+    {
+        local $Test::Builder::Level = $Test::Builder::Level;
+        $Test::Builder::Level++;
+        Test::HTML::Lint::html_ok( $lint, $content );
+    }
+}
 
 =head2 submit_html_ok 
 
@@ -335,7 +398,7 @@ sub submit_html_ok {
     {
         local $Test::Builder::Level = $Test::Builder::Level;
         $Test::Builder::Level++;
-        html_ok($self->content);
+        Test::HTML::Lint::html_ok( $lint, $self->content );
     }
 } 
 
@@ -358,9 +421,10 @@ sub follow_link_ok {
     {
         local $Test::Builder::Level = $Test::Builder::Level;
         $Test::Builder::Level++;
-        html_ok($self->content);
+        Test::HTML::Lint::html_ok( $lint, $self->content );
     }
 } 
+
 
 =head2 session
 
@@ -411,12 +475,12 @@ sub current_user {
     return undef unless $session;
 
     my $id = $session->get('user_id');
-    my $object = (Jifty->config->framework('ApplicationClass')."::CurrentUser")->new();
-    my $user = $session->get('user_ref')->new( current_user => $object );
-    $user->load_by_cols( id => $id );
-    $object->user_object($user);
 
+    return undef unless ($id);
+
+    my $object = (Jifty->config->framework('ApplicationClass')."::CurrentUser")->new(id => $id);
     return $object;
 }
+
 
 1;

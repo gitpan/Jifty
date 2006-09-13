@@ -20,3 +20,7 @@ merge_bleadperl$
 var/*
 t/*/var/*
 doc/talks/*
+^\.
+/\._
+t/mailbox$
+jiftyapptest$

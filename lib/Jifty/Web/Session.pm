@@ -20,7 +20,15 @@ Returns a new, empty session.
 
 sub new {
     my $class = shift;
-    return bless {}, $class;
+
+    my $session_class = Jifty->config->framework('Web')->{'SessionClass'};
+    if ($session_class and $class ne $session_class) {
+        Jifty::Util->require( $session_class );
+        return $session_class->new(@_);
+    }
+    else {
+        return bless {}, $class;
+    }
 }
 
 =head2 id
@@ -48,9 +56,9 @@ sub load {
 
     unless ($session_id) {
         my %cookies    = CGI::Cookie->fetch();
-        my $cookiename = $self->cookie_name;
+        my $cookie_name = $self->cookie_name;
         $session_id
-            = $cookies{$cookiename} ? $cookies{$cookiename}->value() : undef;
+            = $cookies{$cookie_name} ? $cookies{$cookie_name}->value() : undef;
     }
 
     my $session = Jifty::Model::Session->new;
@@ -121,9 +129,9 @@ sub get {
     } else {
         unless ($self->{cache}) {
             my $settings = Jifty::Model::SessionCollection->new;
-            $settings->limit( column => 'session_id', value => $self->id );
-            $settings->limit( column => 'key_type',   value => 'continuation', operator => '!=', entry_aggregator => 'and' );
-            $settings->limit( column => 'key_type',   value => 'session', operator => '!=', entry_aggregator => 'and' );
+            $settings->limit( column => 'session_id', value => $self->id, case_sensitive => '1' );
+            $settings->limit( column => 'key_type',   value => 'continuation', operator => '!=', entry_aggregator => 'and', case_sensitive => '1' );
+            $settings->limit( column => 'key_type',   value => 'session', operator => '!=', entry_aggregator => 'and', case_sensitive => '1' );
             while (my $row = $settings->next) {
                 $self->{cache}{$row->key_type}{$row->data_key} = $row->value;
             }
@@ -246,8 +254,8 @@ sub continuations {
     return () unless $self->loaded;
 
     my $conts = Jifty::Model::SessionCollection->new;
-    $conts->limit( column => "key_type",   value => "continuation" );
-    $conts->limit( column => "session_id", value => $self->id );
+    $conts->limit( column => "key_type",   value => "continuation", case_sensitive => '1' );
+    $conts->limit( column => "session_id", value => $self->id, case_sensitive=> '1' );
 
     my %continuations;
     $continuations{ $_->key } = $_->value while $_ = $conts->next;
@@ -285,14 +293,14 @@ sub set_cookie {
 =head2 cookie_name
 
 Returns the current session's cookie_name -- it is the same for all
-users, but various accorting to the port the server is running on.
+users, but varies according to the port the server is running on.
 
 =cut
 
 sub cookie_name {
     my $self = shift;
-    my $cookiename = "JIFTY_SID_" . ( $ENV{'SERVER_PORT'} || 'NOPORT' );
-    return ($cookiename);
+    my $cookie_name = "JIFTY_SID_" . ( $ENV{'SERVER_PORT'} || 'NOPORT' );
+    return ($cookie_name);
 }
 
 =head2 expires [VALUE]

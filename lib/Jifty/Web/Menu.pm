@@ -2,8 +2,9 @@ package Jifty::Web::Menu;
 
 use base qw/Class::Accessor::Fast/;
 use URI;
+use Scalar::Util ();
 
-__PACKAGE__->mk_accessors(qw(label parent sort_order link escape_label class));
+__PACKAGE__->mk_accessors(qw(label parent sort_order link target escape_label class));
 
 =head2 new PARAMHASH
 
@@ -43,6 +44,12 @@ Gets or set a Jifty::Web::Link object that represents this menu item. If
 you're looking to do complex ajaxy things with menus, this is likely
 the option you want.
 
+=head2 target [STRING]
+
+Get or set the frame or pseudo-target for this link. something like L<_blank>
+
+=cut
+
 =head2 class [STRING]
 
 Gets or sets the CSS class the link should have in addition to the default
@@ -60,7 +67,7 @@ sub url {
     my $self = shift;
     $self->{url} = shift if @_;
 
-    $self->{url} = URI->new_abs($self->{url}, $self->parent->url . "/")
+    $self->{url} = URI->new_abs($self->{url}, $self->parent->url . "/")->as_string
       if $self->parent and $self->parent->url;
 
     return $self->{url};
@@ -105,6 +112,7 @@ sub child {
                                                         escape_label => 1,
                                                         @_
                                                        });
+        Scalar::Util::weaken($self->{children}{$key}{parent});
         # Activate it
         if (my $url = $self->{children}{$key}->url and Jifty->web->request) {
             # XXX TODO cleanup for mod_perl
@@ -118,7 +126,7 @@ sub child {
             if ($url eq $base_path) {
                 $self->{children}{$key}->active(1); 
             }
-	    }
+        }
     }
 
     return $self->{children}{$key}
@@ -226,7 +234,7 @@ sub render_as_hierarchical_menu_item {
         Jifty->web->out(
             qq{<span class="expand"><a href="#" onclick="Jifty.ContextMenu.hideshow('}
                 . $id
-                . qq{'); return false;">+</a></span>}
+                . qq{'); return false;">&nbsp;</a></span>}
                 . qq{<ul id="}
                 . $id
                 . qq{">} );
@@ -249,7 +257,7 @@ sub render_as_hierarchical_menu_item {
 =head2 as_link
 
 Return this menu item as a C<Jifty::Web::Link>, either the one we were
-initialized with or a new one made from the C</label> and c</url>
+initialized with or a new one made from the C</label> and C</url>
 
 If there's no C</url> and no C</link>, renders just the label.
 
@@ -266,6 +274,7 @@ sub as_link {
         return Jifty->web->link( label => _( $self->label ),
                                  url   => $self->url,
                                  escape_label => $self->escape_label,
+                                 target => $self->target,
                                  class => $self->class );
     } else {
         return _( $self->label );

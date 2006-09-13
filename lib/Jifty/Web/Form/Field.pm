@@ -46,7 +46,10 @@ use base 'Jifty::Web::Form::Element';
 
 use Scalar::Util;
 use HTML::Entities;
-use overload '""' => sub { shift->render}, bool => sub { 1 };
+
+# We need the anonymous sub because otherwise the method of the base class is
+# always called, instead of the appropriate overridden method in a child class.
+use overload '""' => sub { shift->render }, bool => sub { 1 };
 
 =head2 new
 
@@ -332,7 +335,8 @@ Renders a default CSS class for each part of our widget.
 
 sub classes {
     my $self = shift;
-    return join(' ', ($self->class||''), ($self->name ? "argument-".$self->name : ''));
+    my $name = $self->name;
+    return join(' ', ($self->class||''), ($name ? "argument-".$name : ''));
 }
 
 
@@ -475,7 +479,8 @@ sub render_value {
     my $self  = shift;
     my $field = '<span';
     $field .= qq! class="@{[ $self->classes ]}"> !;
-    $field .= HTML::Entities::encode_entities(_($self->current_value)) if defined $self->current_value;
+    # XXX: force stringify the value because maketext is buggy with overloaded objects.
+    $field .= HTML::Entities::encode_entities(_("@{[$self->current_value]}")) if defined $self->current_value;
     $field .= qq!</span>\n!;
     Jifty->web->out($field);
     return '';
