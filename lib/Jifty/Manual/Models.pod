@@ -24,13 +24,14 @@ A simple model to store just one line of text might look like this:
     use strict;
     use warnings;
 
-    package MyApp::Model::TextLine::Schema;
+    package MyApp::Model::TextLine;
     use Jifty::DBI::Schema;
 
-    column 'textline';
+    use MyApp::Record schema {
+        column 'textline';
+    };
 
-    package MyApp::Model::TextLine;
-    use base qw/MyApp::Record/;
+    # Your model-specific methods go here.
 
     1;
 
@@ -71,8 +72,8 @@ A simple definition could look like this:
     column name =>
         type is 'text',
         label is 'Name',
-        render_as 'Text',
-        sincle '0.0.1';
+        render as 'Text',
+        since '0.0.1';
 
 The following BNF shows the full syntax supported (omitting
 non-terminals that are self explaining for perl-developers):
@@ -85,6 +86,7 @@ non-terminals that are self explaining for perl-developers):
     column_info ::= 'type' 'is' string
        | 'label' 'is' string
        | 'render_as' string
+       | 'render' 'as' string
        | 'hints' 'is' string
        | 'refers_to' class_name 'by' string_columnname
        | 'default' 'is' string
@@ -103,9 +105,10 @@ non-terminals that are self explaining for perl-developers):
        | 'filters' 'are' string_classname
        | 'since' string_version_number
        | 'valid_values' 'are' array_of_valid_values
+       | 'valid' 'are' array_of_valid_values
        | 'hints' 'are' string
 
-    * 'is', 'by', 'on' and 'are' are fill-words that may get omitted.
+    * 'is', 'by', 'on', 'as' and 'are' are fill-words that may get omitted.
 
 For a full description of all parameter's meaning, look at
 L<Jifty::DBI::Schema>.
@@ -222,6 +225,9 @@ some of the automagically created methods on the object:
     # write some value to a column named 'colname'
     $object->set_colname($value);
 
+    # get all columns in a single hash (not a reference!)
+    my %record = $object->as_hash;
+
 Especially, when writing to a record, you need not worry about how to
 write back the data to the database, the object will manage this step
 on its own.
@@ -250,7 +256,7 @@ use a collection like this:
     $collection->goto_first_item;
 
     $collection->goto_item(42);
-    
+
     # iterate through the result set
     while (my $record = $collection->next) {
           # do something with $record
@@ -263,6 +269,40 @@ use a collection like this:
 
     # get back an array-ref containing all items
     my $records = $collection->items_array_ref;
+
+=head3 some options provided by C<limit>
+
+In order to construct more complex restrictions the C<limit> method
+may get called more than once, specifying one single condition with
+each call.
+
+Every use of C<limit> constructs either a I<clause> or a I<subclause>
+depending on the existence of the C<subclause> attribute when calling
+C<limit>. Every clause is built up by combining its subclauses (if
+any) using the C<entry_aggregator> operator (whose default is I<OR>)
+as a combining operator. Clauses are then I<AND>ed together to yield
+the final restriction that is finally used to retrieve the records in
+question.
+
+The C<operator> (whose default is '=') can be any legal SQL operator
+like C<=>, C<< <= >>, C<< >= >>, C<< != >>, C<LIKE>, C<IS>, C<IS
+NOT> as well as some convenience operators that silently use C<LIKE>
+with properly set wildcards (C<MATCHES>, C<STARTSWITH> or
+C<ENDSWITH>).
+
+    # combining restrictions with "AND"
+    # note that "AND" is implicit here
+    $collection->limit(column=>'col1', value=>'...');
+    $collection->limit(column=>'col2', value=>'...');
+
+    # combining restrictions with "OR"
+    # note that the 'subclause' has the same value
+    $collection->limit(column=>'col1', value=>'...',
+                       entry_aggregator=>'OR', # is already default
+                       subclause=>'some_id');
+    $collection->limit(column=>'col2', value=>'...',
+                       entry_aggregator=>'OR', # is already default
+                       subclause=>'some_id');
 
 see L<Jifty::DBI::Collection> about more ways or ordering and limiting
 collections.

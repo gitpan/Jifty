@@ -9,12 +9,11 @@ This is a template for your own tests. Copy it and modify it.
 
 =cut
 
-use lib 'plugins/REST/lib';
 
 use lib 't/lib';
 use Jifty::SubTest;
 
-use Jifty::Test tests => 61;
+use Jifty::Test tests => 66;
 use Jifty::Test::WWW::Mechanize;
 
 my $server  = Jifty::Test->make_server;
@@ -35,8 +34,9 @@ ok( $u1->id );
 
 $mech->get_ok("$URL/=/model.yml", "Got model list");
 my $list = Jifty::YAML::Load($mech->content);
-is(scalar @$list, 1, "Got one model");
-is($list->[0],'TestApp::Plugin::REST::Model::User');
+is(scalar @$list, 2, "Got one model");
+is($list->[0],'TestApp.Plugin.REST.Model.Group');
+is($list->[1],'TestApp.Plugin.REST.Model.User');
 
 # on GET    '/=/model/*'     => \&list_model_keys;
 $mech->get_ok('/=/model/User');
@@ -84,25 +84,31 @@ is(get_content(), 'test@example.com');
 
 # on GET    '/=/action'      => \&list_actions;
 
-my @actions = qw(TestApp::Plugin::REST::Action::CreateUser
-                 TestApp::Plugin::REST::Action::UpdateUser
-                 TestApp::Plugin::REST::Action::DeleteUser
-                 TestApp::Plugin::REST::Action::SearchUser
-                 TestApp::Plugin::REST::Action::DoSomething
-                 Jifty::Action::Autocomplete
-                 Jifty::Action::Redirect);
+my @actions = qw(
+                 TestApp.Plugin.REST.Action.CreateGroup
+                 TestApp.Plugin.REST.Action.UpdateGroup
+                 TestApp.Plugin.REST.Action.DeleteGroup
+                 TestApp.Plugin.REST.Action.SearchGroup
+                 TestApp.Plugin.REST.Action.CreateUser
+                 TestApp.Plugin.REST.Action.UpdateUser
+                 TestApp.Plugin.REST.Action.DeleteUser
+                 TestApp.Plugin.REST.Action.SearchUser
+                 TestApp.Plugin.REST.Action.DoSomething
+                 Jifty.Action.Autocomplete
+                 Jifty.Action.Redirect);
 
 $mech->get_ok('/=/action/');
 is($mech->status, 200);
-
 for (@actions) {
     $mech->content_contains($_);
 }
-
 $mech->get_ok('/=/action.yml');
 my @got = @{get_content()};
 
-is(join(",",sort @actions), join(",", sort(@got)), "Got all the actions as YAML");
+is(
+    join(",", sort @got ),
+    join(",",sort @actions), 
+, "Got all the actions as YAML");
 
 
 # on GET    '/=/action/*'    => \&list_action_params;
@@ -146,55 +152,38 @@ $mech->post( $URL . '/=/action/DoSomething', { email => 'good@email.com' } );
 
 $mech->content_contains('Something happened!');
 
-TODO: {
-    $mech->post( $URL . '/=/action/DoSomething', { email => 'bad@email.com' } );
+$mech->post( $URL . '/=/action/DoSomething', { email => 'bad@email.com' } );
 
-    local $TODO = "Waiting for actions to return validation errors";
-    $mech->content_contains('Bad looking email');
-    $mech->content_lacks('Something happened!');
+$mech->content_contains('Bad looking email');
+$mech->content_lacks('Something happened!');
 
-    $mech->post( $URL . '/=/action/DoSomething', { email => 'warn@email.com' } );
+$mech->post( $URL . '/=/action/DoSomething', { email => 'warn@email.com' } );
     
-    $mech->content_contains('Warning for email');
-    $mech->content_contains('Something happened!');
-}
+$mech->content_contains('Warning for email');
+$mech->content_contains('Something happened!');
 
 # Test YAML posts
-TODO: {
-    local $TODO = "Waiting for YAML posts to work right";
-    
-    yaml_post( $URL . '/=/action/DoSomething.yml', { email => 'good@email.com' } );
+$mech->post ( $URL . '/=/action/DoSomething.yml', { email => 'good@email.com' } );
 
-    eval {
-        %content = %{get_content()};
-    };
-
-    ok($content{success});
-    is($content{message}, 'Something happened');
-
-    
-    yaml_post( $URL . '/=/action/DoSomething', { email => 'bad@email.com' } );
-
-    eval {
-        %content = %{get_content()};
-    };
-
-    ok(!$content{success});
-    is($content{error}, 'Bad looking email');
+eval {
+    %content = %{get_content()};
 };
+
+ok($content{success});
+is($content{message}, 'Something happened!');
+
+    
+$mech->post ( $URL . '/=/action/DoSomething.yaml', { email => 'bad@email.com' } );
+
+eval {
+    %content = %{get_content()};
+};
+
+ok(!$content{success}, "Action that doesn't validate fails");
+is($content{field_errors}{email}, 'Bad looking email');
 
 
 sub get_content { return Jifty::YAML::Load($mech->content)}
-sub yaml_post {
-    my $url = shift;
-    my $data = shift;
-    my $request = HTTP::Request->new('POST', $url);
-    $request->header('Content-Type', 'text/yaml');
-    $request->content(Jifty::YAML::Dump($data));
-
-    $mech->request($request);
-    
-}
 
 1;
 

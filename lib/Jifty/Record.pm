@@ -14,9 +14,8 @@ representation; that is, it is also a L<Jifty::DBI::Record> as well.
 
 =cut
 
-use base qw/Jifty::Object/;
-use base qw/Jifty::DBI::Record/;
-
+use base qw(Jifty::Object Jifty::DBI::Record Class::Accessor::Fast);
+__PACKAGE__->mk_accessors('_is_readable');
 
 sub _init {
     my $self = shift;
@@ -70,24 +69,28 @@ sub create {
     foreach my $key ( keys %attribs ) {
         my $attr = $attribs{$key};
         my $method = "validate_$key";
-        my $func = $self->can($method) or next;
+        if (my $func = $self->can($method)) {
         my ( $val, $msg ) = $func->($self, $attr);
         unless ($val) {
             $self->log->error("There was a validation error for $key");
             return ( $val, $msg );
         }
-
+        }
         # remove blank values. We'd rather have nulls
-        if ( exists $attribs{$key}
-            and ( not defined $attr or (not ref $attr and $attr eq "" )) )
-        {
+        if ( exists $attribs{$key} and (! defined $attr || ( not ref( $attr) and $attr eq '' ))) {
             delete $attribs{$key};
         }
     }
 
-    my($id,$msg) = $self->SUPER::create(%attribs);
+
+    my $msg = $self->SUPER::create(%attribs);
+    if (ref($msg)  ) {
+        # It's a Class::ReturnValue
+        return $msg ;
+    }
+    my ($id, $status) = $msg;
     $self->load_by_cols( id => $id ) if ($id);
-    return wantarray ? ( $id, _("Record created") ) : $id;
+    return wantarray ? ($id, $status) : $id;
 }
 
 
@@ -122,7 +125,7 @@ sub load_or_create {
 }
 
 
-=head2 current_user_can RIGHT [, ATTRIBUTES]
+=head2 current_user_can RIGHT [ATTRIBUTES]
 
 Should return true if the current user (C<< $self->current_user >>) is
 allowed to do I<RIGHT>.  Possible values for I<RIGHT> are:
@@ -132,19 +135,24 @@ allowed to do I<RIGHT>.  Possible values for I<RIGHT> are:
 =item create
 
 Called just before an object's C<create> method is called, as well as
-before parameter validation.  It is also passed the attributes that
+before parameter validation.  ATTRIBUTES is the attributes that
 the object is trying to be created with, as the attributes aren't on
 the object yet to be inspected.
 
 =item read
 
 Called before any attribute is accessed on the object.
+ATTRIBUTES is a hash with a single key C<column> and a single
+value, the name of the column being queried.
 
-=item edit
+=item update
 
 Called before any attribute is changed on the object.
+ATTRIBUTES is a hash of the arguments passed to _set.
 
-=item admin
+
+
+=item delete
 
 Called before the object is deleted.
 
@@ -196,13 +204,16 @@ sub check_create_rights { return shift->current_user_can('create', @_) }
 
 Internal helper to call L</current_user_can> with C<read>.
 
-Passed C<column> as a named parameter for the column the user is checking rights
+Passes C<column> as a named parameter for the column the user is checking rights
 on.
 
 =cut
 
-sub check_read_rights { return shift->current_user_can('read', column => shift) }
-
+sub check_read_rights {
+    my $self = shift;
+    return (1) if $self->_is_readable;
+    return $self->current_user_can( 'read', column => shift );
+}
 
 =head2 check_update_rights
 
@@ -246,6 +257,7 @@ sub _value {
     $value;
 }
 
+
 =head2 as_superuser
 
 Returns a copy of this object with the current_user set to the
@@ -283,6 +295,9 @@ sub _collection_value {
     return undef unless $classname;
     return unless $classname->isa( 'Jifty::DBI::Collection' );
 
+    if ( my $prefetched_collection = $self->_prefetched_collection($method_name)) {
+        return $prefetched_collection;
+    }
 
     my $coll = $classname->new( current_user => $self->current_user );
     if ($column->by and $self->id) { 
@@ -340,6 +355,8 @@ sub _to_record {
     # perhaps the handle should have an initiializer for records/collections
     my $object = $classname->new(current_user => $self->current_user);
     $object->load_by_cols(( $column->by || 'id')  => $value) if ($value);
+    # XXX: an attribute or hook to let model class declare implicit
+    # readable refers_to columns.  $object->_is_readable(1) if $column->blah;
     return $object;
 }
 

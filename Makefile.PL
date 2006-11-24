@@ -40,34 +40,36 @@ requires('HTTP::Server::Simple' => '0.20');  # HTTP::Server::Simple::CGI
 requires('HTTP::Server::Simple::Recorder');
 requires('Hash::Merge');
 requires('Hook::LexWrap');
-requires('Jifty::DBI' => '0.25' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
+requires('IPC::PubSub' => '0.11' );
+requires('Jifty::DBI' => '0.29' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
 requires('Locale::Maketext::Extract' => '0.20');
 requires('Locale::Maketext::Lexicon' => '0.60');
 requires('Log::Log4perl');
 requires('LWP::UserAgent'); # Net::HTTP
 requires('MIME::Types');
 requires('Module::Pluggable' => '2.95');
+requires('Module::CoreList');
 requires('Module::ScanDeps');
 requires('Object::Declare' => '0.13');
 requires('Params::Validate');
-requires('PerlIO::gzip');
 requires('Scalar::Defer' => '0.06');
 requires('Shell::Command');
 requires('String::Koremutake');
+requires('SQL::ReservedWords');
 requires('UNIVERSAL::require');
 requires('URI');
-requires('XML::Writer');
+requires('XML::Writer' => '0.601');
 requires('XML::Simple');
 requires('XML::XPath');
 requires('version');
 
 if (can_cc()) {
     # Always require the Syck bindings if a C compiler is available
-    requires('YAML::Syck' => 0.45);
+    requires('YAML::Syck' => 0.71);
     requires('JSON::Syck' => 0.14);
 }
 else {
-    requires('YAML' => 0.35) unless can_use('YAML::Syck' => 0.45);
+    requires('YAML' => 0.35) unless can_use('YAML::Syck' => 0.71);
     requires('JSON' => 0.01) unless can_use('JSON::Syck' => 0.14);
 }
 
@@ -104,6 +106,7 @@ features(
 );
 
 
+no_index directory => 'share';
 no_index directory => 't';
 no_index package => 'DB';
 no_index package => 'inc';

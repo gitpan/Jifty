@@ -31,6 +31,7 @@ __PACKAGE__->mk_classdata($_)
 
 __PACKAGE__->javascript_libs([qw(
     jsan/JSAN.js
+    jsan/Push.js
     setup_jsan.js
     jsan/Upgrade/Array/push.js
     jsan/DOM/Events.js
@@ -47,6 +48,7 @@ __PACKAGE__->javascript_libs([qw(
     formatDate.js
     jifty.js
     jifty_utils.js
+    jifty_subs.js
     jifty_smoothscroll.js
     calendar.js
     dom-drag.js
@@ -99,6 +101,7 @@ Send a string to the browser. The default implementation uses Mason->out;
 =cut
 
 sub out {
+    Carp::cluck unless defined $_[0]->mason;
     shift->mason->out(@_);
 }
 
@@ -120,15 +123,36 @@ sub url {
     if ($args{'scheme'}) {
         $self->log->error("Jifty->web->url no longer accepts a 'scheme' argument");
     }
-    
+
     my $uri;
-    if ($ENV{'HTTP_HOST'}) {
-      my $host = $ENV{HTTP_HOST};
-      if ($host !~ m{^http://}) {
-        $host = 'http://' . $host;
-      }
-      $uri = URI->new($host);
-    } else {
+
+    # Try to get a host out of the environment, useful in remote testing.
+    # The code is a little hairy because there's no guarantee these
+    # environment variables have all the information.
+    if (my $http_host_env = $ENV{HTTP_HOST}) {
+        # Explicit flag needed because URI->new("noscheme") is structurally
+        # different from URI->new("http://smth"). Clunky, but works.
+        my $dirty;
+        if ($http_host_env !~ m{^https?://}) {
+            $dirty++;
+            $http_host_env = "http://" . $http_host_env;
+        }
+        $uri = URI->new($http_host_env);
+        if ($dirty && (my $req_uri_env = $ENV{REQUEST_URI})) {
+            my $req_uri = URI->new($req_uri_env);
+            $uri->scheme($req_uri->scheme) if $req_uri->can('scheme');
+            $dirty = $uri->scheme;
+        }
+        # As a last resort, peek at the BaseURL configuration setting
+        # for the scheme, which is an often-missing part.
+        if ($dirty) {
+            my $config_uri = URI->new(
+                    Jifty->config->framework("Web")->{BaseURL});
+            $uri->scheme($config_uri->scheme);
+        }
+    }
+
+    if (!$uri) {
       my $url  = Jifty->config->framework("Web")->{BaseURL};
       my $port = Jifty->config->framework("Web")->{Port};
    
@@ -140,7 +164,7 @@ sub url {
       my $path = $args{path};
       # strip off leading '/' because ->canonical provides one
       $path =~ s{^/}{};
-      $uri->path($path);
+      $uri->path_query($path);
     }
     
     return $uri->canonical->as_string;
@@ -219,15 +243,11 @@ sub current_user {
         return $self->_current_user;
 
     } elsif ( my $id = $self->session->get('user_id') ) {
-        my $object = (
-            Jifty->config->framework('ApplicationClass') . "::CurrentUser" )
-            ->new( id => $id );
+        my $object = Jifty->app_class("CurrentUser")->new( id => $id );
         $self->_current_user($object);
         return $object;
     } else {
-        my $object = (
-            Jifty->config->framework('ApplicationClass') . "::CurrentUser" )
-            ->new();
+        my $object = Jifty->app_class("CurrentUser")->new;
         $object->is_superuser(1) if Jifty->config->framework('AdminMode');
         $self->_current_user($object);
         return ($object);
@@ -323,7 +343,7 @@ sub handle_request {
                 next unless $action->validate;
             }
 
-            $self->log->debug("Running action.");
+            $self->log->debug("Running action ".ref($action). " ".$action->moniker);
             eval { $action->run; };
             $request_action->has_run(1);
 
@@ -337,7 +357,7 @@ sub handle_request {
                 $action->result->error(
                     Jifty->config->framework("DevelMode")
                     ? $err
-                    : "There was an error completing the request.  Please try again later."
+                    : _("There was an error completing the request.  Please try again later.")
                 );
             }
 
@@ -416,17 +436,6 @@ sub new_action {
     );
 
 
-    if ( $args{'moniker'} ) {
-        my $action_in_request = $self->request->action( $args{moniker} );
-
-    # Fields explicitly passed to new_action take precedence over those passed
-    # from the request; we read from the request to implement "sticky fields".
-    #
-        if ( $action_in_request and $action_in_request->arguments ) {
-            $args{'request_arguments'} = $action_in_request->arguments;
-        }
-    }
-
     # "Untaint" -- the implementation class is provided by the client!)
     # Allows anything that a normal package name allows
     my $class = delete $args{class};
@@ -439,9 +448,21 @@ sub new_action {
     # Prepend the base path (probably "App::Action") unless it's there already
     $class = Jifty->api->qualify($class);
 
+    my $loaded = Jifty::Util->require( $class );
+    $args{moniker} ||= ($loaded ? $class : 'Jifty::Action')->_generate_moniker;
+
+    my $action_in_request = $self->request->action( $args{moniker} );
+
+    # Fields explicitly passed to new_action take precedence over those passed
+    # from the request; we read from the request to implement "sticky fields".
+    #
+    if ( $action_in_request and $action_in_request->arguments ) {
+        $args{'request_arguments'} = $action_in_request->arguments;
+    }
+
     # The implementation class is provided by the client, so this
     # isn't a "shouldn't happen"
-    return unless Jifty::Util->require( $class );
+    return unless $loaded;
 
     my $action;
     # XXX TODO bullet proof
@@ -836,7 +857,7 @@ sub _render_messages {
     my $plural = $type . "s";
     $self->out(qq{<div class="jifty results messages" id="$plural">});
     
-    foreach my $moniker ( keys %results ) {
+    foreach my $moniker ( sort keys %results ) {
         if ( $results{$moniker}->$type() ) {
             $self->out( qq{<div class="$type $moniker">}
                         . $results{$moniker}->$type()

@@ -32,11 +32,11 @@ following criteria:
 
 =item C<text> or C<varchar> fields
 
-Create C<field>_contains and C<field>_lacks arguments.
+Create C<field>_contains and C<field>_lacks arguments
 
 =item C<date>, or C<timestamp> fields
 
-Create C<field>_before and C<field>_after ar
+Create C<field>_before and C<field>_after arguments
 
 =item integer fields
 
@@ -85,22 +85,24 @@ sub arguments {
         # Magic _id refers_to columns
         next if($field =~ /^(.*)_id$/ && $self->record->column($1));
 
+        my $label = $info->{label} || $field;
+        $args->{"${field}_not"} = {%$info, label => "$label is not"};
         if($column->type =~ /^(?:text|varchar)/i) {
             $info->{render_as} = 'text';
-            my $label = $info->{label} || $field;
             $args->{"${field}_contains"} = {%$info, label => "$label contains"};
             $args->{"${field}_lacks"} = {%$info, label => "$label lacks"};
         } elsif($column->type =~ /(?:date|time)/) {
-            my $label = $info->{label} || $field;
             $args->{"${field}_after"} = {%$info, label => "$label after"};
             $args->{"${field}_before"} = {%$info, label => "$label before"};
         } elsif(    $column->type =~ /(?:int)/
                 && !$column->refers_to) {
-            my $label = $info->{label} || $field;
             $args->{"${field}_gt"} = {%$info, label => "$label greater than"};
             $args->{"${field}_lt"} = {%$info, label => "$label less than"};
         }
     }
+
+    $args->{contains} = {type => 'text', label => 'Any field contains'};
+    $args->{lacks} = {type => 'text', label => 'No field contains'};
 
     return $self->_cached_arguments($args);
 }
@@ -126,6 +128,7 @@ sub take_action {
     $collection->unlimit;
 
     for my $field (grep {$self->has_argument($_)} $self->argument_names) {
+        next if $field eq 'contains';
         my $value = $self->argument_value($field);
         
         my $column = $self->record->column($field);
@@ -141,7 +144,9 @@ sub take_action {
             if($field =~ m{^(.*)_([[:alpha:]]+)$}) {
                 $field = $1;
                 $op = $2;
-                if($op eq 'contains') {
+                if($op eq 'not') {
+                    $op = '!=';
+                } elsif($op eq 'contains') {
                     $op = 'LIKE';
                     $value = "%$value%";
                 } elsif($op eq 'lacks') {
@@ -159,6 +164,13 @@ sub take_action {
         
         if(defined($value)) {
             next if $value =~ /^\s*$/;
+           
+            if ($op && $op =~ /^(?:!=|NOT LIKE)$/) {
+                $collection->limit( column   => $field, value    => $value, operator => $op || "=", entry_aggregator => 'OR', $op ? (case_sensitive => 0) : (),);
+                $collection->limit( column   => $field, value    => 'NULL', operator => 'IS');
+            } else { 
+
+            
             $collection->limit(
                 column   => $field,
                 value    => $value,
@@ -166,12 +178,29 @@ sub take_action {
                 entry_aggregator => 'AND',
                 $op ? (case_sensitive => 0) : (),
                );
+
+            } 
+
+
         } else {
             $collection->limit(
                 column   => $field,
                 value    => 'NULL',
                 operator => 'IS'
                );
+        }
+    }
+
+    if($self->has_argument('contains')) {
+        my $any = $self->argument_value('contains');
+        for my $col ($self->record->columns) {
+            if($col->type =~ /(?:text|varchar)/) {
+                $collection->limit(column   => $col->name,
+                                   value    => "%$any%",
+                                   operator => 'LIKE',
+                                   entry_aggregator => 'OR',
+                                   subclause => 'contains');
+            }
         }
     }
 

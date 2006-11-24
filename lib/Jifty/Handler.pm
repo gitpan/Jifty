@@ -65,12 +65,11 @@ sub new {
 #        $_[-1] = Jifty->handler->cgi if Jifty->handler->cgi;
 #    };
 
-    $self->dispatcher(
-        Jifty->config->framework('ApplicationClass') . "::Dispatcher" );
+    $self->dispatcher( Jifty->app_class( "Dispatcher" ) );
     Jifty::Util->require( $self->dispatcher );
     $self->dispatcher->import_plugins;
     $self->dispatcher->dump_rules;
-
+    
     $self->mason( Jifty::View::Mason::Handler->new( $self->mason_config ) );
 
     $self->static_handler(Jifty::View::Static::Handler->new());
@@ -178,7 +177,11 @@ sub handle_request {
         @_
     );
 
-    Module::Refresh->refresh if ( Jifty->config->framework('DevelMode') );
+    if ( Jifty->config->framework('DevelMode') ) {
+        Module::Refresh->refresh;
+        Jifty::I18N->refresh;
+    }
+
     $self->cgi( $args{cgi} );
     $self->apache( HTML::Mason::FakeApache->new( cgi => $self->cgi ) );
 

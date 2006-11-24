@@ -8,6 +8,30 @@ use Pod::Usage;
 use version;
 use Jifty::DBI::SchemaGenerator;
 use Jifty::Config;
+use SQL::ReservedWords;
+
+Jifty::Module::Pluggable->import(
+    require     => 1,
+    search_path => [ "SQL::ReservedWords"],
+    sub_name => '_sql_dialects',
+);  
+        
+            
+
+our %_SQL_RESERVED = ();
+our @_SQL_RESERVED_OVERRIDE = qw(value);
+foreach my $dialect ( 'SQL::ReservedWords', &_sql_dialects ) {
+    foreach my $word ( $dialect->words ) {
+        push @{ $_SQL_RESERVED{ lc($word) } }, $dialect->reserved_by($word);
+    }
+}
+
+# XXX TODO: QUESTIONABLE ENGINEERING DECISION
+# The SQL standard forbids columns named 'value', but just about everone on the planet 
+# actually supports it. Rather than going about scaremongering, we choose
+# not to warn people about columns named 'value'
+
+delete $_SQL_RESERVED{lc($_)} for (@_SQL_RESERVED_OVERRIDE);
 
 =head2 options
 
@@ -21,6 +45,7 @@ sub options {
         "setup"             => "setup_tables",
         "print|p"           => "print",
         "create-database|c" => "create_database",
+        "ignore-reserved-words" => "ignore_reserved",
         "drop-database"     => "drop_database",
         "help|?"            => "help",
         "man"               => "man"
@@ -104,21 +129,18 @@ sub prepare_model_classes {
     my $self = shift;
 
     # Set up application-specific parts
-    $self->{'_application_class'}
-        = Jifty->config->framework('ApplicationClass');
     $self->{'_schema_generator'}
         = Jifty::DBI::SchemaGenerator->new( Jifty->handle )
         or die "Can't make Jifty::DBI::SchemaGenerator";
 
 # This creates a sub "models" which when called, finds packages under
-# $self->{'_application_class'}::Model, requires them, and returns a list of their
+# the application's ::Model, requires them, and returns a list of their
 # names.
-    require Module::Pluggable;
-    Module::Pluggable->import(
+    Jifty::Module::Pluggable->import(
         require     => 1,
         except      => qr/\.#/,
         search_path =>
-            [ "Jifty::Model", $self->{'_application_class'} . "::Model" ],
+            [ "Jifty::Model", Jifty->app_class("Model") ],
         sub_name => 'models',
     );
 }
@@ -184,7 +206,7 @@ sub create_all_tables {
 
     my $log    = Log::Log4perl->get_logger("SchemaTool");
     $log->info(
-        "Generating SQL for application $self->{'_application_class'}...");
+        "Generating SQL for application @{[Jifty->app_class]}...");
 
     my $appv
         = version->new( Jifty->config->framework('Database')->{'Version'} );
@@ -200,14 +222,22 @@ sub create_all_tables {
        #   This *will* try to generate SQL for abstract base classes you might
        #   stick in $AC::Model::.
         next unless $model->isa( 'Jifty::Record' );
-        do { $log->info("Skipping $model"); next }
-            if ( $model->can( 'since' )
-            and ($model =~ /^Jifty::Model::/ ? $jiftyv : $appv) < $model->since );
-
+        if ( $model->can( 'since' ) and ($model =~ /^Jifty::Model::/ ? $jiftyv : $appv) < $model->since ) {
+            $log->info("Skipping $model"); 
+            next;
+        }
         $log->info("Using $model");
         my $ret = $self->{'_schema_generator'}->add_model( $model->new );
         $ret or die "couldn't add model $model: " . $ret->error_message;
+        unless ($self->{'ignore_reserved'} or
+         !Jifty->config->framework('Database')->{'CheckSchema'} ) {
+                $self->_check_reserved($model);
+        }
+
+
     }
+     
+
 
     if ( $self->{'print'} ) {
         print $self->{'_schema_generator'}->create_table_sql_text;
@@ -229,7 +259,7 @@ sub create_all_tables {
 
         # Load initial data
         eval {
-            my $bootstrapper = $self->{'_application_class'} . "::Bootstrap";
+            my $bootstrapper = Jifty->app_class("Bootstrap");
             Jifty::Util->require($bootstrapper);
 
             $bootstrapper->run()
@@ -240,6 +270,15 @@ sub create_all_tables {
         # Commit it all
         Jifty->handle->commit;
     }
+
+    Jifty::Util->require('IPC::PubSub');
+    IPC::PubSub->new(
+        JiftyDBI => (
+            db_config    => Jifty->handle->{db_config},
+            table_prefix => '_jifty_pubsub_',
+            db_init      => 1,
+        )
+    );
     $log->info("Set up version $appv, jifty version $jiftyv");
 }
 
@@ -286,7 +325,7 @@ sub upgrade_application_tables {
     my $appv
         = version->new( Jifty->config->framework('Database')->{'Version'} );
 
-    return unless $self->upgrade_tables( $self->{_application_class} => $dbv, $appv );
+    return unless $self->upgrade_tables( Jifty->app_class, $dbv, $appv );
     if( $self->{print} ) {
         warn "Need to upgrade application_db_version to $appv here!";
     } else {
@@ -481,6 +520,34 @@ sub manage_database_existence {
     # Otherwise, reinit our handle
     Jifty->handle( Jifty::Handle->new() );
     Jifty->handle->connect();
+}
+
+sub __parenthesize {
+    if (not defined $_[0]) { return () }
+    if (@_ == 1)           { return $_[0] }
+    return "(" . (join ", ", @_) . ")";
+}
+
+sub _classify {
+    my %dbs;
+    # Guess names of databases + their versions by breaking on last space,
+    # e.g., "SQL Server 7" is ("SQL Server", "7"), not ("SQL", "Server 7").
+    push @{ $dbs{$_->[0]} }, $_->[1] for map { [ split /\s+(?!.*\s)/, $_, 2 ] } @_;
+    return map { join " ", $_, __parenthesize(@{ $dbs{$_} }) } sort keys %dbs;
+}
+
+sub _check_reserved {
+    my $self  = shift;
+    my $model = shift;
+    my $log   = Log::Log4perl->get_logger("SchemaTool");
+    foreach my $col ( $model->columns ) {
+        if ( exists $_SQL_RESERVED{ lc( $col->name ) } ) {
+            $log->error( $model . ": "
+                    . $col->name
+                    . " is a reserved word in these SQL dialects: "
+                    . join( ', ', _classify(@{ $_SQL_RESERVED{ lc( $col->name ) } }) ) );
+        }
+    }
 }
 
 1;

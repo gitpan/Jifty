@@ -9,12 +9,21 @@ Jifty::Action - The ability to Do Things in the framework
 
 =head1 SYNOPSIS
 
-  package MyApp::Action::Foo;
-  use base qw/MyApp::Action Jifty::Action/;
+    package MyApp::Action::Foo;
+    use Jifty::Param::Schema;
+    use Jifty::Action schema {
+
+    param bar =>
+        type is 'checkbox',
+        label is 'Want Bar?',
+        hints is 'Bar is this cool thing that you really want.',
+        default is 0;
+
+    };
   
-  sub take_action {
-    ...
-  }
+    sub take_action {
+        ...
+    }
   
   1;
 
@@ -27,7 +36,10 @@ control how form elements interact with the underlying model.
 See also L<Jifty::Action::Record> for data-oriented actions, 
 L<Jifty::Result> for how to return values from actions.
 
-See Jifty::Action::Schema;
+See L<Jifty::Param::Schema> for more details on the declarative 
+syntax.
+
+See L<Jifty::Manual::Actions> for examples of using actions.
 
 =cut
 
@@ -67,7 +79,7 @@ Lower numbers occur before higher numbers.  Defaults to 0.
 =item arguments
 
 A hash reference of default values for the
-L<arguments|Jifty::Manual::Glossary/arguments> of the action.  Defaults to
+L<arguments|Jifty::Manual::Glossary/argument> of the action.  Defaults to
 none.
 
 =item sticky_on_failure
@@ -116,8 +128,7 @@ sub new {
     if ($args{'moniker'}) {
         $self->moniker($args{'moniker'});
     } else {
-        $self->moniker('auto-'.Jifty->web->serial);
-        $self->log->debug("Generating moniker auto-".Jifty->web->serial);
+        $self->moniker($self->_generate_moniker);
     }
     $self->order($args{'order'});
 
@@ -137,6 +148,39 @@ sub new {
 
     return $self;
 }
+
+=head2 _generate_moniker 
+
+Construct a moniker for a new (or soon-to-be-constructed) action that did not have
+an explicit moniker specified.  The algorithm is simple: We snapshot the call stack,
+prefix it with the action class, and then append it with an per-request autoincrement
+counter in case the same class/stack is encountered twice, which can happen if the
+programmer placed a C<new_action> call inside a loop.
+
+Monikers generated this way are guaranteed to work across requests.
+
+=cut
+
+sub _generate_moniker {
+    my $self = shift;
+
+    use Digest::MD5 qw(md5_hex);
+    my $frame = 1;
+    my @stack = (ref($self) || $self);
+    while (my ($pkg, $filename, $line) = caller($frame++)) {
+        push @stack, $pkg, $filename, $line;
+    }
+
+    # Increment the per-request moniker digest counter, for the case of looped action generation
+    my $digest = md5_hex("@stack");
+    # We should always have a stash. but if we don't, fake something up
+    # (some hiveminder tests create actions outside of a Jifty::Web)
+    my $serial = Jifty->handler->stash ? ++(Jifty->handler->stash->{monikers}{$digest}) : rand();
+    my $moniker = "auto-$digest-$serial";
+    $self->log->debug("Generating moniker $moniker from stack for $self");
+    return $moniker;
+}
+
 
 =head2 arguments
 
@@ -208,8 +252,10 @@ sub run {
 
         return;
     }
-    $self->log->debug("Taking action");
-    $self->take_action;
+    $self->log->debug("Taking action ".ref($self) . " " .$self->moniker);
+    my $ret = $self->take_action;
+    $self->log->debug("Result: ".(defined $ret ? $ret : "(undef)"));
+    
     $self->cleanup;
 }
 
@@ -246,7 +292,7 @@ sub check_authorization { 1; }
 
 =head2 setup
 
-.  C<setup> is expected to return a true value, or
+C<setup> is expected to return a true value, or
 L</run> will skip all other actions.
 
 By default, does nothing.
@@ -377,7 +423,7 @@ sub _form_widget {
 
         my $sticky = 0;
         # Check stickiness iff the values came from the request
-        if($self->values_from_request->{$field} && Jifty->web->response->result($self->moniker)) {
+        if(Jifty->web->response->result($self->moniker)) {
             $sticky = 1 if $self->sticky_on_failure and $self->result->failure;
             $sticky = 1 if $self->sticky_on_success and $self->result->success;
         }
@@ -643,6 +689,20 @@ sub warning_div_id {
   return 'warnings-' . $self->form_field_name($field_name);
 }
 
+=head2 canonicalization_note_div_id ARGUMENT
+
+Turn one of this action's L<arguments|Jifty::Manual::Glossary/arguments> into
+the id for the div in which its canonicalization notes live; takes name of the field
+as an argument.
+
+=cut
+
+sub canonicalization_note_div_id {
+  my $self = shift;
+  my $field_name = shift;
+  return 'canonicalization_note-' . $self->form_field_name($field_name);
+}
+
 
 =head1 VALIDATION METHODS
 
@@ -795,7 +855,7 @@ sub _validate_argument {
     if ( !defined $value || !length $value ) {
 
         if ( $field_info->{mandatory} ) {
-            return $self->validation_error( $field => "You need to fill in this field" );
+            return $self->validation_error( $field => _("You need to fill in this field") );
         }
     }
 
@@ -934,7 +994,7 @@ sub _values_for_field {
                         display => ( $_->$disp() || '' ),
                         value   => ( $_->$val()  || '' )
                     }
-                } grep {$_->current_user_can("read")} @{ $v->{'collection'}->items_array_ref };
+                } grep {$_->check_read_rights} @{ $v->{'collection'}->items_array_ref };
 
             }
             else {
@@ -1012,6 +1072,29 @@ sub validation_ok {
     $self->result->field_warning($field => undef);
 
     return 1;
+}
+
+=head2 canonicalization_note ARGUMENT => NOTE
+
+Used to send an informational message to the user from the canonicalizer.  
+Inside a canonicalizer you can write:
+
+  $self->canonicalization_note( $field => "I changed $field for you");
+
+..where C<$field> is the name of the argument which the canonicalizer is 
+processing
+
+=cut
+
+sub canonicalization_note {
+    my $self = shift;
+    my $field = shift;
+    my $info = shift;
+  
+    $self->result->field_canonicalization_note($field => $info); 
+
+    return;
+
 }
 
 =head2 autogenerated

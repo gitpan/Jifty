@@ -50,7 +50,7 @@ sub is_passing {
 
     my $is_failing = 0;
     $is_failing ||= grep {not $_} $tb->summary;
-    $is_failing ||= $tb->has_plan eq 'no_plan'
+    $is_failing ||= ($tb->has_plan || '') eq 'no_plan'
                       ? 0
                       : $tb->expected_tests < $tb->current_test;
 
@@ -71,7 +71,7 @@ one test has run.
 
 sub is_done {
     my $tb = Jifty::Test->builder;
-    if( $tb->has_plan eq 'no_plan' ) {
+    if( ($tb->has_plan || '') eq 'no_plan' ) {
         return $tb->current_test > 0;
     }
     else {
@@ -127,7 +127,7 @@ sub setup {
 
           use vars qw/$cache_key_prefix/;
 
-          $cache_key_prefix = "jifty-test-$$";
+          $cache_key_prefix = "jifty-test-" . $$;
         
           sub cache_key_prefix {
               $Jifty::Record::cache_key_prefix;
@@ -138,7 +138,7 @@ sub setup {
     my $root = Jifty::Util->app_root;
 
     # Mason's disk caching sometimes causes false tests
-    rmtree(["$root/var/mason"], 0, 1);
+    rmtree([ File::Spec->canonpath("$root/var/mason") ], 0, 1);
 
     Jifty->new( no_handle => 1 );
 
@@ -212,7 +212,7 @@ sub make_server {
     if ($ENV{JIFTY_TESTSERVER_PROFILE} ||
         $ENV{JIFTY_TESTSERVER_COVERAGE} ||
         $ENV{JIFTY_TESTSERVER_DBIPROF} ||
-        $^O eq 'Win32') {
+        $^O eq 'MSWin32') {
         require Jifty::TestServer;
         unshift @Jifty::Server::ISA, 'Jifty::TestServer';
     }
@@ -226,6 +226,26 @@ sub make_server {
 
     return $server;
 } 
+
+
+=head2 web
+
+Like calling C<<Jifty->web>>.
+
+C<<Jifty::Test->web>> does the necessary Jifty->web initialization for
+it to be usable in a test.
+
+=cut
+
+sub web {
+    my $class = shift;
+
+    Jifty->web->request(Jifty::Request->new)   unless Jifty->web->request;
+    Jifty->web->response(Jifty::Response->new) unless Jifty->web->response;
+
+    return Jifty->web;
+}
+
 
 =head2 mailbox
 

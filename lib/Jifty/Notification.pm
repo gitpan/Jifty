@@ -74,7 +74,7 @@ the C<Mailer> and C<MailerArgs> configuration arguments.  Returns true
 if mail was actually sent.  Note errors are not the only cause of mail
 not being sent -- for example, the recipients list could be empty.
 
-    Be aware that if you haven't set C<recipients>, this will fail silently
+Be aware that if you haven't set C<recipients>, this will fail silently
 and return without doing anything useful.
 
 =cut
@@ -89,11 +89,13 @@ sub send_one_message {
         header => [
             From    => $self->from    || 'A Jifty Application <nobody>',
             To      => $to,
-            Subject => $self->subject || 'No subject',
+            Subject => Encode::encode('MIME-Header', $self->subject || 'No subject'),
         ],
         attributes => { charset => 'UTF-8' },
         parts => $self->parts
     );
+    $message->encoding_set('8bit')
+        if (scalar $message->parts == 1);
     $self->set_headers($message);
 
     my $method   = Jifty->config->framework('Mailer');
@@ -201,7 +203,7 @@ person, as well.
 
 sub send {
     my $self = shift;
-    my $currentuser_object_class = Jifty->config->framework('ApplicationClass')."::CurrentUser";
+    my $currentuser_object_class = Jifty->app_class("CurrentUser");
     for my $to ( grep {defined} ($self->to, $self->to_list) ) {
         if ($to->can('id')) {
         next if     $currentuser_object_class->can("nobody")
@@ -267,7 +269,7 @@ sub parts {
   return [
     Email::MIME->create(
       attributes => { charset => 'UTF-8' },
-      body       => $self->full_body
+      body       => Encode::encode_utf8($self->full_body),
     )
   ];
 

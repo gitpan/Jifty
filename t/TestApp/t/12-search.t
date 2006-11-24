@@ -12,7 +12,8 @@ use lib 't/lib';
 use lib 't/lib';
 use Jifty::SubTest;
 
-use Jifty::Test qw(no_plan);
+use Jifty::Test tests => 53;
+
 
 my $user = TestApp::Model::User->new(current_user => TestApp::CurrentUser->superuser);
 
@@ -43,7 +44,7 @@ $user = TestApp::Model::User->new(current_user => TestApp::CurrentUser->superuse
 
 ok($user->create(
         name       => 'third_user',
-        email      => 'test3@not.a.domain',
+        email      => 'test3@test2.com',
         password    => 'hahaha',
         created_on => '1999-12-31 23:59'
     ),
@@ -51,12 +52,7 @@ ok($user->create(
 );
 
 
-# Set up Jifty so we can call J->w->new_action
-Jifty->new;
-Jifty->web->request(Jifty::Request->new);
-Jifty->web->response(Jifty::Response->new);
-
-my $search = Jifty->web->new_action(
+my $search = Jifty::Test->web->new_action(
     class        => 'SearchUser',
     moniker      => 'search',
     current_user => TestApp::CurrentUser->superuser,
@@ -155,6 +151,24 @@ isa_ok($result, 'Jifty::Collection');
 is($result->count, 1);
 is($result->first->name, 'third_user');
 
+
+
+# exact negative searching
+$search->argument_values({ name_not => 'third_user'});
+$search->run;
+
+$result = $search->result->content('search');
+
+isa_ok($result, 'Jifty::Collection');
+is($result->count, 2);
+ok($result->first->name =~ /test/, "it's a test user" );
+
+
+
+
+
+
+
 # This is case insensitive substring
 $search->argument_values({name_contains => 'TEST'});
 $search->run;
@@ -192,3 +206,23 @@ $result = $search->result->content('search');
 isa_ok($result, 'Jifty::Collection');
 is($result->count, 1);
 is($result->first->name, 'third_user');
+
+# Searching on any field
+$search->argument_values({contains => 'test2'});
+$search->run;
+
+$result = $search->result->content('search');
+
+isa_ok($result, 'Jifty::Collection');
+is($result->count, 2);
+is($result->items_array_ref->[0]->name, 'test2');
+is($result->items_array_ref->[1]->name, 'third_user');
+
+
+$search->argument_values({contains => 'test2', email_contains => 'localhost'});
+$search->run;
+
+$result = $search->result->content('search');
+
+isa_ok($result, 'Jifty::Collection');
+is($result->count, 0, "found nothing");

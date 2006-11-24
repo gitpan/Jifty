@@ -86,10 +86,11 @@ sub connect {
 
     my %lc_db_config;
     # Skip the non-dsn keys, but not anything else
-    for (grep {!/^version|recordbaseclass$/i} keys %db_config) {
+    for (grep {!/^checkschema|version|recordbaseclass$/i} keys %db_config) {
         $lc_db_config{lc($_)} = $db_config{$_};
     }
     $self->SUPER::connect( %lc_db_config , %args);
+    $self->{db_config} = { %lc_db_config , %args };
     $self->dbh->{LongReadLen} = Jifty->config->framework('MaxAttachmentSize') || '10000000';
 }
 

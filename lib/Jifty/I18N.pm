@@ -6,6 +6,7 @@ use base 'Locale::Maketext';
 use Locale::Maketext::Lexicon ();
 use Email::MIME::ContentType;
 use Encode::Guess qw(iso-8859-1);
+use File::ShareDir ':ALL';
 
 =head1 NAME
 
@@ -21,7 +22,6 @@ your convenience.
 
 =cut
 
-
 =head2 new
 
 Set up Jifty's internationalization for your application.  This pulls
@@ -36,13 +36,20 @@ sub new {
     my $self  = {};
     bless $self, $class;
 
+    my @import = (
+        'Gettext',Jifty->config->framework('L10N')->{'PoDir'}. '/*.po',
+        'Gettext',Jifty->config->framework('L10N')->{'DefaultPoDir'}. '/*.po'
+        );
+
+    foreach my $plugin (Jifty->plugins) {
+        my $dir = eval { module_dir(ref($plugin)); };
+        next unless $dir;
+        push @import, 'Gettext';
+        push @import, $dir . '/po/*.po';
+    };
+
     Locale::Maketext::Lexicon->import(
-        {   '*' => [
-                Gettext => Jifty->config->framework('L10N')->{'PoDir'}
-                    . '/*.po',
-                Gettext => Jifty->config->framework('L10N')->{'DefaultPoDir'}
-                    . '/*.po',
-            ],
+        {   '*' => \@import,
             _decode => 1,
             _auto   => 1,
             _style  => 'gettext',
@@ -59,7 +66,10 @@ sub new {
     my $loc_method = sub {
         # Retain compatibility with people using "-e _" etc.
         return \*_ unless @_;
-        return undef unless (defined $_[0]);
+
+        # When $_[0] is undef, return undef.  When it is '', return ''.
+        no warnings 'uninitialized';
+        return $_[0] unless (length $_[0]);
 
         local $@;
         # Force stringification to stop Locale::Maketext from choking on
@@ -81,6 +91,30 @@ sub new {
     }
     return $self;
 }
+
+=head2 refresh
+
+Used by L<Jifty::Handler> in DevelMode to reload F<.po> files whenever they
+are modified on disk.
+
+=cut
+
+my $last_modified = '';
+sub refresh {
+    my $modified = join(
+        ',',
+        sort map { $_ => -M $_ } map { glob("$_/*.po") } (
+            Jifty->config->framework('L10N')->{'PoDir'},
+            Jifty->config->framework('L10N')->{'DefaultPoDir'}
+        )
+    );
+    if ($modified ne $last_modified) {
+        Jifty::I18N->new;
+        $last_modified = $modified;
+    }
+}
+
+
 
 =head2 promote_encoding STRING [CONTENT-TYPE]
 
