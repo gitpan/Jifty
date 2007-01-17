@@ -62,6 +62,8 @@ __PACKAGE__->javascript_libs([qw(
     yui/dom.js
     yui/event.js
     yui/calendar.js
+    yui/tabview.js
+    yui/container.js
     app.js
     app_behaviour.js
     css_browser_selector.js
@@ -601,7 +603,7 @@ sub redirect {
     # To submit a Jifty::Action::Redirect, we don't need to serialize a continuation,
     # unlike any other kind of actions.
     if (  (grep { not $_->action_class->isa('Jifty::Action::Redirect') }
-                values %{{ $self->response->results }})
+                values %{ { $self->response->results } })
         or $self->request->state_variables
         or $self->{'state_variables'}
         or $self->request->continuation

@@ -21,24 +21,25 @@ column
 
 column
   email_confirmed => label is 'Email address confirmed?',
-  type is 'boolean';
+  type is 'boolean',
+  render_as 'Unrendered';
 
 column
   auth_token => type is 'text',
-  render_as 'Password';
+  render_as 'Unrendered';
 
 package Jifty::Plugin::Login::Model::User;
-use base qw/Jifty::Record/;
-use Jifty::Plugin::Login::Notification::ConfirmAddress;
+use base qw/Jifty::Record Jifty::Plugin::Login/;
 
 sub create {
     my $self  = shift;
     my %args  = (@_);
     my (@ret) = $self->SUPER::create(%args);
+    my $confirmAddress = Jifty->app_class('Notification','ConfirmAddress');
+    Jifty::Util->require($confirmAddress);
 
     if ( $self->id and not $self->email_confirmed ) {
-        Jifty::Plugin::Login::Notification::ConfirmAddress->new( to => $self )
-          ->send;
+        $confirmAddress->new( to => $self )->send;
     }
     return (@ret);
 }
@@ -122,6 +123,18 @@ sub auth_token {
         $self->__set( column => 'auth_token', value => $digest->b64digest );
     }
     return $self->_value('auth_token');
+
+}
+
+=head2 record_class
+
+Identifies the correct record class for introspection
+
+=cut
+
+sub record_class {
+    my $self = shift;
+    return $self->LoginUserClass;
 
 }
 

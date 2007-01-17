@@ -25,6 +25,8 @@ recommends:
   Test::Base: 0.44
   Test::HTML::Lint: 0
   Test::HTTP::Server::Simple: 0.02
+  Test::MockModule: 0.05
+  Test::MockObject: 1.07
   Test::More: 0.62
   Test::Pod::Coverage: 0
   Test::WWW::Mechanize: 1.04
@@ -42,7 +44,9 @@ requires:
   Compress::Zlib: 0
   Crypt::CBC: 0
   Crypt::Rijndael: 0
+  DBD::SQLite: 1.11
   Data::Page: 0
+  Data::UUID: 0
   Date::Manip: 0
   DateTime: 0
   Email::Folder: 0
@@ -63,12 +67,12 @@ requires:
   HTML::Mason::Plugin: 0
   HTTP::Cookies: 0
   HTTP::Date: 0
-  HTTP::Server::Simple: 0.20
+  HTTP::Server::Simple: 0.26
   HTTP::Server::Simple::Recorder: 0
   Hash::Merge: 0
   Hook::LexWrap: 0
-  IPC::PubSub: 0.11
-  JSON::Syck: 0.14
+  IPC::PubSub: 0.22
+  JSON::Syck: 0.15
   Jifty::DBI: 0.29
   LWP::UserAgent: 0
   Locale::Maketext::Extract: 0.20
@@ -76,7 +80,8 @@ requires:
   Log::Log4perl: 0
   MIME::Types: 0
   Module::CoreList: 0
-  Module::Pluggable: 2.95
+  Module::Pluggable: 3.1
+  Module::Refresh: 0
   Module::ScanDeps: 0
   Object::Declare: 0.13
   Params::Validate: 0
@@ -85,6 +90,7 @@ requires:
   Scalar::Defer: 0.06
   Shell::Command: 0
   String::Koremutake: 0
+  Test::Base: 0
   UNIVERSAL::require: 0
   URI: 0
   XML::Simple: 0
@@ -94,4 +100,4 @@ requires:
   perl: 5.8.3
   version: 0
 tests: t/*.t t/*/t/*.t
-version: 0.61123_01
+version: 0.70116

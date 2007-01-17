@@ -452,6 +452,7 @@ sub handle_request {
 
     # XXX TODO: refactor this out somehow?
     # We don't want the previous mason request hanging aroudn once we start dispatching
+    no warnings 'once';
     local $HTML::Mason::Commands::m = undef;
     # Mason introduces a DIE handler that generates a mason exception
     # which in turn generates a backtrace. That's fine when you only
@@ -777,7 +778,7 @@ sub _do_show {
 
 sub _do_set {
     my ( $self, $key, $value ) = @_;
-    $self->log->debug("Setting argument $key to $value");
+    $self->log->debug("Setting argument $key to ".($value||''));
     request->argument($key, $value);
 }
 
@@ -789,7 +790,7 @@ sub _do_del {
 
 sub _do_default {
     my ( $self, $key, $value ) = @_;
-    $self->log->debug("Setting argument default $key to $value");
+    $self->log->debug("Setting argument default $key to ".($value||''));
     request->argument($key, $value)
         unless defined request->argument($key);
 }
@@ -841,8 +842,8 @@ Returns the regular expression matched if the current request fits
 the condition defined by CONDITION. 
 
 C<CONDITION> can be a regular expression, a "simple string" with shell
-wildcard characters (C<*> and C<?>) to match against, or an arrayref or hashref
-of those. It should even be nestable.
+wildcard characters (C<*>, C<?>, C<#>, C<[]>, C<{}>) to match against,
+or an arrayref or hashref of those. It should even be nestable.
 
 Arrayref conditions represents alternatives: the match succeeds as soon
 as the first match is found.
@@ -943,7 +944,7 @@ sub _compile_condition {
     $cond =~ s{(?:\\\/)+}{/}g;
     $cond =~ s{/$}{};
 
-    my $has_capture = ( $cond =~ / \\ [*?] /x);
+    my $has_capture = ( $cond =~ / \\ [*?#] /x);
     if ($has_capture or $cond =~ / \\ [[{] /x) {
         $cond = $self->_compile_glob($cond);
     }
@@ -984,9 +985,9 @@ sub _compile_condition {
 
 Private function.
 
-Turns a metaexpression containing C<*> and C<?> into a capturing regex pattern.
+Turns a metaexpression containing C<*>, C<?> and C<#> into a capturing regex pattern.
 
-Also supports the non-capturing C<[]> and C<{}> notation.
+Also supports the non-capturing C<[]>,and C<{}> notation.
 
 The rules are:
 
@@ -1027,6 +1028,10 @@ Consecutive C<?> marks are captured together:
 
 =item *
 
+The C<#> character captures one or more digit characters.
+
+=item *
+
 Brackets such as C<[a-z]> denote character classes; they are not captured.
 
 =item *
@@ -1055,6 +1060,10 @@ sub _compile_glob {
         \\ \*
     }{([^/]*)}gx;
     $glob =~ s{
+        # The number-sign character matches one or more digits.
+        \\ \#
+    }{(\\d+)}gx;
+    $glob =~ s{
         # Consecutive question marks are captured as one unit;
         # we do this by capturing them and then repeat the result pattern
         # for that many times.  The divide-by-two takes care of the
@@ -1078,7 +1087,7 @@ sub _compile_glob {
     $glob =~ s{
         # Braces denote alternations
         \\ \{ (         # opening (not part of expression)
-            (?:             # one or more characters:
+            (?:             # zero or more characters:
                 \\ \\ \\ \} # ...escaped closing brace
             |
                 \\ [^\}]    # ...escaped (but not the closing brace)
@@ -1086,7 +1095,7 @@ sub _compile_glob {
                 [^\\]       # ...normal
             )+
         ) \\ \}         # closing (not part of expression)
-    }{'(?:'.join('|', split(/\\,/, $1)).')'}egx;
+    }{'(?:'.join('|', split(/\\,/, $1, -1)).')'}egx;
     $glob;
 }
 

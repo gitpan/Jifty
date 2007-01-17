@@ -36,7 +36,7 @@ sub new {
     # Unless the user has explicitly said they want a floating time,
     # we want to convert to the end-user's timezone.  This is
     # complicated by the fact that DateTime auto-appends
-    if (my $tz = $self->current_user_has_timezone) {
+    if (!$args{time_zone} and my $tz = $self->current_user_has_timezone) {
         $self->set_time_zone("UTC");
         $self->set_time_zone( $tz );
     }
@@ -79,7 +79,10 @@ sub new_from_string {
         if($string =~ /^\s* (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/xi) {
             $string = "next $string";
         }
-        local $ENV{'TZ'} = "GMT";
+        
+        # Why are we parsing this as GMT? This feels really wrong.  It will get the wrong answer
+        # if the current user is in another tz.
+        Date::Manip::Date_Init("TZ=GMT");
         $now = Date::Manip::UnixDate( $string, "%o" );
     }
     return undef unless $now;

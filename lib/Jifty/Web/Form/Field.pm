@@ -129,6 +129,11 @@ Gets or sets the type of the HTML <input> field -- that is, 'text' or
 
 Sets this form field's "submit" key binding to VALUE. 
 
+=head2 key_binding_label VALUE
+
+Sets this form field's key binding label to VALUE.  If none is specified
+the normal label is used.
+
 =head2 default_value [VALUE]
 
 Gets or sets the default value for the form.
@@ -163,6 +168,10 @@ via L<AJAX|Jifty::Manual::Glassary/AJAX> as the user fills out the
 form, instead of waiting until submit.  Arguments will B<always> be
 canonicalized before the action is run, whether or not they also
 C<ajax_canonicalize>
+
+=head2 preamble [VALUE]
+
+Gets or sets the preamble located in front of the field.
 
 =head2 id 
 
@@ -238,6 +247,24 @@ sub label {
     my $val = $self->_label(@_);
     defined $val ? $val :  $self->name;
 
+}
+
+=head2 hints [VALUE]
+
+Hints for the user to explain this field
+
+=cut
+
+sub hints {
+    my $self = shift;
+    return $self->_hints_accessor unless @_;
+
+    my $hint = shift;
+    # people sometimes say hints are "foo" rather than hints is "foo"
+    if (ref $hint eq 'ARRAY') {
+        $hint = shift @$hint;
+    }
+    return $self->_hints_accessor($hint);
 }
 
 
@@ -412,7 +439,7 @@ Use this for sticking instructions right in front of a widget
 sub render_preamble {
     my $self = shift;
     Jifty->web->out(
-qq!<span class="preamble @{[$self->classes]}" >@{[_($self->preamble) || '' ]}</span>\n!
+qq!<span class="preamble @{[$self->classes]}">@{[_($self->preamble) || '' ]}</span>\n!
     );
 
     return '';
@@ -456,9 +483,9 @@ sub render_widget {
     $field .= qq! type="@{[ $self->type ]}"!;
     $field .= qq! name="@{[ $self->input_name ]}"! if ($self->input_name);
     $field .= qq! id="@{[ $self->element_id ]}"!;
-    $field .= qq! value="@{[HTML::Entities::encode_entities($self->current_value)]}"! if defined $self->current_value;
+    $field .= qq! value="@{[Jifty->web->escape($self->current_value)]}"! if defined $self->current_value;
     $field .= $self->_widget_class; 
-    $field .= qq! size="@{[ $self->length() ]}"! if ($self->length());
+    $field .= qq! size="@{[ $self->length() ]}" maxlength="@{[ $self->length() ]}"! if ($self->length());
     $field .= " " .$self->other_widget_properties;
     $field .= qq!  />\n!;
     Jifty->web->out($field);
@@ -514,7 +541,7 @@ sub render_value {
     my $field = '<span';
     $field .= qq! class="@{[ $self->classes ]}"> !;
     # XXX: force stringify the value because maketext is buggy with overloaded objects.
-    $field .= HTML::Entities::encode_entities(_("@{[$self->current_value]}")) if defined $self->current_value;
+    $field .= Jifty->web->escape(_("@{[$self->current_value]}")) if defined $self->current_value;
     $field .= qq!</span>\n!;
     Jifty->web->out($field);
     return '';

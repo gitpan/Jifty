@@ -14,8 +14,9 @@ requires('Crypt::CBC');
 requires('Crypt::Rijndael');
 requires('Compress::Zlib');
 requires('CSS::Squish' => 0.05 );
-#requires('DBD::SQLite' => 1.11 );
+requires('DBD::SQLite' => 1.11 );
 requires('Data::Page');
+requires('Data::UUID');
 requires('DateTime');
 requires('Date::Manip');
 requires('Email::Folder');
@@ -36,19 +37,20 @@ requires('HTML::Mason' => 1.3101);           # HTML::Mason::Exceptions HTML::Mas
 requires('HTML::Mason::Plugin');
 requires('HTTP::Cookies');
 requires('HTTP::Date');
-requires('HTTP::Server::Simple' => '0.20');  # HTTP::Server::Simple::CGI
+requires('HTTP::Server::Simple' => '0.26');  # HTTP::Server::Simple::CGI
 requires('HTTP::Server::Simple::Recorder');
 requires('Hash::Merge');
 requires('Hook::LexWrap');
-requires('IPC::PubSub' => '0.11' );
+requires('IPC::PubSub' => '0.22' );
 requires('Jifty::DBI' => '0.29' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
 requires('Locale::Maketext::Extract' => '0.20');
 requires('Locale::Maketext::Lexicon' => '0.60');
 requires('Log::Log4perl');
 requires('LWP::UserAgent'); # Net::HTTP
 requires('MIME::Types');
-requires('Module::Pluggable' => '2.95');
+requires('Module::Pluggable' => '3.1');
 requires('Module::CoreList');
+requires('Module::Refresh');
 requires('Module::ScanDeps');
 requires('Object::Declare' => '0.13');
 requires('Params::Validate');
@@ -56,6 +58,7 @@ requires('Scalar::Defer' => '0.06');
 requires('Shell::Command');
 requires('String::Koremutake');
 requires('SQL::ReservedWords');
+requires('Test::Base');
 requires('UNIVERSAL::require');
 requires('URI');
 requires('XML::Writer' => '0.601');
@@ -66,11 +69,11 @@ requires('version');
 if (can_cc()) {
     # Always require the Syck bindings if a C compiler is available
     requires('YAML::Syck' => 0.71);
-    requires('JSON::Syck' => 0.14);
+    requires('JSON::Syck' => 0.15);
 }
 else {
     requires('YAML' => 0.35) unless can_use('YAML::Syck' => 0.71);
-    requires('JSON' => 0.01) unless can_use('JSON::Syck' => 0.14);
+    requires('JSON' => 0.01) unless can_use('JSON::Syck' => 0.15);
 }
 
 features(
@@ -83,9 +86,11 @@ features(
         recommends('DBD::SQLite' => 1.11 ),
         recommends('Test::Base' => 0.44 ),            # Test::Base::Filter
         recommends('Module::Install::Admin' => '0.50'),
-        recommends('Test::HTTP::Server::Simple' => '0.02' ),
+        ($^O ne 'MSWin32' ? recommends('Test::HTTP::Server::Simple' => '0.02' ) : ()),
         recommends('Test::HTML::Lint'),
         recommends('Test::More' => 0.62 ),
+        recommends('Test::MockModule' => '0.05'),
+        recommends('Test::MockObject' => '1.07'),
         recommends('Test::Pod::Coverage'),
         recommends('Test::WWW::Mechanize' => 1.04 ),
         recommends('WWW::Mechanize' => 1.12 ),

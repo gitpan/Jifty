@@ -438,7 +438,7 @@ sub _form_widget {
               if exists $field_info->{'default_value'};
             $default_value = $self->argument_value($field)
               if $self->has_argument($field) && !$self->values_from_request->{$field};
-            
+
             $self->{_private_form_fields_hash}{$arg_name}
                 = Jifty::Web::Form::Field->new(
                 %$field_info,
@@ -451,7 +451,6 @@ sub _form_widget {
                 %args
                 );
 
-            
         }    # else $field remains undef
         else {
             Jifty->log->warn("$arg_name isn't a valid field for $self");
@@ -502,11 +501,11 @@ is needed.
 
 sub register {
     my $self = shift;
-    Jifty->web->out( qq!<input type="hidden"! .
+    Jifty->web->out( qq!<div class="hidden"><input type="hidden"! .
                        qq! name="@{[$self->register_name]}"! .
                        qq! id="@{[$self->register_name]}"! .
                        qq! value="@{[ref($self)]}"! .
-                       qq! />\n! );
+                       qq! /></div>\n! );
 
 
 
@@ -552,7 +551,10 @@ sub render_errors {
 Create and render a button.  It functions nearly identically like
 L<Jifty::Web/link>, except it takes C<arguments> in addition to
 C<parameters>, and defaults to submitting this L<Jifty::Action>.
-Returns nothing.
+Returns nothing. 
+
+Recommended reading: L<Jifty::Web::Form::Element>, where most of 
+the cool options to button and other things of its ilk are documented.
 
 =cut
 
@@ -760,6 +762,10 @@ C<canonicalize_I<ARGUMENT>> function, also invoke that function.
 If neither of those are true, by default canonicalize dates using
 _canonicalize_date
 
+Note that it is possible that a canonicalizer will be called multiple
+times on the same field -- canonicalizers should be careful to do
+nothing to already-canonicalized data.
+
 =cut
 
 # XXX TODO: This is named with an underscore to prevent infinite
@@ -852,11 +858,10 @@ sub _validate_argument {
 
     my $value = $self->argument_value($field);
 
-    if ( !defined $value || !length $value ) {
-
-        if ( $field_info->{mandatory} ) {
-            return $self->validation_error( $field => _("You need to fill in this field") );
-        }
+    if (    $field_info->{mandatory}
+        and $self->_is_argument_value_deleted($field) )
+    {
+        return $self->validation_error( $field => _("You need to fill in this field") );
     }
 
     # If we have a set of allowed values, let's check that out.
@@ -891,6 +896,31 @@ sub _validate_argument {
     else {
         return $self->validation_ok($field);
     }
+}
+
+sub _is_argument_value_deleted {
+    my $self  = shift;
+    my $field = shift;
+
+    my $value = $self->argument_value($field);
+
+    my $field_info = $self->arguments->{$field};
+    return unless $field_info;
+
+    my $default_value;
+    $default_value = $field_info->{'default_value'}
+      if exists $field_info->{'default_value'};
+    $default_value = $value
+      if $self->has_argument($field) && $value && !$self->values_from_request->{$field};
+
+    if ( not defined $value or not length $value ) {
+        if (   ( defined $default_value && $value ne $default_value )
+            || ( Jifty->web->request->path !~ m{^/__jifty/validator\.xml} ) )
+        {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 =head2 _autocomplete_argument ARGUMENT
@@ -979,11 +1009,12 @@ sub _values_for_field {
     my $type = shift;
 
     my $vv_orig = $self->arguments->{$field}{$type .'_values'};
-    return $vv_orig unless ref $vv_orig eq 'ARRAY';
+    local $@;
+    my @values = eval { @$vv_orig } or return $vv_orig;
 
     my $vv = [];
 
-    for my $v (@$vv_orig) {
+    for my $v (@values) {
         if ( ref $v eq 'HASH' ) {
             if ( $v->{'collection'} ) {
                 my $disp = $v->{'display_from'};
