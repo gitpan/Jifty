@@ -2,6 +2,8 @@ use strict;
 use warnings;
 
 package Jifty::Plugin;
+use File::ShareDir 'module_dir';
+
 
 =head1 NAME
 
@@ -25,7 +27,7 @@ in the C<config.yml> file:
             the: constructor
 
 The dispatcher for a plugin should live in
-C<Jifty::Plugin::I<name>::Disptcher>; it is written like any other
+C<Jifty::Plugin::I<name>::Dispatcher>; it is written like any other
 L<Jifty::Dispatcher>.  Plugin dispatcher rules are checked before the
 application's rules; however, see L<Jifty::Dispatcher/Plugins and rule
 ordering> for how to manually specify exceptions to this.
@@ -53,13 +55,6 @@ sub new {
     # Get a classloader set up
     Jifty::ClassLoader->new(base => $class)->require;
     Jifty::Util->require($class->dispatcher);
-
-    # Start a plugin classloader set up on behalf of the application
-    require Jifty::Plugin::ClassLoader;
-    Jifty::Plugin::ClassLoader->new(
-	base => Jifty->app_class,
-	plugin => $class,
-    )->require;
 
     # XXX TODO: Add .po path
 
@@ -94,22 +89,65 @@ sub new_request {
     Jifty->api->allow(qr/^\Q$class\E::Action/);
 }
 
+sub _calculate_share {
+    my $self = shift;
+    my $class = ref($self);
+    unless ( $self->{share} ) {
+        local $@
+            ; # We're just avoiding File::ShareDir's failure behaviour of dying
+        eval { $self->{share} = module_dir($class) };
+    }
+    unless ( $self->{share} ) {
+        local $@; # We're just avoiding File::ShareDir's failure behaviour of dying
+        eval { $self->{share} = module_dir('Jifty') };
+        if ( $self->{'share'} ) {
+            my $class_to_path = $class;
+            $class_to_path =~ s|::|/|g;
+            $self->{share} .= "/plugins/" . $class_to_path;
+        }
+    }
+    return $self->{share};
+}
+
+
 =head2 template_root
 
-Returns the root of the template directory for this plugin
+Returns the root of the C<HTML::Mason> template directory for this plugin
 
 =cut
 
 sub template_root {
     my $self = shift;
-    my $class = ref($self) || $self;
-    unless (exists $self->{share}) {
-        $self->{share} = undef;
-        eval { $self->{share} = File::ShareDir::module_dir($class) };
-    }
-    return unless $self->{share};
-    return $self->{share}."/web/templates";
+    my $dir =  $self->_calculate_share();
+    return unless $dir;
+    return $dir."/web/templates";
 }
+
+=head2 po_root
+
+Returns the plugin's message catalog directory. Returns undef if it doesn't exist.
+
+=cut
+
+sub po_root {
+    my $self = shift;
+    my $dir = $self->_calculate_share();
+    return unless $dir;
+    return $dir."/po";
+}
+
+=head2 template_class
+
+Returns the Template::Declare view package for this plugin
+
+=cut
+
+sub template_class {
+    my $self = shift;
+    my $class = ref($self) || $self;
+    return $class.'::View';
+}
+
 
 =head2 static_root
 
@@ -119,13 +157,9 @@ Returns the root of the static directory for this plugin
 
 sub static_root {
     my $self = shift;
-    my $class = ref($self) || $self;
-    unless (exists $self->{share}) {
-        $self->{share} = undef;
-        eval { $self->{share} = File::ShareDir::module_dir($class) };
-    }
-    return unless $self->{share};
-    return $self->{share}."/web/static";
+    my $dir =  $self->_calculate_share();
+    return unless $dir;
+    return $dir."/web/static";
 }
 
 =head2 dispatcher
@@ -138,6 +172,16 @@ sub dispatcher {
     my $self = shift;
     my $class = ref($self) || $self;
     return $class."::Dispatcher";
+}
+
+=head2 prereq_plugins
+
+Returns an array of plugin module names that this plugin depends on.
+
+=cut
+
+sub prereq_plugins {
+    return ();
 }
 
 1;

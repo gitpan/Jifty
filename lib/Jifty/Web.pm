@@ -11,7 +11,7 @@ Jifty::Web - Web framework for a Jifty application
 
 
 
-use Jifty::Everything;
+
 use CGI::Cookie;
 use XML::Writer;
 use CSS::Squish;
@@ -22,12 +22,12 @@ use base qw/Class::Accessor::Fast Class::Data::Inheritable Jifty::Object/;
 use vars qw/$SERIAL @JS_INCLUDES/;
 
 __PACKAGE__->mk_accessors(
-    qw(next_page force_redirect request response session temporary_current_user _current_user)
+    qw(next_page force_redirect request response session temporary_current_user _current_user _state_variables)
 );
 
 __PACKAGE__->mk_classdata($_)
-    for qw(cached_css        cached_css_digest
-           cached_javascript cached_javascript_digest javascript_libs);
+    for qw(cached_css        cached_css_digest        cached_css_time
+           cached_javascript cached_javascript_digest cached_javascript_time javascript_libs);
 
 __PACKAGE__->javascript_libs([qw(
     jsan/JSAN.js
@@ -62,8 +62,10 @@ __PACKAGE__->javascript_libs([qw(
     yui/dom.js
     yui/event.js
     yui/calendar.js
+    yui/element-beta.js
     yui/tabview.js
     yui/container.js
+    yui/menu.js
     app.js
     app_behaviour.js
     css_browser_selector.js
@@ -81,6 +83,7 @@ sub new {
     my $class = shift;
     my $self = bless {region_stack => []}, $class;
     $self->session(Jifty::Web::Session->new());
+    $self->clear_state_variables;
     return ($self);
 }
 
@@ -400,24 +403,38 @@ sub form {
 
 =head3 new_action class => CLASS, moniker => MONIKER, order => ORDER, arguments => PARAMHASH
 
-Creates a new action (an instance of a subclass of L<Jifty::Action>)
+Creates a new action (an instance of a subclass of L<Jifty::Action>). The named arguments passed to this method are passed on to the C<new> method of the action named in C<CLASS>.
+
+=head3 Arguments
+
+=over
+
+=item class 
 
 C<CLASS> is L<qualified|Jifty::API/qualify>, and an instance of that
 class is created, passing the C<Jifty::Web> object, the C<MONIKER>,
 and any other arguments that C<new_action> was supplied.
 
+=item moniker
+
 C<MONIKER> is a unique designator of an action on a page.  The moniker
 is content-free and non-fattening, and may be auto-generated.  It is
 used to tie together arguments that relate to the same action.
 
+=item order
+
 C<ORDER> defines the order in which the action is run, with lower
 numerical values running first.
+
+=item arguments
 
 C<ARGUMENTS> are passed to the L<Jifty::Action/new> method.  In
 addition, if the current request (C<< $self->request >>) contains an
 action with a matching moniker, any arguments that are in that
 requested action but not in the C<PARAMHASH> list are set.  This
 implements "sticky fields".
+
+=back
 
 As a contrast to L<Jifty::Web::Form/add_action>, this does not add the
 action to the current form -- instead, the first form field to be
@@ -566,7 +583,7 @@ sub redirect_required {
         and $self->next_page
         and ( ( $self->next_page ne $self->request->path )
               or $self->request->state_variables
-              or $self->{'state_variables'} )
+              or $self->state_variables )
        )
     {
         return (1);
@@ -605,15 +622,15 @@ sub redirect {
     if (  (grep { not $_->action_class->isa('Jifty::Action::Redirect') }
                 values %{ { $self->response->results } })
         or $self->request->state_variables
-        or $self->{'state_variables'}
+        or $self->state_variables
         or $self->request->continuation
         or grep { $_->active and not $_->class->isa('Jifty::Action::Redirect') } @actions )
     {
         my $request = Jifty::Request->new();
         $request->add_state_variable( key => $_->key, value => $_->value )
           for $self->request->state_variables;
-        $request->add_state_variable( key => $_, value => $self->{'state_variables'}->{$_} )
-          for keys %{ $self->{'state_variables'} };
+        $request->add_state_variable( key => $_, value => $self->_state_variables->{$_} )
+          for keys %{ $self->_state_variables };
         for (@actions) {
             my $new_action = $request->add_action(
                 moniker   => $_->moniker,
@@ -657,6 +674,7 @@ sub _redirect {
 
     # Clear out the mason output, if any
     $self->mason->clear_buffer if $self->mason;
+    Template::Declare->buffer->clear if(Template::Declare->buffer);
 
     my $apache = Jifty->handler->apache;
 
@@ -760,7 +778,8 @@ L<Jifty::Web::Form::Clickable> object generates.
 
 sub return {
     my $self = shift;
-    my %args = (@_);
+    my %args = (to => undef,
+                @_);
     my $continuation = Jifty->web->request->continuation;
     if (not $continuation and $args{to}) {
         $continuation = Jifty::Continuation->new(
@@ -1010,6 +1029,7 @@ sub generate_css {
 
         __PACKAGE__->cached_css( $css );
         __PACKAGE__->cached_css_digest( md5_hex( $css ) );
+		__PACKAGE__->cached_css_time( time );
     }
 }
 
@@ -1131,6 +1151,7 @@ sub generate_javascript {
 
         __PACKAGE__->cached_javascript( $js );
         __PACKAGE__->cached_javascript_digest( md5_hex( $js ) );
+        __PACKAGE__->cached_javascript_time( time );
     }
 }
 
@@ -1169,9 +1190,9 @@ sub set_variable {
     my $value = shift;
 
     if (!defined($value)) {
-        delete $self->{'state_variables'}->{$name};
+        delete $self->_state_variables->{$name};
     } else {
-        $self->{'state_variables'}->{$name} = $value;
+        $self->_state_variables->{$name} = $value;
     }
 
 }
@@ -1188,11 +1209,7 @@ versions of Jifty
 
 sub state_variables {
     my $self = shift;
-    my %vars;
-    $vars{$_} = $self->{'state_variables'}->{$_}
-        for keys %{ $self->{'state_variables'} };
-
-    return %vars;
+    return %{ $self->_state_variables };
 }
 
 =head3 clear_state_variables
@@ -1204,7 +1221,7 @@ Remove all the state variables to be serialized for the next request.
 sub clear_state_variables {
     my $self = shift;
 
-    $self->{'state_variables'} = {};
+    $self->_state_variables({});
 }
 
 =head2 REGIONS

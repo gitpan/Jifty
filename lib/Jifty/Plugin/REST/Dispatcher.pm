@@ -12,7 +12,7 @@ use Jifty::JSON ();
 use Data::Dumper ();
 use XML::Simple;
 
-before qr{^ (/=/ .*) \. (js|json|yml|yaml|perl|pl) $}x => run {
+before qr{^ (/=/ .*) \. (js|json|yml|yaml|perl|pl|xml) $}x => run {
     $ENV{HTTP_ACCEPT} = $2;
     dispatch $1;
 };
@@ -22,27 +22,135 @@ before POST qr{^ (/=/ .*) ! (DELETE|PUT|GET|POST|OPTIONS|HEAD|TRACE|CONNECT) $}x
     dispatch $1;
 };
 
-on GET    '/=/model/*/*/*/*' => \&show_item_field;
-on GET    '/=/model/*/*/*'   => \&show_item;
-on GET    '/=/model/*/*'     => \&list_model_items;
-on GET    '/=/model/*'       => \&list_model_columns;
-on GET    '/=/model'         => \&list_models;
+on GET    '/=/model/*/*/*/*'    => \&show_item_field;
+on GET    '/=/model/*/*/*'      => \&show_item;
+on GET    '/=/model/*/*'        => \&list_model_items;
+on GET    '/=/model/*'          => \&list_model_columns;
+on GET    '/=/model'            => \&list_models;
 
-on PUT    '/=/model/*/*/*' => \&replace_item;
-on DELETE '/=/model/*/*/*' => \&delete_item;
+on POST   '/=/model/*'          => \&create_item;
+on PUT    '/=/model/*/*/*'      => \&replace_item;
+on DELETE '/=/model/*/*/*'      => \&delete_item;
 
-on GET    '/=/action/*'    => \&list_action_params;
-on GET    '/=/action'      => \&list_actions;
-on POST   '/=/action/*'    => \&run_action;
+on GET    '/=/action/*'         => \&list_action_params;
+on GET    '/=/action'           => \&list_actions;
+on POST   '/=/action/*'         => \&run_action;
 
+on GET    '/=/help'             => \&show_help;
+
+=head2 show_help
+
+Shows basic help about resources and formats available via this RESTian interface.
+
+=cut
+
+sub show_help {
+    my $apache = Jifty->handler->apache;
+
+    $apache->header_out('Content-Type' => 'text/plain; charset=UTF-8');
+    $apache->send_http_header;
+   
+    print qq{
+Accessing resources:
+
+on GET    /=/model                                  list models
+on GET    /=/model/<model>                          list model columns
+on GET    /=/model/<model>/<column>                 list model items
+on GET    /=/model/<model>/<column>/<key>           show item
+on GET    /=/model/<model>/<column>/<key>/<field>   show item field
+
+on POST   /=/model/<model>                          create item
+on PUT    /=/model/<model>/<column>/<key>           update item
+on DELETE /=/model/<model>/<column>/<key>           delete item
+
+on GET    /=/action                                 list actions
+on GET    /=/action/<action>                        list action params
+on POST   /=/action/<action>                        run action
+
+
+Resources are available in a variety of formats:
+
+    JSON, JS, YAML, XML, Perl, and HTML
+
+and may be requested in such formats by sending an appropriate HTTP Accept: header
+or appending one of the extensions to any resource:
+
+    .json, .js, .yaml, .xml, .pl
+
+HTML is output only if the Accept: header or an extension does not request a
+specific format.
+    };
+    last_rule;
+}
+
+
+=head2 stringify LIST
+
+Takes a list of values and forces them into strings.  Right now all it does
+is concatenate them to an empty string, but future versions might be more
+magical.
+
+=cut
+
+sub stringify {
+    no warnings 'uninitialized';
+    my @r = map { defined $_ ? '' . $_ : undef } @_;
+    return wantarray ? @r : pop @r;
+}
+
+=head2 object_to_data OBJ
+
+Takes an object and converts the known types into simple data structures.
+
+Current known types:
+
+  Jifty::DBI::Collection
+  Jifty::DBI::Record
+
+=cut
+
+sub object_to_data {
+    my $obj = shift;
+    
+    my %types = (
+        'Jifty::DBI::Collection' => \&_collection_to_data,
+        'Jifty::DBI::Record'     => \&_record_to_data,
+    );
+
+    for my $type ( keys %types ) {
+        if ( UNIVERSAL::isa( $obj, $type ) ) {
+            return $types{$type}->( $obj );
+        }
+    }
+
+    # As the last resort, return the object itself and expect the $accept-specific
+    # renderer to format the object as e.g. YAML or JSON data.
+    return $obj;
+}
+
+sub _collection_to_data {
+    my $records = shift->items_array_ref;
+    return [ map { _record_to_data( $_ ) } @$records ];
+}
+
+sub _record_to_data {
+    my $record = shift;
+    # We could use ->as_hash but this method avoids transforming refers_to
+    # columns into JDBI objects
+    my %data   = map {
+                    $_ => (UNIVERSAL::isa( $record->column( $_ )->refers_to,
+                                           'Jifty::DBI::Collection' )
+                             ? undef
+                             : stringify( $record->_value( $_ ) ) )
+                 } $record->readable_attributes;
+    return \%data;
+}
 
 =head2 list PREFIX items
 
 Takes a URL prefix and a set of items to render. passes them on.
 
 =cut
-
-
 
 sub list {
     my $prefix = shift;
@@ -88,7 +196,7 @@ sub outs {
         $apache->send_http_header;
         print 'var $_ = ', Jifty::JSON::objToJson( @_, { singlequote => 1 } );
     }
-    elsif ($accept =~ /perl/i) {
+    elsif ($accept =~ qr{^(?:application/x-)?(?:perl|pl)$}i) {
         $apache->header_out('Content-Type' => 'application/x-perl; charset=UTF-8');
         $apache->send_http_header;
         print Data::Dumper::Dumper(@_);
@@ -101,14 +209,25 @@ sub outs {
     else {
         $apache->header_out('Content-Type' => 'text/html; charset=UTF-8');
         $apache->send_http_header;
-        print render_as_html($prefix, $url, @_);
+        
+        # Special case showing particular actions to show an HTML form
+        if (    defined $prefix
+            and $prefix->[0] eq 'action'
+            and scalar @$prefix == 2 )
+        {
+            show_action_form($1);
+        }
+        else {
+            print render_as_html($prefix, $url, @_);
+        }
     }
 
     last_rule;
 }
 
-our $xml_config = { SuppressEmpty => '',
-                    NoAttr => 1 };
+our $xml_config = { SuppressEmpty   => '',
+                    NoAttr          => 1,
+                    RootName        => 'data' };
 
 =head2 render_as_xml DATASTRUCTURE
 
@@ -125,7 +244,7 @@ sub render_as_xml {
     elsif (ref($content) eq 'HASH') {
         return XMLout($content, %$xml_config);
     } else {
-        return XMLout({$content}, %$xml_config)
+        return XMLout({value => $content}, %$xml_config)
     }
 }
 
@@ -250,26 +369,22 @@ Sends the user a list of models in this application, with the names transformed 
 =cut
 
 sub list_models {
-    list(['model'], map {s/::/./g; $_ } Jifty->class_loader->models);
+    list(['model'], map { s/::/./g; $_ } Jifty->class_loader->models);
 }
 
 our @column_attrs = 
-qw(    name
+qw( name
     type
     default
-    validator
     readable writable
-    length
+    max_length
     mandatory
-    virtual
     distinct
     sort_order
-    refers_to by
+    refers_to
     alias_for_column
     aliased_as
-    since until
-
-    label hints render_as
+    label hints
     valid_values
 );
 
@@ -285,14 +400,16 @@ sub list_model_columns {
     my ($model) = model($1);
 
     my %cols;
-    map {
-            my $col = $_;
-            $cols{$col->name} = { map { $_ => $col->$_() } @column_attrs} ;
-    } $model->new->columns;
+    for my $col ( $model->new->columns ) {
+        $cols{ $col->name } = { };
+        for ( @column_attrs ) {
+            my $val = $col->$_();
+            $cols{ $col->name }->{ $_ } = $val
+                if defined $val and length $val;
+        }
+    }
 
-    outs(
-        [ 'model', $model ], \%cols
-    );
+    outs( [ 'model', $model ], \%cols );
 }
 
 =head2 list_model_items MODELCLASS COLUMNNAME
@@ -303,16 +420,17 @@ Returns a list of items in MODELCLASS sorted by COLUMNNAME, with only COLUMNAME 
 
 
 sub list_model_items {
-
     # Normalize model name - fun!
     my ( $model, $column ) = ( model($1), $2 );
     my $col = $model->new->collection_class->new;
     $col->unlimit;
-    $col->columns($column);
+
+    # If we don't load the PK, we won't get data
+    $col->columns("id", $column);
     $col->order_by( column => $column );
 
     list( [ 'model', $model, $column ],
-        map { $_->$column() } @{ $col->items_array_ref || [] } );
+        map { stringify($_->$column()) } @{ $col->items_array_ref || [] } );
 }
 
 
@@ -320,8 +438,6 @@ sub list_model_items {
 
 Loads up a model of type C<$model> which has a column C<$column> with a value C<$key>. Returns the value of C<$field> for that object. 
 Returns 404 if it doesn't exist.
-
-
 
 =cut
 
@@ -331,12 +447,16 @@ sub show_item_field {
     $rec->load_by_cols( $column => $key );
     $rec->id          or abort(404);
     $rec->can($field) or abort(404);
-    outs( [ 'model', $model, $column, $key, $field ], $rec->$field());
+
+    # Check that the field is actually a column (and not some other method)
+    abort(404) if not scalar grep { $_->name eq $field } $rec->columns;
+
+    outs( [ 'model', $model, $column, $key, $field ], stringify($rec->$field()) );
 }
 
 =head2 show_item $model, $column, $key
 
-Loads up a model of type C<$model> which has a column C<$column> with a value C<$key>. Returns  all columns for the object
+Loads up a model of type C<$model> which has a column C<$column> with a value C<$key>. Returns all columns for the object
 
 Returns 404 if it doesn't exist.
 
@@ -347,28 +467,83 @@ sub show_item {
     my $rec = $model->new;
     $rec->load_by_cols( $column => $key );
     $rec->id or abort(404);
-    outs( ['model', $model, $column, $key],  { map {$_ => $rec->$_()} map {$_->name} $rec->columns});
+    outs( ['model', $model, $column, $key],  { map {$_ => stringify($rec->$_())} map {$_->name} $rec->columns});
 }
 
+=head2 create_item
+
+Implemented by redispatching to a CreateModel action.
+
+=cut
+
+sub create_item { _dispatch_to_action('Create') }
 
 =head2 replace_item
 
-UNIMPLEMENTED
+Implemented by redispatching to a CreateModel or UpdateModel action.
 
 =cut
 
-sub replace_item {
-    die "hey replace item";
-}
+sub replace_item { _dispatch_to_action('Update') }
 
 =head2 delete_item
 
-UNIMPLEMENTED
+Implemented by redispatching to a DeleteModel action.
 
 =cut
 
-sub delete_item {
-    die "hey delete item";
+sub delete_item { _dispatch_to_action('Delete') }
+
+sub _dispatch_to_action {
+    my $prefix = shift;
+    my ($model, $class, $column, $key) = (model($1), $1, $2, $3);
+    my $rec = $model->new;
+    $rec->load_by_cols( $column => $key )
+        if defined $column and defined $key;
+
+    if ( not $rec->id ) {
+        abort(404)         if $prefix eq 'Delete';
+        $prefix = 'Create' if $prefix eq 'Update';
+    }
+
+    $class =~ s/^[\w\.]+\.//;
+
+    if ( defined $column and defined $key ) {
+        Jifty->web->request->argument( $column => $key );
+        Jifty->web->request->argument( 'id' => $rec->id )
+            if defined $rec->id;
+    }
+    
+    # CGI.pm doesn't handle form encoded data in PUT requests (in fact,
+    # it doesn't really handle PUT requests properly at all), so we have
+    # to read the request body ourselves and have CGI.pm parse it
+    if (    $ENV{'REQUEST_METHOD'} eq 'PUT'
+        and (   $ENV{'CONTENT_TYPE'} =~ m|^application/x-www-form-urlencoded$|
+              or $ENV{'CONTENT_TYPE'} =~ m|^multipart/form-data$| ) )
+    {
+        my $cgi    = Jifty->handler->cgi;
+        my $length = defined $ENV{'CONTENT_LENGTH'} ? $ENV{'CONTENT_LENGTH'} : 0;
+        my $data;
+
+        $cgi->read_from_client( \$data, $length, 0 )
+            if $length > 0;
+
+        if ( defined $data ) {
+            my @params = $cgi->all_parameters;
+            $cgi->parse_params( $data );
+            push @params, $cgi->all_parameters;
+            
+            my %seen;
+            my @uniq = map { $seen{$_}++ == 0 ? $_ : () } @params;
+
+            # Add only the newly parsed arguments to the Jifty::Request
+            Jifty->web->request->argument( $_ => $cgi->param( $_ ) )
+                for @uniq;
+        }
+    }
+
+    $ENV{REQUEST_METHOD} = 'POST';
+    dispatch '/=/action/' . action( $prefix . $class );
 }
 
 =head2 list_actions
@@ -385,12 +560,49 @@ sub list_actions {
 
 Takes a single parameter, $action, supplied by the dispatcher.
 
-Shows the user all possible parameters to the action, currently in the form of a form to run that action.
+Shows the user all possible parameters to the action.
 
 =cut
 
+our @param_attrs = qw(
+    name
+    type
+    default_value
+    label
+    hints
+    mandatory
+    length
+);
+
 sub list_action_params {
-    my ($action) = action($1) or abort(404);
+    my ($class) = action($1) or abort(404);
+    Jifty::Util->require($class) or abort(404);
+    my $action = $class->new or abort(404);
+
+    my $arguments = $action->arguments;
+    my %args;
+    for my $arg ( keys %$arguments ) {
+        $args{ $arg } = { };
+        for ( @param_attrs ) {
+            my $val = $arguments->{ $arg }{ $_ };
+            $args{ $arg }->{ $_ } = $val
+                if defined $val and length $val;
+        }
+    }
+
+    outs( ['action', $class], \%args );
+}
+
+=head2 show_action_form $ACTION_CLASS
+
+Takes a single parameter, the class of an action.
+
+Shows the user an HTML form of the action's parameters to run that action.
+
+=cut
+
+sub show_action_form {
+    my ($action) = action(shift) or abort(404);
     Jifty::Util->require($action) or abort(404);
     $action = $action->new or abort(404);
 
@@ -433,14 +645,21 @@ On an internal error, throws a C<500>.
 sub run_action {
     my ($action_name) = action($1) or abort(404);
     Jifty::Util->require($action_name) or abort(404);
-    my $action = $action_name->new or abort(404);
-
-    Jifty->api->is_allowed( $action ) or abort(403);
-
+    
     my $args = Jifty->web->request->arguments;
     delete $args->{''};
 
-    $action->argument_values({ %$args });
+    my $action = $action_name->new( arguments => $args ) or abort(404);
+
+    Jifty->api->is_allowed( $action_name ) or abort(403);
+
+    my $params = $action->arguments;
+    for my $key ( keys %$params ) {
+        next if not exists $params->{ $key }{'default_value'};
+        next if $action->has_argument( $key );
+        $action->argument_value( $key => $params->{ $key }{'default_value'} );
+    }
+
     $action->validate;
 
     local $@;
@@ -473,6 +692,10 @@ sub run_action {
         delete $out->{field_warnings}->{$_} unless $out->{field_warnings}->{$_};
     }
     $out->{content} = $result->content;
+
+    for my $key ( keys %{ $out->{content} } ) {
+        $out->{content}{$key} = object_to_data( $out->{content}{$key} );
+    }
     
     outs(undef, $out);
 

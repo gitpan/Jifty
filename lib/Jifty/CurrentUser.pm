@@ -34,27 +34,44 @@ if you want any sort of access control.
 Creates a new L<Jifty::CurrentUser> object.  Calls L<_init>, an
 app-specific initialization routine.
 
+If you call it with the C<_bootstrap> argument, Jifty will set the user up as a bootstrap user, who's usually allowed to do just about anything without any access control
+
 =cut
 
 sub new {
     my $class = shift;
-    my $self = {};
-    bless $self, $class;
-    $self->_init(@_);
+    my $self  = {};
+    bless $self, (ref $class || $class);
+    my %args = (@_);
+    if ( delete $args{'_bootstrap'} ) { $self->is_bootstrap_user(1); }
+    $self->_init(%args);
     return $self;
 }
 
-sub _init { 1}
+
+sub _init {
+	    my $self = shift;
+	    my %args = (@_);
+	
+            if (keys %args and UNIVERSAL::can(Jifty->app_class('Model', 'User'), 'new')  ) {
+                
+	        $self->user_object(Jifty->app_class('Model', 'User')->new(current_user => $self));
+	        $self->user_object->load_by_cols(%args);
+	    }
+        return 1;
+}
+	
 
 =head2 superuser
 
 A convenience constructor that returns a new CurrentUser object that's
-marked as a superuser.
+marked as a superuser. Can be called either as a class or object method.
 
 =cut
 
 sub superuser {
     my $class = shift;
+    $class = ref( $class ) if ref $class;
     my $self = $class->new();
     $self->is_superuser(1);
     return $self;
@@ -66,19 +83,16 @@ This gets or sets your application's user object for the current
 user. Generally, you're expected to set and load it in the _init method
 in your L<Jifty::CurrentUser> subclass.
 
-Example:  
+If you do nothing, code similar to this will be called by _init.
 
 	sub _init {
 	    my $self = shift;
 	    my %args = (@_);
 	
-	    if (delete $args{'_bootstrap'} ) {
-	        $self->is_bootstrap_user(1);
-	    } elsif (keys %args) {
+            if (keys %args) {
 	        $self->user_object(Wifty::Model::User->new(current_user => $self));
 	        $self->user_object->load_by_cols(%args);
 	    }
-	    $self->SUPER::_init(%args);
 	}
 	
 

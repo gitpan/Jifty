@@ -17,7 +17,8 @@ the name of the javascript event handler, such as C<onclick>, with a
 set of arguments.
 
 The format of the arguments passed to C<onclick> (or any similar
-method) is a hash reference or string.  Strings are inserted verbatim.
+method) is a string, a hash reference, or a reference to an array of
+multiple hash references.  Strings are inserted verbatim.
 
 Hash references can take a number of possible keys.  The most
 important is the mode of the fragment replacement, if any; it is
@@ -102,7 +103,7 @@ region that the region was given when it was last rendered.
 
 =item effect => STRING
 
-The Prototype visual effect to use when updating or creating the
+The Scriptaculous visual effect to use when updating or creating the
 fragment.
 
 =item effect_args => HASHREF
@@ -370,7 +371,7 @@ sub key_binding_javascript {
                 . Jifty::JSON::objToJson( uc($key), { singlequote => 1 } ).","
                 . "'click', "
                 . Jifty::JSON::objToJson( $self->id, { singlequote => 1 } ).","
-                . Jifty::JSON::objToJson( $label, { singlequote => 1 } )
+                . Jifty::JSON::objToJson( $label, { singlequote => 0 } )
                 . ");";
     }
 }

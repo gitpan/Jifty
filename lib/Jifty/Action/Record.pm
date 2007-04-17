@@ -11,8 +11,9 @@ Jifty::Action::Record -- An action tied to a record in the database.
 
 Represents a web-based action that is a create, update, or delete of a
 L<Jifty::Record> object.  This automatically populates the arguments
-method of L<Jifty::Action> so that you don't need to bother.  To
-actually use this class, you probably want to inherit from one of
+method of L<Jifty::Action> so that you don't need to bother.  
+
+To actually use this class, you probably want to inherit from one of
 L<Jifty::Action::Record::Create>, L<Jifty::Action::Record::Update>, or
 L<Jifty::Action::Record::Delete> and override the C<record_class>
 method.
@@ -20,6 +21,8 @@ method.
 =cut
 
 use base qw/Jifty::Action/;
+
+use Scalar::Util qw/ blessed /;
 
 __PACKAGE__->mk_accessors(qw(record _cached_arguments));
 
@@ -150,7 +153,7 @@ sub arguments {
                 # If the current value is actually a pointer to
                 # another object, dereference it
                 $current_value = $current_value->id
-                    if ref($current_value)
+                    if blessed($current_value)
                     and $current_value->isa('Jifty::Record');
                 $info->{default_value} = $current_value if $self->record->id;
             }
@@ -288,12 +291,11 @@ sub arguments {
                 };
             }
 
-            my $canonicalize_method = "canonicalize_" . $field;
-            if ( $self->record->can($canonicalize_method) ) {
+            if ( $self->record->has_canonicalizer_for_column($field) ) {
                 $info->{'ajax_canonicalizes'} = 1;
                 $info->{'canonicalizer'} ||= sub {
                     my ( $self, $value ) = @_;
-                    return $self->record->$canonicalize_method($value);
+                    return $self->record->run_canonicalization_for_column(column => $field, value => $value);
                 };
             } elsif ( $render_as eq 'date')
             {
@@ -301,7 +303,7 @@ sub arguments {
             }
 
             # If we're hand-coding a render_as, hints or label, let's use it.
-            for (qw(render_as label hints length mandatory sort_order)) {
+            for (qw(render_as label hints max_length mandatory sort_order)) {
 
                 if ( defined (my $val = $column->$_) ) {
                     $info->{$_} = $val;
@@ -344,7 +346,7 @@ This defaults to all of the fields of the object.
 
 sub possible_fields {
     my $self = shift;
-    return map {$_->name} grep {$_->type ne "serial"} $self->record->columns;
+    return map { $_->name } grep { $_->type ne "serial" } $self->record->columns;
 }
 
 =head2 take_action
@@ -390,7 +392,13 @@ sub _setup_event_after_action {
 =head1 SEE ALSO
 
 L<Jifty::Action>, L<Jifty::Record>, L<Jifty::DBI::Record>,
-L<Jifty::Action::Record::Create>, L<Jifty::Action::Record::Update>
+L<Jifty::Action::Record::Create>, L<Jifty::Action::Record::Update>,
+L<Jifty::Action::Reocrd::Delete>
+
+=head1 LICENSE
+
+Jifty is Copyright 2005-2006 Best Practical Solutions, LLC.
+Jifty is distributed under the same terms as Perl itself.
 
 =cut
 

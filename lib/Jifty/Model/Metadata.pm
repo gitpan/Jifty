@@ -14,18 +14,20 @@ Jifty::Model::Metadata - Tracks Jifty-related metadata
 
 Every Jifty application automatically inherits this table, which
 describes information about the Jifty database.  It uses this
-information to smartly upgrade between application versions, as well
+information to smartly upgrade between application schema versions, as well
 as versions of Jifty itself, for instance.
 
 =cut
 
-package Jifty::Model::Metadata::Schema;
+package Jifty::Model::Metadata;
+
 use Jifty::DBI::Schema;
+use Jifty::Record schema {
 
 column data_key => type is 'text';
 column value    => type is 'text';
+};
 
-package Jifty::Model::Metadata;
 use version;
 
 use base qw( Jifty::Record );

@@ -53,9 +53,20 @@ sub started_ok {
         $SIG{USR1} = sub { };
         sleep 15;
         $self->{started} = 1;
+        Jifty->handle->dbh->{'InactiveDestroy'} = 1;
         $Tester->ok(1, $text);
         # XXX: pull from jifty::config maybe
         return "http://localhost:".$self->port;
+    } else {
+        Jifty->handle->dbh->{'InactiveDestroy'} = 1;
+        # See DBI.pm: 
+        #
+        # This attribute is specifically designed for use in Unix applications
+        # that "fork" child processes. Either the parent or the child process,
+        # but not both, should set C<InactiveDestroy> true on all their shared handles.
+        # (Note that some databases, including Oracle, don't support passing a
+        # database connection across a fork.)
+        #
     }
 
     require POSIX;
@@ -66,8 +77,11 @@ sub started_ok {
 
     my @extra;
     if (my $profile_file = $ENV{JIFTY_TESTSERVER_PROFILE}) {
-        push @extra, '-d:DProf', '-MClass::Accessor::Named';
+        push @extra, '-d:DProf';
         $ENV{"PERL_DPROF_OUT_FILE_NAME"} = $profile_file;
+    }
+    if ($ENV{JIFTY_TESTSERVER_NAMED_ACCESSOR}) {
+        push @extra, '-MClass::Accessor::Named';
     }
     if (my $coverage = $ENV{JIFTY_TESTSERVER_COVERAGE}) {
         push @extra, '-MDevel::Cover'.($coverage =~ m/,/ ? "=$coverage" : '');

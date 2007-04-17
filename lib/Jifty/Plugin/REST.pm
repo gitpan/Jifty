@@ -21,7 +21,10 @@ Add the following to your site_config.yml
  framework:
    Plugins:
      - REST: {}
- 
+
+See the URL /=/help in your Jifty app for more information about
+how to access the RESTian resources.
 
 =cut
+
 1;

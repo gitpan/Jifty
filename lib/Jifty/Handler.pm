@@ -26,6 +26,7 @@ handlers.
 
 use base qw/Class::Accessor::Fast/;
 use Module::Refresh ();
+use Jifty::View::Declare::Handler ();
 
 BEGIN {
     # Creating a new CGI object breaks FastCGI in all sorts of painful
@@ -47,7 +48,7 @@ BEGIN {
 
 
 
-__PACKAGE__->mk_accessors(qw(mason dispatcher static_handler cgi apache stash));
+__PACKAGE__->mk_accessors(qw(mason dispatcher declare_handler static_handler cgi apache stash));
 
 =head2 new
 
@@ -61,20 +62,33 @@ sub new {
     bless $self, $class;
 
     $self->create_cache_directories();
-#    wrap 'CGI::new', pre => sub {
-#        $_[-1] = Jifty->handler->cgi if Jifty->handler->cgi;
-#    };
 
     $self->dispatcher( Jifty->app_class( "Dispatcher" ) );
     Jifty::Util->require( $self->dispatcher );
     $self->dispatcher->import_plugins;
-    $self->dispatcher->dump_rules;
-    
-    $self->mason( Jifty::View::Mason::Handler->new( $self->mason_config ) );
+	eval { Jifty::Plugin::DumpDispatcher->dump_rules };
 
-    $self->static_handler(Jifty::View::Static::Handler->new());
-
+    $self->setup_view_handlers();
     return $self;
+}
+
+sub _template_handlers { qw(declare_handler mason) }
+sub _fallback_template_handler { 'mason' }
+
+=head2 setup_view_handlers
+
+Initialize all of our view handlers. 
+
+XXX TODO: this should take pluggable views
+
+=cut
+
+sub setup_view_handlers {
+    my $self = shift;
+
+    $self->declare_handler( Jifty::View::Declare::Handler->new());
+    $self->mason( Jifty::View::Mason::Handler->new());
+    $self->static_handler(Jifty::View::Static::Handler->new());
 }
 
 
@@ -92,55 +106,6 @@ sub create_cache_directories {
     }
 }
 
-
-=head2 mason_config
-
-Returns our Mason config.  We use the component root specified in the
-C<Web/TemplateRoot> framework configuration variable (or C<html> by
-default).  Additionally, we set up a C<jifty> component root, as
-specified by the C<Web/DefaultTemplateRoot> configuration.  All
-interpolations are HTML-escaped by default, and we use the fatal error
-mode.
-
-=cut
-
-sub mason_config {
-    my %config = (
-        static_source => 1,
-        use_object_files => 1,
-        preprocess => sub {
-            # Force UTF-8 semantics on all our components by
-            # prepending this block to all components as Mason
-            # components defaults to parse the text as Latin-1
-            ${$_[0]} =~ s!^!<\%INIT>use utf8;</\%INIT>\n!;
-        },
-        data_dir =>  Jifty::Util->absolute_path( Jifty->config->framework('Web')->{'DataDir'} ),
-        allow_globals => [
-            qw[ $JiftyWeb ],
-            @{Jifty->config->framework('Web')->{'Globals'} || []},
-        ],
-        comp_root     => [ 
-                          [application =>  Jifty::Util->absolute_path( Jifty->config->framework('Web')->{'TemplateRoot'} )],
-                          [jifty => Jifty->config->framework('Web')->{'DefaultTemplateRoot'}],
-                         ],
-        %{ Jifty->config->framework('Web')->{'MasonConfig'} },
-    );
-
-    for my $plugin (Jifty->plugins) {
-        my $comp_root = $plugin->template_root;
-        next unless $comp_root;
-        push @{ $config{comp_root} }, [ ref($plugin)."-".Jifty->web->serial => $comp_root ];
-    }
-
-    # In developer mode, we want halos, refreshing and all that other good stuff. 
-    if (Jifty->config->framework('DevelMode') ) {
-        push @{$config{'plugins'}}, 'Jifty::Mason::Halo';
-        $config{static_source}    = 0;
-        $config{use_object_files} = 0;
-    }
-    return (%config);
-        
-}
 
 =head2 cgi
 
@@ -181,6 +146,8 @@ sub handle_request {
         Module::Refresh->refresh;
         Jifty::I18N->refresh;
     }
+
+    Jifty::I18N->get_language_handle;
 
     $self->cgi( $args{cgi} );
     $self->apache( HTML::Mason::FakeApache->new( cgi => $self->cgi ) );

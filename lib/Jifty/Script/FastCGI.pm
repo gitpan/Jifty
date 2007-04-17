@@ -7,7 +7,7 @@ use base qw/App::CLI::Command/;
 
 use File::Basename;
 use CGI::Fast;
-use Jifty::Everything;
+
 
 =head1 NAME
 
@@ -19,13 +19,12 @@ When you're ready to move up to something that can handle the increasing load yo
 new world-changing application is generating, you'll need something a bit heavier-duty
 than the pure-perl Jifty standalone server.  C<FastCGI> is what you're looking for.
 
-Because Apache's FastCGI dispatcher can't pass commandline flags to your script, you'll need
-to call jifty a bit differently:
-
+ # These two lines are FastCGI-specific; skip them to run in vanilla CGI mode
  AddHandler fastcgi-script fcgi
+ FastCgiServer /path/to/your/jifty/app/bin/jifty
+
  DocumentRoot /path/to/your/jifty/app/share/web/templates
- FastCgiServer /path/to/your/jifty/app/bin/jifty -initial-env JIFTY_COMMAND=fastcgi
- ScriptAlias /  /path/to/your/jifty/app/bin/jifty/
+ ScriptAlias / /path/to/your/jifty/app/bin/jifty/
 
 For B<lighttpd> (L<http://www.lighttpd.net/>), use this setting:
 
@@ -49,6 +48,25 @@ For B<lighttpd> (L<http://www.lighttpd.net/>), use this setting:
 If you have MaxRequests options under FastCGI in your config.yml, or
 commandline option C<--maxrequests=N> assigned, the fastcgi process
 will exit after serving N requests. 
+
+An alternative to Apache mod_fastcgi is to use mod_fcgid with mod_rewrite.
+If you use mod_fcgid and mod_rewrite, you can use this in your Apache
+configuration instead:
+
+ DocumentRoot /path/to/your/jifty/app/share/web/templates
+ ScriptAlias /cgi-bin /path/to/your/jifty/app/bin
+ DefaultInitEnv JIFTY_COMMAND fastcgi
+ <Directory /path/to/your/jifty/app/bin>
+     Options ExecCGI
+     SetHandler fcgid-script
+ </Directory>
+ <Directory /path/to/your/jifty/app/share/web/templates>
+     RewriteEngine on
+     RewriteRule ^$ index.html [QSA]
+     RewriteRule ^(.*)$ /cgi-bin/jifty/$1 [QSA,L]
+ </Directory>
+
+It may be possible to do this without using mod_rewrite.
 
 =head2 options
 

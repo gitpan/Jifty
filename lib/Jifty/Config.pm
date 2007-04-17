@@ -233,13 +233,17 @@ sub guess {
     $app_class =~ s/-/::/g;
     my $db_name = lc $app_name;
     $db_name =~ s/-/_/g;
+    my $app_uuid = Jifty::Util->generate_uuid;
 
     my $guess = {
         framework => {
             AdminMode        => 1,
             DevelMode        => 1,
+	    SkipAccessControl => 0,
             ApplicationClass => $app_class,
+            TemplateClass    => $app_class."::View",
             ApplicationName  => $app_name,
+            ApplicationUUID  => $app_uuid,
             LogLevel         => 'INFO',
             PubSub           => {
                 Enable => undef,
@@ -260,7 +264,16 @@ sub guess {
             L10N       => {
                 PoDir => "share/po",
             },
-            Plugins    => [],
+            Plugins => [
+            #  { LetMe               => {}, },
+                { SkeletonApp            => {}, },
+                { REST               => {}, },
+                { Halo               => {}, },
+                { ErrorTemplates     => {}, },
+                { OnlineDocs         => {}, },
+                { CompressedCSSandJS => {}, },
+                { AdminUI            => {}, }
+                ],
             Web        => {
                 Port => '8888',
                 BaseURL => 'http://localhost',
@@ -334,7 +347,6 @@ sub load_file {
 sub _expand_relative_paths {
     my $self  = shift;
     my $datum = shift;
-
     if ( ref $datum eq 'ARRAY' ) {
         return [ map { $self->_expand_relative_paths($_) } @$datum ];
     } elsif ( ref $datum eq 'HASH' ) {

@@ -33,7 +33,12 @@ Jifty::Param::Schema - Declare parameters of a Jifty action with ease.
 This module provides a simple syntax to declare action parameters.
 
 It re-exports C<defer> and C<lazy> from L<Scalar::Defer>, for setting
-parameter fields that must be recomputed at request-time.
+parameter fields that must be recomputed at request-time:
+
+    param name =>
+        default is defer { Jifty->web->current_user->name };
+
+See L<Scalar::Defer> for more information about C<defer>.
 
 =head2 schema
 
@@ -88,7 +93,6 @@ use Object::Declare (
         valid       => 'valid_values',
         render      => 'render_as',
         order       => 'sort_order',
-        max_length  => 'length',
     },
     copula  => {
         is      => '',
@@ -107,6 +111,9 @@ sub schema (&) {
     my $from = caller;
 
     no warnings 'redefine';
+    
+    # See the perldoc for an explanation of why we're redefining
+    # the localization method _().
     local *_ = sub { my $args = \@_; defer { _(@$args) } };
 
     Class::Data::Inheritable::mk_classdata($from => qw/PARAMS/);

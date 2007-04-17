@@ -6,19 +6,31 @@ use base 'Locale::Maketext';
 use Locale::Maketext::Lexicon ();
 use Email::MIME::ContentType;
 use Encode::Guess qw(iso-8859-1);
-use File::ShareDir ':ALL';
+use File::ShareDir 'module_dir';
+use Jifty::Util;
 
 =head1 NAME
 
 Jifty::I18N - Internationalization framework for Jifty
 
+=head1 SYNOPSIS
+
+  # Whenever you need an internationalized string:
+  print _('Hello, %1!', 'World');
+
+In your Mason templates:
+
+  <% _('Hello, %1!', 'World') %>
+
 =head1 METHODS
 
 =head2 C<_>
 
-This module exports the C<loc> method, which it inherits from
-L<Locale::Maketext::Simple>. Jifty aliases this method to C<_()> for 
-your convenience.
+This module provides a method named C<_>, which allows you to quickly and easily include localized strings in your application. The first argument is the string to translated. If that string contains placeholders, the remaining arguments are used to replace the placeholders. The placeholders in the form of "%1" where the number is the number of the argument used to replace it:
+
+  _('Welcome %1 to the %2', 'Bob', 'World');
+
+This example would return the string "Welcome Bob to the World" if no translation is being performed.
 
 =cut
 
@@ -30,23 +42,14 @@ the wider world.
 
 =cut
 
+my $DynamicLH;
 
 sub new {
     my $class = shift;
     my $self  = {};
     bless $self, $class;
 
-    my @import = (
-        'Gettext',Jifty->config->framework('L10N')->{'PoDir'}. '/*.po',
-        'Gettext',Jifty->config->framework('L10N')->{'DefaultPoDir'}. '/*.po'
-        );
-
-    foreach my $plugin (Jifty->plugins) {
-        my $dir = eval { module_dir(ref($plugin)); };
-        next unless $dir;
-        push @import, 'Gettext';
-        push @import, $dir . '/po/*.po';
-    };
+    my @import = map {( Gettext => $_ )} _get_file_patterns();
 
     Locale::Maketext::Lexicon->import(
         {   '*' => \@import,
@@ -56,16 +59,18 @@ sub new {
         }
     );
 
-    $self->init;
-
     # Allow hard-coded languages in the config file
     my $lang = Jifty->config->framework('L10N')->{'Lang'};
     $lang = [defined $lang ? $lang : ()] unless ref($lang) eq 'ARRAY';
 
-    my $lh         = $class->get_handle(@$lang);
+    my $lh = $class->get_handle(@$lang);
+
+    $DynamicLH = \$lh unless @$lang; 
+    $self->init;
+
     my $loc_method = sub {
         # Retain compatibility with people using "-e _" etc.
-        return \*_ unless @_;
+        return \*_ unless @_; # Needed for perl 5.8
 
         # When $_[0] is undef, return undef.  When it is '', return ''.
         no warnings 'uninitialized';
@@ -77,6 +82,7 @@ sub new {
         my @stringified_args = map {"$_"} @_;
         my $result = eval { $lh->maketext(@stringified_args) };
         if ($@) {
+            warn $@;
             # Sometimes Locale::Maketext fails to localize a string and throws
             # an exception instead.  In that case, we just return the input.
             return join(' ', @stringified_args);
@@ -92,6 +98,42 @@ sub new {
     return $self;
 }
 
+=head2 _get_file_patterns
+
+Get list of patterns for all PO files in the project.
+(Paths are gotten from the configuration variables and plugins).
+
+=cut
+
+sub _get_file_patterns {
+    my @ret;
+
+    push(@ret, Jifty->config->framework('L10N')->{'PoDir'});
+    push(@ret, Jifty->config->framework('L10N')->{'DefaultPoDir'});
+
+    # Convert relative paths to absolute ones
+    @ret = map { Jifty::Util->absolute_path($_) } @ret;
+
+    foreach my $plugin (Jifty->plugins) {
+        my $dir = $plugin->po_root;
+        next unless ($dir and -d $dir and -r $dir );
+        push @ret, $dir ;
+    }
+
+    return ( map { $_ . '/*.po' } @ret );
+}
+
+=head2 get_language_handle
+
+Get the lanauge language for this request.
+
+=cut
+
+sub get_language_handle {
+    my $self = shift;
+    $$DynamicLH = $self->get_handle() if $DynamicLH;
+}
+
 =head2 refresh
 
 Used by L<Jifty::Handler> in DevelMode to reload F<.po> files whenever they
@@ -99,18 +141,16 @@ are modified on disk.
 
 =cut
 
-my $last_modified = '';
+my $LAST_MODIFED = '';
 sub refresh {
     my $modified = join(
         ',',
-        sort map { $_ => -M $_ } map { glob("$_/*.po") } (
-            Jifty->config->framework('L10N')->{'PoDir'},
-            Jifty->config->framework('L10N')->{'DefaultPoDir'}
-        )
+        #   sort map { $_ => -M $_ } map { glob("$_/*.po") } ( Jifty->config->framework('L10N')->{'PoDir'}, Jifty->config->framework('L10N')->{'DefaultPoDir'}
+        sort map { $_ => -M $_ } map { glob($_) } _get_file_patterns()
     );
-    if ($modified ne $last_modified) {
+    if ($modified ne $LAST_MODIFED) {
         Jifty::I18N->new;
-        $last_modified = $modified;
+        $LAST_MODIFED = $modified;
     }
 }
 
@@ -148,6 +188,7 @@ sub promote_encoding {
     } else {
         my $encoding = Encode::Guess->guess($string);
         if(!ref($encoding)) {
+            local $@;
             eval {
                 # Try utf8
                 $string = Encode::decode_utf8($string, 1);
@@ -177,11 +218,17 @@ not ideal.
 sub maybe_decode_utf8 {
     my $class = shift;
     my $string = shift;
+
+    local $@;
     eval {
         $string =  Encode::decode_utf8($string);
     };
     Carp::carp "Couldn't decode UTF-8: $@" if $@;
     return $string;
 }
+
+package Jifty::I18N::en;
+use base 'Locale::Maketext';
+our %Lexicon = ( _fallback => 1, _AUTO => 1 );
 
 1;

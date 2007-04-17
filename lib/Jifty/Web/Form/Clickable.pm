@@ -313,18 +313,20 @@ sub region_argument {
 
 # Query-map any complex structures
 sub _map {
-    my %args = @_;
-    for (keys %args) {
-        my ($key, $value) = Jifty::Request::Mapper->query_parameters($_ => $args{$_});
-        delete $args{$_};
-        $args{$key} = $value;
+    my %old_args = @_;
+    my %new_args;
+
+    while (my ($key, $val) = each %old_args) {
+        my ($new_key, $new_val) = Jifty::Request::Mapper->query_parameters($key => $val);
+        $new_args{$new_key} = $new_val;
     }
-    return %args;
+
+    return %new_args;
 }
 
 =head2 parameters
 
-Returns the generic list of parameters attached to the link as a hash.
+Returns the generic list of HTTP form parameters attached to the link as a hash.
 Use of this is discouraged in favor or L</post_parameters> and
 L</get_parameters>.
 
@@ -377,7 +379,7 @@ sub post_parameters {
 
     # Add a redirect, if this isn't to the right page
     if ( $self->url ne $root and not $self->returns ) {
-        require Jifty::Action::Redirect;
+        Jifty::Util->require('Jifty::Action::Redirect');
         my $redirect = Jifty::Action::Redirect->new(
             arguments => { url => $self->url } );
         $parameters{ $redirect->register_name } = ref $redirect;

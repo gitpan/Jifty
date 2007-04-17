@@ -12,16 +12,10 @@ Jifty::Util - Things that don't fit anywhere else
 
 =cut
 
-use Jifty;
-use File::Spec;
-use File::Path;
-use File::ShareDir;
-use UNIVERSAL::require;
-use ExtUtils::MakeMaker ();
+use Jifty ();
+use File::Spec ();
 use Cwd ();
-use Config;
 
-# Trivial memoization to ward off evil Cwd calls.
 use vars qw/%ABSOLUTE_PATH $JIFTY_ROOT $SHARE_ROOT $APP_ROOT/;
 
 
@@ -107,6 +101,8 @@ currently only used to store the common Mason components.
 sub share_root {
     my $self = shift;
 
+    
+    Jifty::Util->require('File::ShareDir');
     $SHARE_ROOT ||=  eval { File::Spec->rel2abs( File::ShareDir::module_dir('Jifty') )};
     if (not $SHARE_ROOT or not -d $SHARE_ROOT) {
         # XXX TODO: This is a bloody hack
@@ -141,14 +137,15 @@ sub app_root {
 
     push( @roots, Cwd::cwd() );
 
-    eval { require FindBin };
+    eval { Jifty::Util->require('FindBin') };
     if ( my $err = $@ ) {
-
         #warn $@;
     } else {
         push @roots, $FindBin::Bin;
     }
 
+    Jifty::Util->require('ExtUtils::MM') if $^O =~ /(?:MSWin32|cygwin|os2)/;
+    Jifty::Util->require('Config');
     for (@roots) {
         my @root = File::Spec->splitdir($_);
         while (@root) {
@@ -160,10 +157,15 @@ sub app_root {
                 # Also, /usr/bin or /usr/local/bin should be taken from
                 # %Config{bin} or %Config{scriptdir} or something like that
                 # for portablility.
+                # Note that to compare files in Win32 we have to ignore the case
                 (-e $try or (($^O =~ /(?:MSWin32|cygwin|os2)/) and MM->maybe_command($try)))
-                and $try ne File::Spec->catdir($Config{bin}, "jifty")
-                and $try ne File::Spec->catdir($Config{scriptdir}, "jifty") )
+                and lc($try) ne lc(File::Spec->catdir($Config::Config{bin}, "jifty"))
+                and lc($try) ne lc(File::Spec->catdir($Config::Config{scriptdir}, "jifty")) )
             {
+                #warn "root: ", File::Spec->catdir(@root);
+                #warn "bin/jifty: ", File::Spec->catdir($Config::Config{bin}, "jifty");
+                #warn "scriptdir/jifty: ", File::Spec->catdir($Config::Config{scriptdir}, "jifty");
+                #warn "try: $try";
                 return $APP_ROOT = File::Spec->catdir(@root);
             }
             pop @root;
@@ -207,6 +209,7 @@ sub make_path {
     my $self = shift;
     my $whole_path = shift;
     return 1 if (-d $whole_path);
+    Jifty::Util->require('File::Path');
     File::Path::mkpath([$whole_path]);
 }
 
@@ -219,7 +222,14 @@ Additionally, logs any failures at the C<error> log level.
 
 sub require {
     my $self = shift;
-    my $class = shift;
+    my $module = shift;
+    $self->_require( module => $module,  quiet => 0);
+}
+
+sub _require {
+    my $self = shift;
+    my %args = ( module => undef, quiet => undef, @_);
+    my $class = $args{'module'};
 
     # Quick hack to silence warnings.
     # Maybe some dependencies were lost.
@@ -230,11 +240,15 @@ sub require {
 
     return 1 if $self->already_required($class);
 
+    local $UNIVERSAL::require::ERROR = '';
     my $retval = $class->require;
     if ($UNIVERSAL::require::ERROR) {
         my $error = $UNIVERSAL::require::ERROR;
         $error =~ s/ at .*?\n$//;
-        Jifty->log->error(sprintf("$error at %s line %d\n", (caller)[1,2]));
+        
+        unless ($args{'quiet'} and $error =~ /^Can't locate/) {
+            Jifty->log->error(sprintf("$error at %s line %d\n", (caller(1))[1,2]));
+        }
         return 0;
     }
 
@@ -247,6 +261,20 @@ sub require {
     return 1;
 }
 
+=head2 try_to_require Module
+
+This method works just like L</require>, except that it surpresses the error message
+in cases where the module isn't found.
+
+=cut
+
+sub  try_to_require {
+    my $self = shift;
+    my $module = shift;
+    $self->_require( module => $module,  quiet => 1);
+}
+
+
 =head2 already_required class
 
 Helper function to test whether a given class has already been require'd.
@@ -258,6 +286,20 @@ sub already_required {
     my ($self, $class) = @_;
     my $path =  join('/', split(/::/,$class)).".pm";
     return ( $INC{$path} ? 1 : 0);
+}
+
+=head2 generate_uuid
+
+Generate a new UUID using B<Data::UUID>.
+
+=cut
+
+my $Data_UUID_instance;
+sub generate_uuid {
+    ($Data_UUID_instance ||= do {
+        require Data::UUID;
+        Data::UUID->new;
+    })->create_str;
 }
 
 =head1 AUTHOR

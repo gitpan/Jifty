@@ -3,6 +3,8 @@ use strict;
 
 package Jifty::Record;
 
+use Jifty::Config;
+
 =head1 NAME
 
 Jifty::Record - Represents a Jifty object that lives in the database.
@@ -32,6 +34,7 @@ sub _init {
 
 =head2 create PARAMHASH
 
+C<create> can be called as either a class method or an object method.
 
 Takes an array of key-value pairs and inserts a new row into the database representing
 this object.
@@ -51,7 +54,14 @@ Override's L<Jifty::DBI::Record> in these ways:
 =cut 
 
 sub create {
-    my $self    = shift;
+    my $class = shift;
+    my $self;
+    if ( ref($class) ) {
+        ( $self, $class ) = ( $class, undef );
+    } else {
+        $self = $class->new();
+    }
+
     my %attribs = @_;
 
     unless ( $self->check_create_rights(@_) ) {
@@ -61,38 +71,48 @@ sub create {
     }
 
     foreach my $key ( keys %attribs ) {
-        my $attr = $attribs{$key};
-        my $method = "canonicalize_$key";
-        my $func = $self->can($method) or next;
-        $attribs{$key} = $self->$func( $attr);
+        $attribs{$key} = $self->run_canonicalization_for_column(
+            column => $key,
+            value  => $attribs{$key}
+        );
     }
     foreach my $key ( keys %attribs ) {
         my $attr = $attribs{$key};
-        my $method = "validate_$key";
-        if (my $func = $self->can($method)) {
-        my ( $val, $msg ) = $func->($self, $attr);
-        unless ($val) {
+        my ( $val, $msg ) = $self->run_validation_for_column(
+            column => $key,
+            value  => $attribs{$key}
+        );
+        if ( not $val ) {
             $self->log->error("There was a validation error for $key");
-            return ( $val, $msg );
+            if ($class) {
+                return ($self);
+            } else {
+                return ( $val, $msg );
+            }
         }
-        }
+
         # remove blank values. We'd rather have nulls
-        if ( exists $attribs{$key} and (! defined $attr || ( not ref( $attr) and $attr eq '' ))) {
+        if ( exists $attribs{$key}
+            and ( !defined $attr || ( not ref($attr) and $attr eq '' ) ) )
+        {
             delete $attribs{$key};
         }
     }
 
-
     my $msg = $self->SUPER::create(%attribs);
-    if (ref($msg)  ) {
-        # It's a Class::ReturnValue
-        return $msg ;
-    }
-    my ($id, $status) = $msg;
-    $self->load_by_cols( id => $id ) if ($id);
-    return wantarray ? ($id, $status) : $id;
-}
+    if ( ref($msg) ) {
 
+        # It's a Class::ReturnValue
+        return $msg;
+    }
+    my ( $id, $status ) = $msg;
+    $self->load_by_cols( id => $id ) if ($id);
+    if ($class) {
+        return $self;
+    } else {
+        return wantarray ? ( $id, $status ) : $id;
+    }
+}
 
 =head2 id
 
@@ -107,13 +127,21 @@ sub id { $_[0]->{'values'}->{'id'} }
 
 =head2 load_or_create
 
-Attempts to load a record with the named parameters passed in.  If it
+C<load_or_create> can be called as either a class method or an object method.
+It attempts to load a record with the named parameters passed in.  If it
 can't do so, it creates a new record.
 
 =cut
 
 sub load_or_create {
-    my $self = shift;
+    my $class = shift;
+    my $self;
+    if (ref($class)) {
+       ($self,$class) = ($class,undef); 
+    } else {
+        $self = $class->new();
+    }
+
     my %args = (@_);
 
     my ( $id, $msg ) = $self->load_by_cols(%args);
@@ -169,6 +197,11 @@ routine.  Otherwise, it returns false.
 sub current_user_can {
     my $self  = shift;
     my $right = shift;
+    
+    if (Jifty->config->framework('SkipAccessControl')) {
+	return 1;	
+    }
+
 
     if (   $self->current_user->is_bootstrap_user
         or $self->current_user->is_superuser )
@@ -204,8 +237,7 @@ sub check_create_rights { return shift->current_user_can('create', @_) }
 
 Internal helper to call L</current_user_can> with C<read>.
 
-Passes C<column> as a named parameter for the column the user is checking rights
-on.
+Passes C<column> as a named parameter for the column the user is checking rights on.
 
 =cut
 
@@ -376,6 +408,132 @@ sub _cache_config {
     {   'cache_p'       => 1,
         'cache_for_sec' => 60,
     };
+}
+
+=head2 since
+ 
+By default, all models exist since C<undef>, the ur-time when the application was created. Please override it for your model class.
+ 
+=cut
+ 
+
+
+=head2 printable_table_schema
+
+When called, this method will generate the SQL schema for the current version of this 
+class and return it as a scalar, suitable for printing or execution in your database's command line.
+
+=cut
+
+
+sub printable_table_schema {
+    my $class = shift;
+
+    my $schema_gen = $class->_make_schema();
+    return $schema_gen->create_table_sql_text;
+}
+
+=head2 create_table_in_db
+
+When called, this method will generate the SQL schema for the current version of this 
+class and insert it into the application's currently open database.
+
+=cut
+
+sub create_table_in_db {
+    my $class = shift;
+
+    my $schema_gen = $class->_make_schema();
+
+    # Run all CREATE commands
+    for my $statement ( $schema_gen->create_table_sql_statements ) {
+        my $ret = Jifty->handle->simple_query($statement);
+        $ret or die "error creating table $class: " . $ret->error_message;
+    }
+
+}
+
+sub _make_schema { 
+    my $class = shift;
+
+    my $schema_gen = Jifty::DBI::SchemaGenerator->new( Jifty->handle )
+        or die "Can't make Jifty::DBI::SchemaGenerator";
+    my $ret = $schema_gen->add_model( $class->new );
+    $ret or die "couldn't add model $class: " . $ret->error_message;
+
+    return $schema_gen;
+}
+
+=head2 add_column_sql column_name
+
+Returns the SQL statement neccessary to add C<column_name> to this class's representation in the database
+
+=cut
+
+sub add_column_sql {
+    my $self        = shift;
+    my $column_name = shift;
+
+    my $col        = $self->column($column_name);
+    my $definition = $self->_make_schema()->column_definition_sql($self->table => $col->name);
+    return "ALTER TABLE " . $self->table . " ADD COLUMN " . $definition;
+}
+
+=head2 drop_column_sql column_name
+
+Returns the SQL statement neccessary to remove C<column_name> from this class's representation in the database
+
+=cut
+
+sub drop_column_sql {
+    my $self        = shift;
+    my $column_name = shift;
+
+    my $col = $self->column($column_name);
+    return "ALTER TABLE " . $self->table . " DROP COLUMN " . $col->name;
+}
+
+=head2 schema_version
+
+This method is used by L<Jifty::DBI::Record> to determine which schema version is in use. It returns the current database version stored in the configuration.
+
+Jifty's notion of the schema version is currently broken into two:
+
+=over
+
+=item 1.
+
+The Jifty version is the first. In the case of models defined by Jifty itself, these use the version found in C<$Jifty::VERSION>.
+
+=item 2.
+
+Any model defined by your application use the database version declared in the configuration. In F<etc/config.yml>, this is lcoated at:
+
+  framework:
+    Database:
+      Version: 0.0.1
+
+=back
+
+A model is considered to be defined by Jifty if it the package name starts with "Jifty::". Otherwise, it is assumed to be an application model.
+
+=cut
+
+sub schema_version {
+    my $class = shift;
+    
+    # Return the Jifty schema version
+    if ($class =~ /^Jifty::Model::/) {
+        return $Jifty::VERSION;
+    }
+
+    # TODO need to consider Jifty plugin versions?
+
+    # Return the application schema version
+    else {
+        my $config = Jifty->config();
+        return $config->framework('Database')->{'Version'};
+    }
 }
 
 1;

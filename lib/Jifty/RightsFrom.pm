@@ -8,8 +8,7 @@ Jifty::RightsFrom
 =head1 SYNOPSIS
 
   package Application::Model::Thing;
-  use Application::Model::Person;
-
+  use Jifty::DBI::Schema;
   use Application::Record schema {
     column owner => refers_to Application::Model::Person;
   }
@@ -112,7 +111,6 @@ sub delegate_current_user_can {
 
     my $column   = $self->column($col_name);
     my $obj_type = $column->refers_to();
-    
 
     # XXX TODO: this card is bloody hard to follow. it's my fault. --jesse
 

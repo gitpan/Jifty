@@ -19,7 +19,7 @@ This provides a version of L<JSON/objToJson> which allows
 single-quoted string output.
 
 If the faster L<JSON::Syck> is available, it is preferred over the pure-perl
-L<JSON>, as it provides native support for single-quoted strings..
+L<JSON>, as it provides native support for single-quoted strings.
 
 =head1 METHODS
 
@@ -32,11 +32,13 @@ BEGIN {
     if (eval { require JSON::Syck; JSON::Syck->VERSION(0.05) }) {
         *jsonToObj = *_jsonToObj_syck;
         *objToJson = *_objToJson_syck;
+        $JSON::Syck::ImplicitUnicode = 1;
     }
     else {
         require JSON;
         *jsonToObj = *_jsonToObj_pp;
         *objToJson = *_objToJson_pp;
+        $JSON::UTF8 = 1;
     }
 }
 
@@ -71,7 +73,13 @@ sub _objToJson_syck {
 
     local $JSON::Syck::SingleQuote = $args->{singlequote};
     local $JSON::Syck::ImplicitUnicode = 1;
-    JSON::Syck::Dump($obj);
+	my $json = JSON::Syck::Dump($obj);
+	if (! $args->{singlequte}) {
+		$json =~ s/\n\n\n/\\n/gs;	# fix syck bug
+		$json =~ s/\n/\\n/gs;		# just to be safe
+		$json =~ s/\r/\\r/gs;
+	}
+	return $json;
 }
 
 # We should escape double-quotes somehow, so that we can guarantee
@@ -99,7 +107,7 @@ sub _objToJson_pp {
     local *JSON::Converter::_stringfy = sub {
         my $arg = shift;
         $arg =~ s/([\\\n'\r\t\f\b])/$esc{$1}/eg;
-        $arg =~ s/([\x00-\x07\x0b\x0e-\x1f])/'\\u00' . unpack('H2',$1)/eg;
+        $arg =~ s/([\x00-\x07\x0b\x0e-\x1f])/'\\u00' . unpack('H2',$1)/egs;
         return "'" . $arg ."'";
     };
     return JSON::objToJson($obj, $args);

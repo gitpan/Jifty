@@ -302,6 +302,8 @@ sub OPTIONS ($) { _qualify method => @_ }
 
 sub plugin ($) { return { plugin => @_ } }
 
+our $CURRENT_STAGE;
+
 =head2 import
 
 Jifty::Dispatcher is an L<Exporter>, that is, part of its role is to
@@ -480,6 +482,9 @@ This is the unit which calling L</last_rule> skips to the end of.
 
 sub _handle_stage {
     my ($self, $stage, @rules) = @_;
+
+    # Set the current stage so that rules can make smarter choices;
+    local $CURRENT_STAGE = $stage;
 
     eval { $self->_handle_rules( [ $self->rules($stage), @rules ] ); };
     if ( my $err = $@ ) {
@@ -749,29 +754,33 @@ sub _do_show {
     # Fix up the path
     $path = shift if (@_);
     $path ||= $self->{path};
+
+    unless ($CURRENT_STAGE eq 'RUN') {
+        die "You can't call a 'show' rule in a 'before' or 'after' block in the dispatcher.  Not showing path $path";
+    }
+
     $self->log->debug("Showing path $path");
+
 
     # If we've got a working directory (from an "under" rule) and we have
     # a relative path, prepend the working directory
     $path = "$self->{cwd}/$path" unless $path =~ m{^/};
 
-    # When we're requesting a directory, go looking for the index.html
-    if ( $self->template_exists( $path . "/index.html" ) ) {
+    # When we're requesting a directory, go looking for the index.html if the 
+    # path given does not exist
+    if (  ! $self->template_exists( $path )
+         && $self->template_exists( $path . "/index.html" ) ) {
         $path .= "/index.html";
     }
 
-    my $abs_template_path = Jifty::Util->absolute_path(
-        Jifty->config->framework('Web')->{'TemplateRoot'} . $path );
-    my $abs_root_path = Jifty::Util->absolute_path(
-        Jifty->config->framework('Web')->{'TemplateRoot'} );
+    my $abs_template_path = Jifty::Util->absolute_path( Jifty->config->framework('Web')->{'TemplateRoot'} . $path );
+    my $abs_root_path = Jifty::Util->absolute_path( Jifty->config->framework('Web')->{'TemplateRoot'} );
 
     if ( $abs_template_path !~ /^\Q$abs_root_path\E/ ) {
-        request->path('/__jifty/errors/500');
+        $self->render_template('/__jifty/errors/500');
     } else {
-        # Set the request path
-        request->path($path);
+        $self->render_template( $path);
     }
-    $self->render_template( request->path );
 
     last_rule;
 }
@@ -916,7 +925,7 @@ came in with that method.
 
 sub _match_method {
     my ( $self, $method ) = @_;
-    $self->log->debug("Matching URL $ENV{REQUEST_METHOD} against ".$method);
+    #$self->log->debug("Matching URL $ENV{REQUEST_METHOD} against ".$method);
     lc( $ENV{REQUEST_METHOD} ) eq lc($method);
 }
 
@@ -1106,23 +1115,32 @@ sub _unescape {
     return $text;
 }
 
+
 =head2 template_exists PATH
 
-Returns true if PATH is a valid template inside your template root.
+Returns true if PATH is a valid template inside your template root. This checks
+for both Template::Declare and HTML::Mason Templates.
 
 =cut
 
 sub template_exists {
-    my $self = shift;
+    my $self     = shift;
     my $template = shift;
 
-    return  Jifty->handler->mason->interp->comp_exists( $template);
+    foreach my $handler ( Jifty->handler->_template_handlers) {
+        if ( Jifty->handler->$handler->template_exists($template) ) {
+            return 1;
+        }
+    }
+    return undef;
 }
 
 
 =head2 render_template PATH
 
-Use our templating system to render a template. If there's an error, do the right thing.
+Use our templating system to render a template. If there's an error, do the
+right thing. If the same 'PATH' is found in both Template::Declare and
+HTML::Mason templates then the T::D template is used.
 
 
 =cut
@@ -1130,9 +1148,21 @@ Use our templating system to render a template. If there's an error, do the righ
 sub render_template {
     my $self = shift;
     my $template = shift;
+    my $showed = 0;
+    eval { 
+    	foreach my $handler (Jifty->handler->_template_handlers ) {
+        if (Jifty->handler->$handler->template_exists($template) ) {
+	   $showed = 1;
+            Jifty->handler->$handler->show($template);
+		last;
+        	}
+   	} 
+	if (not $showed and my $fallback_handler = Jifty->handler->_fallback_template_handler) {
+            Jifty->handler->$fallback_handler->show($template);
+	}
+    
+    };
 
-    $self->log->debug( "Handling template " . $template );
-    eval { Jifty->handler->mason->handle_comp( $template ); };
     my $err = $@;
 
     # Handle parse errors
@@ -1149,8 +1179,7 @@ sub render_template {
         warn "$err";
 
         # Redirect with a continuation
-        Jifty->web->_redirect(
-            "/__jifty/error/mason_internal_error?J:C=" . $c->id );
+        Jifty->web->_redirect( "/__jifty/error/mason_internal_error?J:C=" . $c->id );
     }
     elsif ($err) {
         die $err;
@@ -1239,61 +1268,6 @@ sub _match_deferred {
     @$deferred = grep {@{$_->[2]}} @$deferred;
 
     return @matches;
-}
-
-=head2 dump_rules
-
-Dump all defined rules in debug log. It will be called by Jifty on startup.
-
-=cut
-
-sub dump_rules {
-    my $self = shift;
-
-    no strict 'refs';
-    foreach my $stage ( qw/SETUP RUN CLEANUP/ ) {
-
-        my $log = '';
-        foreach my $r ( @{ $self . '::RULES_' . $stage } ) {
-            $log .= _unroll_dumpable_rules( 0,$r );
-        }
-
-        Jifty->log->debug( "Rules in stage $stage:\n", $log) if ($log);
-    }
-};
-
-=head2 _unroll_dumpable_rules LEVEL,RULE
-
-Walk all rules defined in dispatcher starting at rule
-C<RULE> and indentation level C<LEVEL>
-
-=cut
-
-sub _unroll_dumpable_rules {
-    my ($level, $rule) = @_;
-    my $log =
-        # indentation
-        ( "    " x $level ) .
-        # op
-        ( $rule->[0] || "undef op" ) . ' ' .
-        # arguments
-        (
-            ! defined( $rule->[1] )   ? ""                                          :
-            ref $rule->[1] eq 'ARRAY' ? "'" . join("','", @{ $rule->[1] }) . "'" :
-            ref $rule->[1] eq 'HASH'  ? $rule->[1]->{method} . " '" . $rule->[1]->{""} ."'" :
-            ref $rule->[1] eq 'CODE'  ? '{...}' :
-                                        "'" . $rule->[1] . "'"
-        ) .
-        "\n";
-
-    if (ref $rule->[2] eq 'ARRAY') {
-        $level++;
-        foreach my $sr ( @{ $rule->[2] } ) {
-            $log .= _unroll_dumpable_rules( $level, $sr );
-        }
-    }
-
-    return $log;
 }
 
 1;

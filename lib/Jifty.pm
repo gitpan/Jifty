@@ -5,13 +5,49 @@ package Jifty;
 use IPC::PubSub 0.22;
 use Data::UUID;
 use encoding 'utf8';
-# Work around the fact that Time::Local caches thing on first require
-BEGIN { local $ENV{'TZ'} = "GMT";  require Time::Local;}
-$Jifty::VERSION = '0.70117';
+BEGIN { 
+    # Work around the fact that Time::Local caches TZ on first require
+    local $ENV{'TZ'} = "GMT";
+    require Time::Local;
+
+    # Declare early to make sure Jifty::Record::schema_version works
+    $Jifty::VERSION = '0.70416';
+}
 
 =head1 NAME
 
 Jifty - an application framework
+
+=head1 SYNOPSIS
+
+ # Object containing lots of web related goodies...
+ my $web      = Jifty->web;
+ my $request  = Jifty->web->request;
+ my $response = Jifty->web->response;
+ my $link     = Jifty->web->link( label => _('W00t'), url => '/whatsit' );
+
+ # Retrieve information from your application's etc/config.yml file.
+ my $config   = Jifty->config;
+
+ # Retrieve the Jifty::DBI handle
+ my $handle   = Jifty->handle;
+
+ # Load an application class, very handy in plugins
+ my $class    = Jifty->app_class('Model', 'Foo');
+ my $foo      = $class->new;
+ $foo->create( frobnicate => 42 );
+
+ # Configure information related to your application's actions
+ my $api      = Jifty->api;
+
+ # Make parts of your page "subscribe" to information in a fragment
+ my $subs     = Jifty->subs;
+
+ # Share information via IPC::PubSub in your application
+ my $bus      = Jifty->bus;
+
+ # Retrieve general information about Mason
+ my $handler  = Jifty->handler;
 
 =head1 DESCRIPTION
 
@@ -113,27 +149,33 @@ sub new {
         @_
     );
 
-    # Load the configuration. stash it in ->config
-    Jifty->config( Jifty::Config->new() );
 
 
     # Now that we've loaded the configuration, we can remove the temporary 
     # Jifty::DBI::Record baseclass for records and insert our "real" baseclass,
     # which is likely Record::Cachable or Record::Memcached
-    pop @Jifty::Record::ISA;
-    Jifty::Util->require( Jifty->config->framework('Database')->{'RecordBaseClass'});
-    push @Jifty::Record::ISA, Jifty->config->framework('Database')->{'RecordBaseClass'};
+    @Jifty::Record::ISA = grep { $_ ne 'Jifty::DBI::Record' } @Jifty::Record::ISA;
+
+    my $record_base_class = Jifty->config->framework('Database')->{'RecordBaseClass'};
+    Jifty::Util->require( $record_base_class );
+    push @Jifty::Record::ISA, $record_base_class unless $record_base_class eq 'Jifty::Record';
 
     Jifty->logger( Jifty::Logger->new( $args{'logger_component'} ) );
 
     # Set up plugins
     my @plugins;
-    for my $plugin (@{Jifty->config->framework('Plugins')}) {
+    my @plugins_to_load = @{Jifty->config->framework('Plugins')};
+    for (my $i = 0; my $plugin = $plugins_to_load[$i]; $i++) {
         my $class = "Jifty::Plugin::".(keys %{$plugin})[0];
         my %options = %{ $plugin->{(keys %{$plugin})[0]} };
         Jifty::Util->require($class);
         Jifty::ClassLoader->new(base => $class)->require;
-        push @plugins, $class->new(%options);
+        my $plugin_obj = $class->new(%options);
+        push @plugins, $plugin_obj;
+        foreach my $name ($plugin_obj->prereq_plugins) {
+            next if grep { $_ eq $name } @plugins_to_load;
+            push @plugins_to_load, {$name => {}};
+        }
     }
 
     Jifty->plugins(@plugins);
@@ -153,6 +195,9 @@ sub new {
     Jifty->handler(Jifty::Handler->new());
     Jifty->api(Jifty::API->new());
 
+    # We can only require view classes once we have our models and actions set.
+    $class_loader->require_views;
+
     # Let's get the database rocking and rolling
     Jifty->setup_database_connection(%args);
 
@@ -165,6 +210,13 @@ sub new {
     
 }
 
+# Explicitly destroy the classloader; if this happens during global
+# destruction, there's a period of time where there's a bogus entry in
+# @INC
+END {
+    Jifty->class_loader->DESTROY if Jifty->class_loader;
+}
+
 =head2 config
 
 An accessor for the L<Jifty::Config> object that stores the
@@ -175,12 +227,16 @@ configuration for the Jifty application.
 sub config {
     my $class = shift;
     $CONFIG = shift if (@_);
+    $CONFIG ||= Jifty::Config->new();
     return $CONFIG;
 }
 
 =head2 logger
 
 An accessor for our L<Jifty::Logger> object for the application.
+
+You probably aren't interested in this. See L</log> for information on how to
+make log messages.
 
 =cut
 
@@ -193,6 +249,9 @@ sub logger {
 =head2 handler
 
 An accessor for our L<Jifty::Handler> object.
+
+This is another method that you usually don't want to mess with too much.
+Most of the interesting web bits are handled by L</web>.
 
 =cut
 
@@ -233,11 +292,15 @@ sub api {
 Return Class in application space.  For example C<app_class('Model', 'Foo')>
 returns YourApp::Model::Foo.
 
+By the time you get it back, the class will have already been required
+
 =cut
 
 sub app_class {
     shift;
-    join('::', Jifty->config->framework('ApplicationClass'), @_);
+    my $val = join('::', Jifty->config->framework('ApplicationClass'), @_);
+    Jifty::Util->try_to_require($val);
+    return $val;
 }
 
 =head2 web
@@ -284,7 +347,7 @@ sub bus {
             }
         } 
         
-        if ($backend eq 'JiftyDBI' ) {
+        if ($backend eq 'JiftyDBI' and Jifty->handle ) {
                 @args    = (
                     db_config    => Jifty->handle->{db_config},
                     table_prefix => '_jifty_pubsub_',
@@ -377,18 +440,19 @@ sub app_instance_id {
 }
 
 
+=head1 SEE ALSO
+
+L<http://jifty.org>, L<Jifty::Manual::Tutorial>, L<Jifty::Everything>, L<Jifty::Config>, L<Jifty::Handle>, L<Jifty::Logger>, L<Jifty::Handler>, L<Jifty::Web>, L<Jifty::API>, L<Jifty::Subs>, L<IPC::PubSub>, L<Jifty::Plugin>, L<Jifty::ClassLoader>
+
+=head1 AUTHORS
+
+Jesse Vincent, Alex Vandiver and David Glasser.
+
 =head1 LICENSE
 
 Jifty is Copyright 2005-2006 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
-=head1 SEE ALSO
-
-L<http://jifty.org>
-
-=head1 AUTHORS
-
-Jesse Vincent, Alex Vandiver and David Glasser.
 
 
 =cut

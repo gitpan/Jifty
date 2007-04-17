@@ -70,6 +70,7 @@ file should be checked.
 =cut
 
 use Log::Log4perl;
+use Carp;
 
 use base qw/Jifty::Object/;
 
@@ -105,6 +106,7 @@ sub new {
     
     # whenever Perl wants to warn something out capture it with a signal
     # handler and pass it to log4perl
+    my $previous_warning_handler = $SIG{__WARN__};
     $SIG{__WARN__} = sub {
 
         # This caller_depth line tells Log4perl to report
@@ -116,10 +118,20 @@ sub new {
         # If the logger has been taken apart by global destruction,
         # don't try to use it to log warnings
         if (Log::Log4perl->initialized) {
+            my $action = $self->_warning_action(@_);
             # @_ often has read-only scalars, so we need to break
             # the aliasing so we can remove trailing newlines
             my @lines = map {"$_"} @_;
-            $logger->warn(map {chomp; $_} @lines);
+            $logger->$action(map {chomp; $_} @lines);
+        }
+        elsif ($previous_warning_handler) {
+            # Fallback to the old handler
+            goto &$previous_warning_handler;
+        }
+        else {
+            # Now handler - just carp about it for now
+            local $SIG{__WARN__};
+            carp(@_);
         }
     };
 
@@ -149,6 +161,45 @@ sub _initialize_log4perl {
         );
         Log::Log4perl->init( \%default );
   }
+}
+
+=head2 _warning_action
+
+change the Log4Perl action from warn to error|info|etc based 
+on the content of the warning.  
+
+Added because DBD::Pg throws up NOTICE and other messages
+as warns, and we really want those to be info (or error, depending
+on the code).  List based on Postgres documentation
+
+TODO: needs to be smarter than just string matching
+
+returns a valid Log::Log4Perl action, if nothing matches
+will return the default of warn since we're in a __WARN__ handler
+
+=cut
+
+sub _warning_action {
+    my $self = shift;
+    my $warnings = join('',@_);
+
+    my %pg_notices = ('DEBUG\d+' => 'debug',
+                      'INFO'     => 'info',
+                      'NOTICE'   => 'info',
+                      '.*ERROR.*database .* does not exist' => 'info',
+                      '.*couldn.t execute the query .DROP DATABASE.' => 'info',
+                      'WARNING'  => 'warn',
+                      'DBD::Pg.+ERROR'    => 'error',
+                      'LOG'      => 'warn',
+                      'FATAL'    => 'fatal',
+                      'PANIC'    => 'fatal' );
+    
+    foreach my $notice (keys %pg_notices) {
+        if ($warnings =~ /^$notice/) {
+            return $pg_notices{$notice};
+        } 
+    }
+    return 'warn';
 }
 
 =head1 AUTHOR

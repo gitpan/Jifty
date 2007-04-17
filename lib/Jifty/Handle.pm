@@ -65,7 +65,7 @@ sub canonical_database_name {
     # legacy databases
     my $db = $db_config->{'Database'};
 
-    if ($db_config->{'Driver'} eq 'SQLite') {
+    if ($db_config->{'Driver'} =~ /SQLite/) {
         $db = Jifty::Util->absolute_path($db);
     } 
 
@@ -86,12 +86,18 @@ sub connect {
 
     my %lc_db_config;
     # Skip the non-dsn keys, but not anything else
-    for (grep {!/^checkschema|version|recordbaseclass$/i} keys %db_config) {
+    for (grep {!/^checkschema|version|recordbaseclass|attributes$/i} keys %db_config) {
         $lc_db_config{lc($_)} = $db_config{$_};
     }
     $self->SUPER::connect( %lc_db_config , %args);
     $self->{db_config} = { %lc_db_config , %args };
     $self->dbh->{LongReadLen} = Jifty->config->framework('MaxAttachmentSize') || '10000000';
+
+    # setup attributes
+    my $attributes = Jifty->config->framework('Database')->{Attributes} || {};
+    for (keys %$attributes) {
+        $self->dbh->{lc($_)} = $attributes->{$_};
+    }
 }
 
 
@@ -156,6 +162,55 @@ sub check_schema_version {
             unless $appv == $dbv;
     }
 
+}
+
+
+=head2 create_database MODE
+
+C<MODE> is either "print" or "execute".
+
+This method either prints the commands necessary to create the database
+or actually creates it, depending on the value of MODE.
+
+=cut
+
+sub create_database {
+    my $self = shift;
+    my $mode = shift || 'execute';
+    my $database = $self->canonical_database_name;
+    my $driver   = Jifty->config->framework('Database')->{'Driver'};
+    my $query = "CREATE DATABASE $database;\n";
+    if ( $mode eq 'print') {
+        print $query;
+    } elsif ( $driver !~ /SQLite/ ) {
+        $self->simple_query($query);
+    }
+}
+
+=head2 drop_database MODE
+
+C<MODE> is either "print" or "execute".
+
+This method either prints the commands necessary to drop the database
+or actually drops it, depending on the value of MODE.
+
+=cut
+
+sub drop_database {
+    my $self = shift;
+    my $mode = shift || 'execute';
+    my $database = $self->canonical_database_name;
+    my $driver   = Jifty->config->framework('Database')->{'Driver'};
+    if ( $mode eq 'print' ) {
+        print "DROP DATABASE $database;\n";
+    } elsif ( $driver =~ /SQLite/ ) {
+
+        # Win32 complains when you try to unlink open DB
+        $self->disconnect if $^O eq 'MSWin32';
+        unlink($database);
+    } else {
+        $self->simple_query("DROP DATABASE $database");
+    }
 }
 
 
