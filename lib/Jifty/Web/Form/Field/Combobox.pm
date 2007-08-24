@@ -5,6 +5,12 @@ package Jifty::Web::Form::Field::Combobox;
 
 use base qw/Jifty::Web::Form::Field/;
 
+=head1 NAME
+
+Jifty::Web::Form::Field::Combobox - Add comboboxes to your forms
+
+=head1 METHODS
+
 =head2 render_widget
 
 Renders the select widget.
@@ -23,6 +29,7 @@ my $field = <<"EOF";
        value="@{[ $self->current_value ]}" 
        type="text" 
        size="30"
+       @{[ $self->javascript ]}
        autocomplete="off" /><span id="@{[ $self->element_id ]}_Button" 
        @{[ $self->_widget_class('combo-button')]}
         ></span></span><span style="display: none"></span><select 
@@ -60,6 +67,7 @@ EOF
         Jifty->web->out($field);
     '';
 }
+
 
 =head2 render_autocomplete
 

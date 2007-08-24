@@ -5,6 +5,12 @@ package Jifty::Web::Form::Field::Radio;
 
 use base qw/Jifty::Web::Form::Field/;
 
+=head1 NAME
+
+Jifty::Web::Form::Field::Radio - Add a radio button to your forms
+
+=head1 METHODS
+
 =head2 render_widget
 
 Renders the whole radio button collection.
@@ -58,6 +64,7 @@ sub render_option {
 
     $field .= qq! checked="checked" !
       if defined $self->current_value and $self->current_value eq $value;
+    $field .= $self->javascript;
     $field .= qq! /><label for="@{[ $id ]}"!;
     $field .= $self->_widget_class;
     $field .= qq!>$display</label>\n!;
@@ -66,5 +73,6 @@ sub render_option {
     Jifty->web->out($field);
     '';
 }
+
 
 1;

@@ -55,7 +55,7 @@ template '__jifty/error/_elements/error_text' => sub {
 {
     no warnings qw'redefine';
 
-    sub wrapper ($) {
+    sub wrapper {
         my $code = shift;
         html {
             head {
@@ -104,7 +104,7 @@ template '__jifty/error/dhandler' => sub {
                             Jifty->log->error( "Unhandled web error " . $error );
                             page {
                               title is 'Something went awry';
-                              show('_elements/error_text', error => $error );
+                              show('/__jifty/error/_elements/error_text', error => $error );
                         };
                     };
 
@@ -152,7 +152,7 @@ template '__jifty/error/mason_internal_error' => page {
 
     # If we're not in devel, bail
     if ( not Jifty->config->framework("DevelMode") or not $cont ) {
-            show("_elements/error_text");
+            show("/__jifty/error/_elements/error_text");
     #    return;
     }
 

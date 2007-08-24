@@ -24,7 +24,7 @@ make up a Jifty application's API
  my @actions = Jifty->api->actions;
 
  # Check to see if an action is allowed
- if (Jifty->api->is_allow('TrueFooBar')) {
+ if (Jifty->api->is_allowed('TrueFooBar')) {
      # do something...
  }
 
@@ -57,8 +57,10 @@ sub new {
     my $class = shift;
     my $self  = bless {}, $class;
 
+    # Setup the basic allow/deny rules
     $self->reset;
 
+    # Find all the actions for the API reference (available at _actions)
     Jifty::Module::Pluggable->import(
         search_path => [
             Jifty->app_class("Action"),
@@ -85,13 +87,16 @@ sub qualify {
     my $self   = shift;
     my $action = shift;
 
-    my $base_path = Jifty->app_class("Action");
+    # Get the application class name
+    my $base_path = Jifty->app_class;
 
+    # Return the class now if it's already fully qualified
     return $action
-        if $action =~ /^Jifty::/
-        or $action =~ /^\Q$base_path\E/;
+        if ($action =~ /^Jifty::/
+        or $action =~ /^\Q$base_path\E::/);
 
-    return $base_path . "::" . $action;
+    # Otherwise qualify it
+    return $base_path . "::Action::" . $action;
 }
 
 =head2 reset
@@ -109,6 +114,7 @@ sub reset {
     # Set up defaults
     my $app_actions = Jifty->app_class("Action");
 
+    # These are the default action limits
     $self->action_limits(
         [   { deny => 1, restriction => qr/.*/ },
             {   allow       => 1,
@@ -180,6 +186,7 @@ sub restrict {
     my $polarity     = shift;
     my @restrictions = @_;
 
+    # Check the sanity of the polarity
     die "Polarity must be 'allow' or 'deny'"
         unless $polarity eq "allow"
         or $polarity     eq "deny";
@@ -204,7 +211,7 @@ sub restrict {
 
 =head2 is_allowed CLASS
 
-Returns false if the I<CLASS> name (which is fully qualified if it is
+Returns true if the I<CLASS> name (which is fully qualified if it is
 not already) is allowed to be executed.  See L</restrict> above for
 the rules that the class name must pass.
 

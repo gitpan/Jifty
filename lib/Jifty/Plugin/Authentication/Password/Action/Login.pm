@@ -83,7 +83,7 @@ sub validate_password {
 
 
     if ($token eq '') { # we have no token, validate in a standard way
-        if ($pw eq '') {
+        unless ( defined $pw && length $pw ) {
             return $self->validation_error(password => "Please fill in this field." );
         }
     } else { # we have a token, so we should have a hashed pw
@@ -149,7 +149,7 @@ sub take_action {
         Jifty->web->session->set( login_token => '' );
     } else {                # no password hashing over the wire
         unless ( $user->id && $user->password_is($password) ) {
-            $self->result->error( _('You may have mistyped your email address or password. Give it another shot.'));
+            $self->result->error( _('You may have mistyped your email or password. Give it another shot.'));
             return;
         }
     }
@@ -159,6 +159,7 @@ sub take_action {
 
     # Set up our login message
     $self->result->message( $self->login_message($user));
+    $self->result->content( id => $user->id );
 
     # Actually do the signin thing.
     Jifty->web->current_user(Jifty->app_class('CurrentUser')->new( id => $user->id));

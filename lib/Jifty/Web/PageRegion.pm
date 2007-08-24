@@ -215,7 +215,7 @@ sub enter {
             $self->argument($2 => $value);
         }
         if ($key =~ /^region-(.*)$/ and $1 eq $self->qualified_name and $value ne $self->default_path) {
-            $self->path($value);
+            $self->path(URI::Escape::uri_unescape($value));
         }
 
         # We should always inherit the state variables from the uplevel request.
@@ -298,7 +298,7 @@ sub as_string {
 sub render_as_subrequest {
     my ($self, $out_method, $arguments, $enable_actions) = @_;
 
-    my $orig_out = Jifty->handler->mason->interp->out_method || \&Jifty::View::Mason::Handler::out_method;
+    my $orig_out = Jifty->handler->mason->interp->out_method || Jifty::View->can('out_method');
 
     Jifty->handler->mason->interp->out_method($out_method);
 
@@ -310,6 +310,17 @@ sub render_as_subrequest {
     $subrequest->path( $self->path );
     $subrequest->top_request( Jifty->web->request->top_request );
 
+    if ($self->path =~ m/\?/) {
+	# XXX: this only happens if we are redirect within region AND
+	# with continuation, which is already taken care of by the
+	# clone.
+	my ($path, $arg) = split(/\?/, $self->path, 2);
+	$subrequest->path( $path );
+	my %args = (map { split /=/, $_ } split /&/, $arg);
+	if ($args{'J:C'}) {
+	    $subrequest->continuation($args{'J:C'});
+	}
+    }
     # Remove all of the actions
     unless ($enable_actions) {
 	$_->active(0) for ($subrequest->actions);
@@ -320,21 +331,27 @@ sub render_as_subrequest {
     # While we're inside this region, have Mason to tack its response
     # onto a variable and not send headers when it does so
     #XXX TODO: There's gotta be a better way to localize it
-    my $region_content = '';
 
     # template-declare based regions are printing to stdout
     my $td_out = '';
-    Encode::_utf8_on($td_out);
-    open my $output_fh, '>>:utf8', \$td_out;
-    local *STDOUT = $output_fh;
+    {
+        open my $output_fh, '>>', \$td_out;
+        local *STDOUT = $output_fh;
 
-    local $main::DEBUG=1;
-    # Call into the dispatcher
-    Jifty->handler->dispatcher->handle_request;
+        local $main::DEBUG = 1;
+        # Call into the dispatcher
+        Jifty->handler->dispatcher->handle_request;
+    }
 
     Jifty->handler->mason->interp->out_method($orig_out);
 
-    $$out_method .= $td_out if length($td_out);
+    return unless length $td_out;
+
+    if ( my ($enc) = Jifty->handler->apache->content_type =~ /charset=([\w-]+)$/ ) {
+        $td_out = Encode::decode($enc, $td_out);
+    }
+    $$out_method .= $td_out;
+
     return;
 }
 
@@ -365,6 +382,36 @@ where to add new regions.
 sub get_element {
     my $self = shift;
     return "#region-" . $self->qualified_name . ' ' . join(' ', @_);
+}
+
+my $can_compile = eval 'use Jifty::View::Declare::Compile; 1' ? 1 : 0;
+
+=head2 client_cacheable
+
+Returns the client cacheable state of the regions path. Returns false if the template has not been marked as client cacheable. Otherwise it returns the string "static" or "action" based uon the cacheable attribute set on the template.
+
+=cut
+
+sub client_cacheable {
+    my $self = shift;
+    return unless $can_compile;
+
+    return Jifty::View::Declare::BaseClass->client_cacheable($self->path);
+}
+
+=head2 client_cache_content
+
+Returns the template as JavaScript code.
+
+=cut
+
+sub client_cache_content {
+    my $self = shift;
+    return unless $can_compile;
+
+    return Jifty::View::Declare::Compile->compile_to_js(
+        Jifty::View::Declare::BaseClass->_actual_td_code($self->path)
+    );
 }
 
 1;

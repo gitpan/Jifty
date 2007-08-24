@@ -6,6 +6,12 @@ use Scalar::Util ();
 
 __PACKAGE__->mk_accessors(qw(label parent sort_order link target escape_label class));
 
+=head1 NAME
+
+Jifty::Web::Menu - Handle the API for menu navigation
+
+=head1 METHODS
+
 =head2 new PARAMHASH
 
 Creates a new L<Jifty::Web::Menu> object.  Possible keys in the
@@ -69,6 +75,8 @@ sub url {
 
     $self->{url} = URI->new_abs($self->{url}, $self->parent->url . "/")->as_string
       if $self->parent and $self->parent->url;
+
+    $self->{url} =~ s!///!/! if $self->{url};
 
     return $self->{url};
 }
@@ -197,9 +205,7 @@ sub render_as_menu {
 
 Render this menu with html markup as an inline dropdown menu.
 
-
 =cut
-
 
 sub render_as_context_menu {
 	my $self = shift;
@@ -253,6 +259,50 @@ sub render_as_hierarchical_menu_item {
 
 }
 
+=head2 render_as_classical_menu
+
+Render this menu with html markup as old classical mason menu. 
+Currently renders one level of submenu, if it exists.
+
+=cut
+
+sub  render_as_classical_menu {
+	my $self = shift;
+    my @kids = $self->children;
+
+    Jifty->web->out( qq{<ul class="menu">});
+
+    for (@kids) {
+	    $_->_render_as_classical_menu_item();
+    }
+
+    Jifty->web->out(qq{</ul>});
+    '';
+}
+
+sub _render_as_classical_menu_item {
+    my $self = shift;
+    my %args = (
+        class => '',
+        @_
+    );
+    my @kids = $self->children;
+    Jifty->web->out( qq{<li} . ($self->active ? qq{ class="active"} : '' ) . qq{>} );
+    Jifty->web->out( $self->as_link );
+    if (@kids) {
+      Jifty->web->out( qq{<ul class="submenu">} );
+      for (@kids) {
+         Jifty->web->out( qq{<li} . ($_->active ? qq{ class="active"} : '' ) . qq{>} );
+         Jifty->web->out( $_->as_link );
+         Jifty->web->out("</li>");
+      }
+      Jifty->web->out(qq{</ul>});
+    }
+    Jifty->web->out(qq{</li>});
+    '';
+
+}
+
 =head2 render_as_yui_menubar
 
 Render menubar with YUI menu, suitable for an application's menu.
@@ -284,7 +334,8 @@ sub _render_as_yui_menu_item {
         . qq{ class="$class"><div class="bd"><ul>}
     );
     for (@kids) {
-        Jifty->web->out( qq{<li class="${class}item">});
+        Jifty->web->out( qq{<li class="${class}item }
+        . ($_->active? 'active' : '') . qq{">});
         Jifty->web->out( $_->as_link );
         $_->_render_as_yui_menu_item("yuimenu");
         Jifty->web->out( qq{</li>});

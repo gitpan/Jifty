@@ -94,7 +94,8 @@ sub jifty_root {
 =head2 share_root
 
 Returns the 'share' directory of the installed Jifty module.  This is
-currently only used to store the common Mason components.
+currently only used to store the common Mason components, CSS, and JS
+of Jifty and it's plugins.
 
 =cut
 
@@ -162,10 +163,6 @@ sub app_root {
                 and lc($try) ne lc(File::Spec->catdir($Config::Config{bin}, "jifty"))
                 and lc($try) ne lc(File::Spec->catdir($Config::Config{scriptdir}, "jifty")) )
             {
-                #warn "root: ", File::Spec->catdir(@root);
-                #warn "bin/jifty: ", File::Spec->catdir($Config::Config{bin}, "jifty");
-                #warn "scriptdir/jifty: ", File::Spec->catdir($Config::Config{scriptdir}, "jifty");
-                #warn "try: $try";
                 return $APP_ROOT = File::Spec->catdir(@root);
             }
             pop @root;
@@ -201,7 +198,7 @@ sub default_app_name {
 =head2 make_path PATH
 
 When handed a directory, creates that directory, starting as far up the 
-chain as necessary. (This is what 'mkdir -p' does in your shell)
+chain as necessary. (This is what 'mkdir -p' does in your shell).
 
 =cut
 
@@ -245,11 +242,15 @@ sub _require {
     if ($UNIVERSAL::require::ERROR) {
         my $error = $UNIVERSAL::require::ERROR;
         $error =~ s/ at .*?\n$//;
-        
-        unless ($args{'quiet'} and $error =~ /^Can't locate/) {
-            Jifty->log->error(sprintf("$error at %s line %d\n", (caller(1))[1,2]));
+        if ($args{'quiet'} and $error =~ /^Can't locate/) {
+            return 0;
         }
-        return 0;
+        elsif ( $UNIVERSAL::require::ERROR !~ /^Can't locate/) {
+            die $UNIVERSAL::require::ERROR;
+        } else {
+            Jifty->log->error(sprintf("$error at %s line %d\n", (caller(1))[1,2]));
+            return 0;
+        }
     }
 
     # If people forget the '1;' line in the dispatcher, don't eit them

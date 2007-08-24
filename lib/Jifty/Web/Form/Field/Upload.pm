@@ -28,10 +28,12 @@ sub render_widget {
     my $self  = shift;
     my $field = qq!<input type="file" name="@{[ $self->input_name ]}" !;
     $field .= $self->_widget_class();
-        $field .= qq!/>!;
+    $field .= $self->javascript;
+    $field .= qq!/>!;
     Jifty->web->out($field);
     '';
 }
+
 
 =head2 render_value
 
@@ -42,6 +44,17 @@ streamed to the browser.
 
 sub render_value {
     '';
+}
+
+=head2 classes
+
+Add 'upload' to the rest of the classes
+
+=cut
+
+sub classes {
+    my $self = shift;
+    return join(' ', 'upload', ($self->SUPER::classes));
 }
 
 1;

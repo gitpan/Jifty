@@ -23,7 +23,7 @@ use HTML::Mason::FakeApache;
 use Encode qw();
 
 use Class::Container;
-use base qw(Class::Container);
+use base qw(Jifty::View Class::Container);
 
 use HTML::Mason::MethodMaker
     ( read_write => [ qw( interp ) ] );
@@ -56,7 +56,7 @@ sub new {
 
     my %p = @_ || $package->config;
     my $self = $package->SUPER::new( request_class => 'HTML::Mason::Request::Jifty',
-                                     out_method => \&out_method,
+                                     out_method => $package->can('out_method'),
                                      %p );
     $self->interp->compiler->add_allowed_globals('$r');
     $self->interp->set_escape( h => \&escape_utf8 );
@@ -117,42 +117,6 @@ sub config {
     return %config;
 }
 
-=head2 out_method
-
-The default output method.  Sets the content-type to C<text/html;
-charset=utf-8> unless a content type has already been set, and then
-sends a header if need be.
-
-=cut
-
-sub out_method {
-    my $m = HTML::Mason::Request->instance;
-    my $r = Jifty->handler->apache;
-
-    $r->content_type || $r->content_type('text/html; charset=utf-8'); # Set up a default
-
-    if ($r->content_type =~ /charset=([\w-]+)$/ ) {
-        my $enc = $1;
-	if (lc($enc) =~ /utf-?8/) {
-            binmode *STDOUT, ":utf8";
-	}
-	else {
-            binmode *STDOUT, ":encoding($enc)";
-	}
-    }
-
-    unless ($r->http_header_sent or not $m->auto_send_headers) {
-        $r->send_http_header();
-    }
-
-    # We could perhaps install a new, faster out_method here that
-    # wouldn't have to keep checking whether headers have been
-    # sent and what the $r->method is.  That would require
-    # additions to the Request interface, though.
-    print STDOUT grep {defined} @_;
-}
-
-
 =head2 escape_utf8 SCALARREF
 
 Does a css-busting but minimalist escaping of whatever html you're passing in.
@@ -161,24 +125,24 @@ Does a css-busting but minimalist escaping of whatever html you're passing in.
 
 sub escape_utf8 {
     my $ref = shift;
-    my $val = $$ref;
-    use bytes;
     no warnings 'uninitialized';
-    $val =~ s/&/&#38;/g;
-    $val =~ s/</&lt;/g;
-    $val =~ s/>/&gt;/g;
-    $val =~ s/\(/&#40;/g;
-    $val =~ s/\)/&#41;/g;
-    $val =~ s/"/&#34;/g;
-    $val =~ s/'/&#39;/g;
-    $$ref = $val;
-    Encode::_utf8_on($$ref);
+    $$ref =~ s/&/&#38;/g;
+    $$ref =~ s/</&lt;/g;
+    $$ref =~ s/>/&gt;/g;
+    $$ref =~ s/\(/&#40;/g;
+    $$ref =~ s/\)/&#41;/g;
+    $$ref =~ s/"/&#34;/g;
+    $$ref =~ s/'/&#39;/g;
 }
-
 
 =head2 escape_uri SCALARREF
 
-Escapes URI component according to RFC2396
+Escapes in-place URI component according to RFC2396. Takes a reference to
+perl string.
+
+*Note* that octets would be treated as latin1 encoded sequence and converted
+to UTF-8 encoding and then escaped. So this sub always provide UTF-8 escaped
+string. See also L<Encode> for more info about converting.
 
 =cut
 
@@ -186,7 +150,6 @@ sub escape_uri {
     my $ref = shift;
     $$ref = Encode::encode_utf8($$ref);
     $$ref =~ s/([^a-zA-Z0-9_.!~*'()-])/uc sprintf("%%%02X", ord($1))/eg;
-    Encode::_utf8_on($$ref);
 }
 
 
@@ -220,13 +183,17 @@ sub show {
 }
 
 sub handle_comp {
-    my ($self, $comp) = (shift, shift);
+    my ($self, $comp, $args) = @_;
 
     # Set up the global
     my $r = Jifty->handler->apache;
     $self->interp->set_global('$r', $r);
 
-    my %args = $self->request_args($r);
+    # XXX FIXME This is a kludge to get use_mason_wrapper to work
+    $self->interp->set_global('$jifty_internal_request', 0);
+    $self->interp->set_global('$jifty_internal_request', 1) if defined $args;
+
+    my %args = $args ? %$args : $self->request_args($r);
 
     my @result;
     if (wantarray) {
@@ -286,7 +253,7 @@ L<Jifty::Request>).
 =cut
 
 sub auto_send_headers {
-    return not Jifty->web->request->is_subrequest;
+    Jifty::View->auto_send_headers;
 }
 
 =head2 exec

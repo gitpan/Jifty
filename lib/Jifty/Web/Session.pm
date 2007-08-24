@@ -5,12 +5,20 @@ package Jifty::Web::Session;
 use base qw/Jifty::Object/;
 use CGI::Cookie ();
 use DateTime ();
+use Storable ();
  
 =head1 NAME
 
 Jifty::Web::Session - A Jifty session handler
 
-=cut
+=head1 SYNOPSIS
+
+In your F<etc/config.yml> (optional):
+
+  framework:
+    Web:
+      # The default ($PORT is replaced by the port the app is running on)
+      SessionCookieName: JIFTY_SID_$PORT
 
 =head2 new
 
@@ -22,12 +30,13 @@ sub new {
     my $class = shift;
 
     my $session_class = Jifty->config->framework('Web')->{'SessionClass'};
+    my $cookie_name   = Jifty->config->framework('Web')->{'SessionCookieName'};
     if ($session_class and $class ne $session_class) {
         Jifty::Util->require( $session_class );
         return $session_class->new(@_);
     }
     else {
-        return bless {}, $class;
+        return bless { _cookie_name => $cookie_name }, $class;
     }
 }
 
@@ -66,6 +75,41 @@ sub load {
     $session->create( key_type => "session" ) unless $session->id;
     $self->_session($session);
     $self->{cache} = undef;
+}
+
+=head2 load_by_kv key => value 
+
+Load up the current session from the given (key, value) pair. If no matching
+session could be found, it will create a new session with the key, value set.
+Be sure that what you're loading by is unique. If you're loading a session
+based on, say, a timestamp, then you're asking for trouble.
+
+=cut
+
+sub load_by_kv {
+    my $self = shift;
+    my $k    = shift;
+    my $v    = shift;
+    my $session_id;
+
+    # tried doing this with load_by_cols but it never returned any rows
+    my $sessions = Jifty::Model::SessionCollection->new;
+    $sessions->limit( column => 'key_type', value => 'key' );
+    $sessions->limit( column => 'data_key', value => $k );
+
+    # XXX TODO: we store this data in a storable. so we now want to match on the storable version
+    # It would be so nice if Jifty::DBI could do this for us.
+    $Storable::Deparse = 1;
+    my $value = Storable::nfreeze(\$v);
+
+    $sessions->limit( column => 'value' => value => $value );
+
+    while ( my $row = $sessions->next ) {
+        $session_id = $row->session_id;
+        last;
+    }
+    $self->load($session_id);
+    $self->set( $k => $v ) if !$session_id;
 }
 
 sub _get_session_id_from_client {
@@ -276,8 +320,6 @@ sub set_cookie {
 
     my $cookie_name = $self->cookie_name;
     my %cookies     = CGI::Cookie->fetch();
-    my $session_id
-        = $cookies{$cookie_name} ? $cookies{$cookie_name}->value() : undef;
     my $cookie = new CGI::Cookie(
         -name    => $cookie_name,
         -value   => $self->id,
@@ -302,7 +344,9 @@ users, but varies according to the port the server is running on.
 
 sub cookie_name {
     my $self = shift;
-    my $cookie_name = "JIFTY_SID_" . ( $ENV{'SERVER_PORT'} || 'NOPORT' );
+    my $cookie_name = $self->{'_cookie_name'};
+    my $port = ( $ENV{'SERVER_PORT'} || 'NOPORT' );
+    $cookie_name =~ s/\$PORT/$port/g;
     return ($cookie_name);
 }
 

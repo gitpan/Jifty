@@ -1,5 +1,7 @@
-package Jifty::Plugin::REST::Dispatcher;
 use warnings;
+use strict;
+
+package Jifty::Plugin::REST::Dispatcher;
 
 
 
@@ -93,9 +95,25 @@ magical.
 =cut
 
 sub stringify {
+    # XXX: allow configuration to specify model fields that are to be
+    # expanded
     no warnings 'uninitialized';
-    my @r = map { defined $_ ? '' . $_ : undef } @_;
+    my @r = map { ref($_) && UNIVERSAL::isa($_, 'Jifty::Record')
+                             ? reference_to_data($_) :
+                  defined $_ ? '' . $_               : undef } @_;
     return wantarray ? @r : pop @r;
+}
+
+=head2 reference_to_data
+
+provides a saner output format for models than MyApp::Model::Foo=HASH(0x1800568)
+
+=cut
+
+sub reference_to_data {
+    my $obj = shift;
+    my ($model) = map { s/::/./g; $_ } ref($obj);
+    return { jifty_model_reference => 1, id => $obj->id, model => $model };
 }
 
 =head2 object_to_data OBJ
@@ -137,9 +155,12 @@ sub _record_to_data {
     my $record = shift;
     # We could use ->as_hash but this method avoids transforming refers_to
     # columns into JDBI objects
+
+    # XXX: maybe just test ->virtual?
     my %data   = map {
                     $_ => (UNIVERSAL::isa( $record->column( $_ )->refers_to,
-                                           'Jifty::DBI::Collection' )
+                                           'Jifty::DBI::Collection' ) ||
+                           $record->column($_)->container
                              ? undef
                              : stringify( $record->_value( $_ ) ) )
                  } $record->readable_attributes;
@@ -194,6 +215,11 @@ sub outs {
     elsif ($accept =~ /j(?:ava)?s|ecmascript/i) {
         $apache->header_out('Content-Type' => 'application/javascript; charset=UTF-8');
         $apache->send_http_header;
+	# XXX: temporary hack to fix _() that aren't respected by json dumper
+	for (values %{$_[0]}) {
+	    $_->{label} = "$_->{label}" if exists $_->{label} && defined ref $_->{label};
+	    $_->{hints} = "$_->{hints}" if exists $_->{hints} && defined ref $_->{hints};
+	}
         print 'var $_ = ', Jifty::JSON::objToJson( @_, { singlequote => 1 } );
     }
     elsif ($accept =~ qr{^(?:application/x-)?(?:perl|pl)$}i) {
@@ -571,6 +597,7 @@ our @param_attrs = qw(
     label
     hints
     mandatory
+    ajax_validates
     length
 );
 

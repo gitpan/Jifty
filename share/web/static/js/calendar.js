@@ -67,7 +67,7 @@ Jifty.Calendar = {
         cal.cfg.fireQueue();
         
         cal.selectEvent.subscribe( Jifty.Calendar.handleSelect, { event: ev, calendar: cal }, true );
-        cal.changePageEvent.subscribe( function() { Jifty.Calendar._blurredCalendar = null; }, null, false );
+        cal.changePageEvent.subscribe( function() { setTimeout( function() { Jifty.Calendar._blurredCalendar = null; }, 75 ) }, null, false );
         
         cal.render();
 
@@ -81,6 +81,12 @@ Jifty.Calendar = {
         var year  = args[0][0][0],
             month = args[0][0][1],
             day   = args[0][0][2];
+
+        if (month < 10)
+            month = "0" + month;
+
+        if (day < 10)
+            day = "0" + day;
 
         var input = obj.event.target;
         

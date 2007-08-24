@@ -34,13 +34,11 @@ column 'created_on' =>
   is immutable,
   default is defer { DateTime->now },
   filters are 'Jifty::DBI::Filter::DateTime';
+column 'uuid' => is UUID;
 };
 
 
 # Your model-specific methods go here.
-sub current_user_can {
-    return 1;
-}
 
 1;
 

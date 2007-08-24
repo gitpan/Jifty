@@ -14,7 +14,7 @@ our ($MIME,$MAGIC);
 
 =head1 NAME
 
-Jifty::View::Static::Handler
+Jifty::View::Static::Handler - Jifty view handler for static files
 
 head1 DESCRIPTION
 
@@ -24,7 +24,7 @@ When fully operational, it will use an algorithm along the lines of the followin
 
 * Static files are served out of a separate root
 * If static files go through apache:
-    * How do we merge together the two static roots?
+    * How do we merge together the N static roots?
 * If static files go through Jifty::Handler
     * We need a flag to allow them to go through the dispatcher, too
     * return "True" (304) for if-modified-since
@@ -50,17 +50,49 @@ Create a new static file handler. Likely, only the C<Jifty::Handler> needs to do
 =cut
 sub new {
     my $class = shift;
-    my $self = {};
-    bless $self, $class;
+    
+    my @roots = (Jifty->config->framework('Web')->{StaticRoot});
+    for my $plugin ( Jifty->plugins ) {
+        my $root = $plugin->static_root;
+        if ( -d $root and -r $root ) {
+            push @roots, $root;
+            Jifty->log->debug( "Plugin @{[ref($plugin)]} static root added: (@{[$root ||'']})");
+        }
+    }
+    push @roots, (Jifty->config->framework('Web')->{DefaultStaticRoot});
+
+    return bless { roots => \@roots }, $class;
 }
 
+=head2 roots
 
-=head2 handle_request $path
+Returns all the static roots the handler will search
+
+=cut
+
+sub roots {
+    my $self = shift;
+    return wantarray ? @{$self->{roots}} : $self->{roots};
+}
+
+=head2 show $path
 
 Handle a request for C<$path>. If we can't find a static file of that name, return undef.
 
 
 =cut
+
+=head2 handle_request $path
+
+
+An alias for L</show>
+
+=cut
+
+
+sub show {
+    shift->handle_request(@_);
+}
 
 sub handle_request {
     my $self = shift;
@@ -113,17 +145,24 @@ path.
 
 =cut
 
+=head2 template_exists $path
+
+An alias for L</file_path>.
+
+=cut
+
+sub template_exists {
+    shift->file_path(@_);
+}
+
 sub file_path {
     my $self    = shift;
     my $file    = shift;
-    my @options = (Jifty->config->framework('Web')->{StaticRoot});
-    push @options, grep { -d $_ && -r $_ } map {$_->static_root} Jifty->plugins;
-    push @options, (Jifty->config->framework('Web')->{DefaultStaticRoot});
 
     # Chomp a leading "/static" - should this be configurable?
     $file =~ s/^\/*?static//; 
 
-    foreach my $path (@options) {
+    foreach my $path ( $self->roots ) {
         my $abspath = Jifty::Util->absolute_path( File::Spec->catdir($path,$file ));
         # If the user is trying to request something outside our static root, 
         # decline the request

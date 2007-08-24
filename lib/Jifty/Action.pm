@@ -36,7 +36,7 @@ control how form elements interact with the underlying model.
 See also L<Jifty::Action::Record> for data-oriented actions, 
 L<Jifty::Result> for how to return values from actions.
 
-See L<Jifty::Param::Schema> for more details on the declarative 
+See L<Jifty::Param::Schema> for more details on the declarative
 syntax.
 
 See L<Jifty::Manual::Actions> for examples of using actions.
@@ -57,7 +57,8 @@ These common methods provide the basic guts for the action.
 
 B<Do not call this directly>; always go through C<< Jifty->web->new_action >>! 
 
-This method constructs a new action. Subclasses who need do custom initialization should start with:
+This method constructs a new action. Subclasses who need do custom
+initialization should start with:
 
     my $class = shift;
     my $self = $class->SUPER::new(@_)
@@ -81,29 +82,20 @@ Lower numbers occur before higher numbers.  Defaults to 0.
 =item arguments
 
 A hash reference of default values for the
-L<arguments|Jifty::Manual::Glossary/argument> of the action.  Defaults to
-none.
+L<arguments|Jifty::Manual::Glossary/argument> of the action.  Defaults
+to none.
 
 =item sticky_on_failure
 
 A boolean value that determines if the form fields are
-L<sticky|Jifty::Manual::Glossary/sticky> when the action fails.  Defaults to
-true.
+L<sticky|Jifty::Manual::Glossary/sticky> when the action fails.
+Defaults to true.
 
 =item sticky_on_success
 
 A boolean value that determines if the form fields are
-L<sticky|Jifty::Manual::Glossary/sticky> when the action succeeds.  Defaults
-to false.
-
-=begin private
-
-=item request_arguments
-
-A hashref of arguments passed in as part of the
-L<Jifty::Request>. Internal use only.
-
-=end private
+L<sticky|Jifty::Manual::Glossary/sticky> when the action succeeds.
+Defaults to false.
 
 =back
 
@@ -121,30 +113,65 @@ sub new {
         current_user => undef,
         @_);
 
+    # Setup current user according to parameter or pickup the actual
     if ($args{'current_user'}) {
         $self->current_user($args{current_user});
     } else {
         $self->_get_current_user();
     }
 
-    if ($args{'moniker'}) {
-        $self->moniker($args{'moniker'});
-    } else {
-        $self->moniker($self->_generate_moniker);
+    # If given a moniker, validate/sanitize it
+    if ( $args{'moniker'} ) {
+
+        # XXX Should this be pickier about sanitized monikers?
+
+        # Monkiers must not contain semi-colons
+        if ( $args{'moniker'} =~ /[\;]/ ) {
+
+            # Replace the semis with underscores and warn
+            $args{'moniker'} =~ s/[\;]/_/g;
+            $self->log->warn(
+                "Moniker @{[$args{'moniker'}]} contains invalid characters. It should not contain any ';' characters. "
+                    . "It has been autocorrected, but you should correct your code"
+            );
+        }
+
+        # Monikers must not start with a digit
+        if ( $args{'moniker'} =~ /^\d/ ) {
+
+            # Stick "fixup-" to the front and warn
+            $args{'moniker'} = "fixup-" . $args{'moniker'};
+            $self->log->warn(
+                "Moniker @{[$args{'moniker'}]} contains invalid characters. It can not begin with a digit. "
+                    . "It has been autocorrected, but you should correct your code"
+            );
+
+        }
     }
+
+    # Setup the moniker and run order
+    $self->moniker($args{'moniker'} || $self->_generate_moniker);
     $self->order($args{'order'});
 
+    # Fetch any arguments from a passed in request
+    my $action_in_request = Jifty->web->request->action( $self->moniker );
+    if ( $action_in_request and $action_in_request->arguments ) {
+        $args{'request_arguments'} = $action_in_request->arguments;
+    }
+
+    # Setup the argument values with the new_action arguments taking precedent
     $self->argument_values( { %{ $args{'request_arguments' } }, %{ $args{'arguments'} } } );
 
-    # Keep track of whether arguments came from the request, or were
-    # programmatically set elsewhere
+    # Track how an argument was set, again new_action args taking precedent
     $self->values_from_request({});
     $self->values_from_request->{$_} = 1 for keys %{ $args{'request_arguments' } };
     $self->values_from_request->{$_} = 0 for keys %{ $args{'arguments' } };
     
+    # Place this actions result in the response result if already processed
     $self->result(Jifty->web->response->result($self->moniker) || Jifty::Result->new);
     $self->result->action_class(ref($self));
 
+    # Remember stickiness
     $self->sticky_on_success($args{sticky_on_success});
     $self->sticky_on_failure($args{sticky_on_failure});
 
@@ -153,11 +180,12 @@ sub new {
 
 =head2 _generate_moniker 
 
-Construct a moniker for a new (or soon-to-be-constructed) action that did not have
-an explicit moniker specified.  The algorithm is simple: We snapshot the call stack,
-prefix it with the action class, and then append it with an per-request autoincrement
-counter in case the same class/stack is encountered twice, which can happen if the
-programmer placed a C<new_action> call inside a loop.
+Construct a moniker for a new (or soon-to-be-constructed) action that
+did not have an explicit moniker specified.  The algorithm is simple:
+We snapshot the call stack, prefix it with the action class, and then
+append it with an per-request autoincrement counter in case the same
+class/stack is encountered twice, which can happen if the programmer
+placed a C<new_action> call inside a loop.
 
 Monikers generated this way are guaranteed to work across requests.
 
@@ -166,23 +194,45 @@ Monikers generated this way are guaranteed to work across requests.
 sub _generate_moniker {
     my $self = shift;
 
+    # We use Digest::MD5 to generate the moniker
     use Digest::MD5 qw(md5_hex);
+
+    # Use information from the call stack as the data for the digest 
     my $frame = 1;
     my @stack = (ref($self) || $self);
     while (my ($pkg, $filename, $line) = caller($frame++)) {
         push @stack, $pkg, $filename, $line;
     }
 
-    # Increment the per-request moniker digest counter, for the case of looped action generation
+    # Generate the digest that forms the basis of the auto-moniker
     my $digest = md5_hex("@stack");
+
+    # Increment the per-request moniker digest counter, for the case of looped action generation
     # We should always have a stash. but if we don't, fake something up
     # (some hiveminder tests create actions outside of a Jifty::Web)
-    my $serial = Jifty->handler->stash ? ++(Jifty->handler->stash->{monikers}{$digest}) : rand();
+    # Multiple things happening here that need to be noted:
+    #  
+    #  1. We have a per-request moniker digest counter, which handles the
+    #     highly unlikely circumstance that the same digest were hit twice
+    #     within the same request.
+    #
+    #  2. We should always have a stash, but sometimes we don't. (Specifically,
+    #     some Hiveminder tests create actions outside of a Jifty::Web, which
+    #     don't.) In that case, add more random data at the end and cross our
+    #     fingers that we don't hit that one in a billion (or actually one in a
+    #     significantly larger than a billion odds here).
+
+    # Create a serial number that prevents collisions within a request
+    my $serial = Jifty->handler->stash 
+        ? ++(Jifty->handler->stash->{monikers}{$digest}) 
+        : rand();
+
+    # Build the actual moniker from digest + serial
     my $moniker = "auto-$digest-$serial";
     $self->log->debug("Generating moniker $moniker from stack for $self");
+
     return $moniker;
 }
-
 
 =head2 arguments
 
@@ -238,6 +288,8 @@ C<take_action> instead.
 sub run {
     my $self = shift;
     $self->log->debug("Running action ".ref($self) . " " .$self->moniker);
+
+    # We've already had a validation failure. STOP!
     unless ($self->result->success) {
         $self->log->debug("Not taking action, as it doesn't validate");
 
@@ -254,15 +306,19 @@ sub run {
 
         return;
     }
+
+    # Made it past validation, continue...
     $self->log->debug("Taking action ".ref($self) . " " .$self->moniker);
+
+    # Take the action (user-defined)
     my $ret = $self->take_action;
     $self->log->debug("Result: ".(defined $ret ? $ret : "(undef)"));
     
+    # Perform post action clean-up (user-defined)
     $self->cleanup;
 }
 
 =head2 validate
-
 
 Checks authorization with L</check_authorization>, calls C</setup>,
 canonicalizes and validates each argument that was submitted, but
@@ -291,7 +347,6 @@ By default, always returns true.
 
 sub check_authorization { 1; }
 
-
 =head2 setup
 
 C<setup> is expected to return a true value, or
@@ -302,7 +357,6 @@ By default, does nothing.
 =cut
 
 sub setup { 1; }
-
 
 =head2 take_action
 
@@ -317,7 +371,6 @@ should be using the L</result> object to store a result).
 =cut
 
 sub take_action { 1; }
-
 
 =head2 cleanup
 
@@ -344,13 +397,15 @@ sub argument_value {
     my $self = shift;
     my $arg = shift;
 
+    # Not only get it, but set it
     if(@_) {
         $self->values_from_request->{$arg} = 0;
         $self->argument_values->{$arg} = shift;
     }
+
+    # Get it
     return $self->argument_values->{$arg};
 }
-
 
 =head2 has_argument ARGUMENT
 
@@ -367,7 +422,6 @@ sub has_argument {
     return exists $self->argument_values->{$arg};
 }
 
-
 =head2 form_field ARGUMENT
 
 Returns a L<Jifty::Web::Form::Field> object for this argument.  If
@@ -376,14 +430,15 @@ C<ARGUMENT>, returns C<undef>.
 
 =cut
 
-
 sub form_field {
     my $self = shift;
     my $arg_name = shift;
 
+    # Determine whether we want reads or write on this field
     my $mode = $self->arguments->{$arg_name}{'render_mode'};
     $mode = 'update' unless $mode && $mode eq 'read';
 
+    # Return the widget
     $self->_form_widget( argument => $arg_name,
                          render_mode => $mode,
                          @_);
@@ -402,6 +457,8 @@ returns C<undef>.
 sub form_value {
     my $self = shift;
     my $arg_name = shift;
+
+    # Return the widget, but in read mode
     $self->_form_widget( argument => $arg_name,
                          render_mode => 'read',
                          @_);
@@ -415,17 +472,17 @@ sub _form_widget {
                  render_mode => 'update',
                  @_);
 
+    # Setup the field name
     my $field = $args{'argument'};
-    
     my $arg_name = $field. '!!' .$args{'render_mode'};
 
+    # This particular field hasn't been added to the form yet
     if ( not exists $self->{_private_form_fields_hash}{$arg_name} ) {
-
         my $field_info = $self->arguments->{$field};
-
         my $sticky = 0;
+
         # Check stickiness iff the values came from the request
-        if(Jifty->web->response->result($self->moniker)) {
+        if (Jifty->web->response->result($self->moniker)) {
             $sticky = 1 if $self->sticky_on_failure and $self->result->failure;
             $sticky = 1 if $self->sticky_on_success and $self->result->success;
         }
@@ -433,7 +490,9 @@ sub _form_widget {
         # $sticky can be overrided per-parameter
         $sticky = $field_info->{sticky} if defined $field_info->{sticky};
 
+        # It is in fact a form field for this action
         if ($field_info) {
+            
             # form_fields overrides stickiness of what the user last entered.
             my $default_value;
             $default_value = $field_info->{'default_value'}
@@ -441,6 +500,7 @@ sub _form_widget {
             $default_value = $self->argument_value($field)
               if $self->has_argument($field) && !$self->values_from_request->{$field};
 
+            # Add the form field to the cache
             $self->{_private_form_fields_hash}{$arg_name}
                 = Jifty::Web::Form::Field->new(
                 %$field_info,
@@ -453,14 +513,22 @@ sub _form_widget {
                 %args
                 );
 
-        }    # else $field remains undef
+        }    
+
+        # The field name is not known by this action
         else {
             Jifty->log->warn("$arg_name isn't a valid field for $self");
         }
-    } elsif ( $args{render_as} ) {
+    } 
+    
+    # It has been cached, but render_as is explicitly set
+    elsif ( $args{render_as} ) {
+
+        # Rebless the form control as something else
         bless $self->{_private_form_fields_hash}{$arg_name},
           "Jifty::Web::Form::Field::$args{render_as}";
     }
+
     return $self->{_private_form_fields_hash}{$arg_name};
 }
 
@@ -474,6 +542,8 @@ as a hidden form field, with the default value C<VALUE>.
 sub hidden {
     my $self = shift;
     my ($arg, $value, @other) = @_;
+
+    # Return the control as a hidden widget
     $self->form_field( $arg, render_as => 'hidden', default_value => $value, @other);
 }
 
@@ -503,16 +573,16 @@ is needed.
 
 sub register {
     my $self = shift;
+
+    # Add information about the action to the form
     Jifty->web->out( qq!<div class="hidden"><input type="hidden"! .
                        qq! name="@{[$self->register_name]}"! .
                        qq! id="@{[$self->register_name]}"! .
                        qq! value="@{[ref($self)]}"! .
                        qq! /></div>\n! );
 
-
-
+    # Add all the default values as hidden fields to the form
     my %args = %{$self->arguments};
-
     while ( my ( $name, $info ) = each %args ) {
         next unless $info->{'constructor'};
         Jifty::Web::Form::Field->new(
@@ -524,6 +594,7 @@ sub register {
             render_as     => 'Hidden'
         )->render();
     }
+
     return '';
 }
 
@@ -537,6 +608,7 @@ Returns nothing.
 sub render_errors {
     my $self = shift;
     
+    # Render the span that contians errors
     if (defined $self->result->error) {
         # XXX TODO FIXME escape?
         Jifty->web->out( '<div class="form_errors">'
@@ -567,11 +639,17 @@ sub button {
                  register  => 0,
                  @_);
 
+    # The user has asked to register the action while we're at it
     if ($args{register}) {
+
         # If they ask us to register the action, do so
         Jifty->web->form->register_action( $self );
         Jifty->web->form->print_action_registration($self->moniker);
-    } elsif ( not Jifty->web->form->printed_actions->{ $self->moniker } ) {
+    } 
+    
+    # Not registered yet, so we need to place registration in the button itself
+    elsif ( not Jifty->web->form->printed_actions->{ $self->moniker } ) {
+
         # Otherwise, if we're not registered yet, do it in the button
         my $arguments = $self->arguments;
         $args{parameters}{ $self->register_name } = ref $self;
@@ -579,9 +657,12 @@ sub button {
             = $self->argument_value($_) || $arguments->{$_}->{'default_value'}
             for grep { $arguments->{$_}{constructor} } keys %{ $arguments };
     }
+
+    # Add whatever additional arguments they've requested to the button
     $args{parameters}{$self->form_field_name($_)} = $args{arguments}{$_}
       for keys %{$args{arguments}};
 
+    # Render us a button
     Jifty->web->link(%args);
 }
 
@@ -598,15 +679,17 @@ to return to if there is no current continuation.
 sub return {
     my $self = shift;
     my %args = (@_);
+
+    # Fetch the current continuation or build a new one
     my $continuation = Jifty->web->request->continuation;
     if (not $continuation and $args{to}) {
         $continuation = Jifty::Continuation->new(request => Jifty::Request->new(path => $args{to}));
     }
     delete $args{to};
 
+    # Render a button that will call the continuation
     $self->button( call => $continuation, %args );
 }
-
 
 =head1 NAMING METHODS
 
@@ -625,7 +708,7 @@ sub register_name {
     return 'J:A-' . (defined $self->order ? $self->order . "-" : "") .$self->moniker;
 }
 
-
+# prefixes a fieldname with a given prefix and follows it with the moniker
 sub _prefix_field {
     my $self = shift;
     my ($field_name, $prefix) = @_;
@@ -707,7 +790,6 @@ sub canonicalization_note_div_id {
   return 'canonicalization_note-' . $self->form_field_name($field_name);
 }
 
-
 =head1 VALIDATION METHODS
 
 =head2 argument_names
@@ -716,7 +798,6 @@ Returns the list of argument names.  This information is extracted
 from L</arguments>.
 
 =cut
-
 
 sub argument_names {
     my $self      = shift;
@@ -729,7 +810,6 @@ sub argument_names {
             } keys %arguments
     );
 }
-
 
 =head2 _canonicalize_arguments
 
@@ -747,6 +827,7 @@ described by L</arguments>.
 sub _canonicalize_arguments {
     my $self   = shift;
 
+    # For each, canonicalize them all
     $self->_canonicalize_argument($_)
       for $self->argument_names;
 }
@@ -777,6 +858,7 @@ sub _canonicalize_argument {
     my $self  = shift;
     my $field = shift;
 
+    # Setup some variables
     my $field_info = $self->arguments->{$field};
     my $value = $self->argument_value($field);
     my $default_method = 'canonicalize_' . $field;
@@ -784,20 +866,31 @@ sub _canonicalize_argument {
     # XXX TODO: Do we really want to skip undef values?
     return unless defined $value;
 
+    # Do we have a valid canonicalizer for this field?
     if ( $field_info->{canonicalizer}
-        and defined &{ $field_info->{canonicalizer} } )
-    {
+        and defined &{ $field_info->{canonicalizer} } ) {
+        
+        # Run it, sucka
         $value = $field_info->{canonicalizer}->( $self, $value );
-    } elsif ( $self->can($default_method) ) {
+    } 
+    
+    # How about a method named canonicalize_$field?
+    elsif ( $self->can($default_method) ) {
+
+        # Run that, foo'
         $value = $self->$default_method( $value );
-    } elsif (   defined( $field_info->{render_as} )
+    } 
+    
+    # Or is it a date?
+    elsif (   defined( $field_info->{render_as} )
              && lc( $field_info->{render_as} ) eq 'date') {
+
+        # Use the default date canonicalizer, Mr. T!
         $value = $self->_canonicalize_date( $value );
     }
 
     $self->argument_value($field => $value);
 }
-
 
 =head2 _canonicalize_date DATE
 
@@ -826,9 +919,9 @@ L</_validate_argument> for each field described by L</arguments>
 sub _validate_arguments {
     my $self   = shift;
     
+    # Validate each argument
     $self->_validate_argument($_)
       for $self->argument_names;
-
 
     return $self->result->success;
 }
@@ -851,15 +944,19 @@ sub _validate_argument {
     my $self  = shift;
     my $field = shift;
 
+    # Do nothing if we don't have a field name
     return unless $field;
     
     $self->log->debug(" validating argument $field");
 
+    # Do nothing if we don't know what that field is
     my $field_info = $self->arguments->{$field};
     return unless $field_info;
 
+    # Grab the current value
     my $value = $self->argument_value($field);
     
+    # When it isn't even given, check if it's mandatory and whine about it
     if ( !defined $value || !length $value ) {
         if ( $field_info->{mandatory} ) {
             return $self->validation_error( $field => _("You need to fill in this field") );
@@ -870,9 +967,9 @@ sub _validate_argument {
     # XXX TODO this should be a validate_valid_values sub
     if ( $value && $field_info->{valid_values} ) {
 
+        # If you're not on the list, you can't come to the party
         unless ( grep $_->{'value'} eq $value,
-            @{ $self->valid_values($field) } )
-        {
+            @{ $self->valid_values($field) } ) {
 
             return $self->validation_error(
                 $field => _("That doesn't look like a correct value") );
@@ -881,6 +978,7 @@ sub _validate_argument {
    # ... but still check through a validator function even if it's in the list
     }
 
+    # the validator method name is validate_$field
     my $default_validator = 'validate_' . $field;
 
     # Finally, fall back to running a validator sub
@@ -890,6 +988,7 @@ sub _validate_argument {
         return $field_info->{validator}->( $self, $value );
     }
 
+    # Check to see if it's the validate_$field method instead and use that
     elsif ( $self->can($default_validator) ) {
         return $self->$default_validator( $value );
     }
@@ -928,17 +1027,22 @@ sub _autocomplete_argument {
     my $field_info = $self->arguments->{$field};
     my $value = $self->argument_value($field);
 
+    # the method is autocomplete_$field
     my $default_autocomplete = 'autocomplete_' . $field;
 
+    # If it's defined on the field, use that autocompleter
     if ( $field_info->{autocompleter}  )
     {
         return $field_info->{autocompleter}->( $self, $value );
     }
 
+    # If it's a method on the class, use that autocompleter
     elsif ( $self->can($default_autocomplete) ) {
         return $self->$default_autocomplete( $value );
     }
 
+    # Otherwise, return zip-zero-notta
+    return();
 }
 
 =head2 valid_values ARGUMENT
@@ -985,18 +1089,32 @@ sub _values_for_field {
     my $field = shift;
     my $type = shift;
 
+    # Check for $type_values (valid_values or available_values)
     my $vv_orig = $self->arguments->{$field}{$type .'_values'};
     local $@;
+
+    # Try making that into a list or just return it
     my @values = eval { @$vv_orig } or return $vv_orig;
 
+    # This is a final return list
     my $vv = [];
 
+    # For each value in the *_values list
     for my $v (@values) {
+
+        # If it's a hash, it may be a collection spec or a display/value
         if ( ref $v eq 'HASH' ) {
+
+            # Check for a collection spec
             if ( $v->{'collection'} ) {
+
+                # Load the display_from/value_from paramters
                 my $disp = $v->{'display_from'};
                 my $val  = $v->{'value_from'};
+
                 # XXX TODO: wrap this in an eval?
+
+                # Fetch all the record from the given collection and keep'em
                 push @$vv, map {
                     {
                         display => ( $_->$disp() || '' ),
@@ -1005,12 +1123,16 @@ sub _values_for_field {
                 } grep {$_->check_read_rights} @{ $v->{'collection'}->items_array_ref };
 
             }
+
+            # Otherwise, push on the display/value hash
             else {
 
                 # assume it's already display/value
                 push @$vv, $v;
             }
         }
+
+        # Otherwise, treat plain string both display and value
         else {
 
             # just a string
@@ -1105,6 +1227,27 @@ sub canonicalization_note {
 
 }
 
+=head2 deny REASON
+
+When access to an action is denied by L<Jifty::API::is_allowed> 
+the request handler calls this with a message.
+
+This should mark the action as failed and store the message
+but may also want to do other things (such as providing a nicer message
+or logging somewhere other than the jifty logs)
+
+=cut
+
+sub deny {
+    my $self = shift;
+    my $message = shift||'';
+
+    $self->result->failure(1);
+    $self->result->message($message);
+
+    return;
+}
+
 =head2 autogenerated
 
 Autogenerated Actions will always return true when this method is called. 
@@ -1114,9 +1257,13 @@ Autogenerated Actions will always return true when this method is called.
 
 =head2 Canonicalization
 
-If you wish to have the data in a field normalized into a particular format (such as changing a date into YYYY-MM-DD format, adding commas to numbers, capitalizing words, or whatever you need) you can do so using a canonicalizer. 
+If you wish to have the data in a field normalized into a particular
+format (such as changing a date into YYYY-MM-DD format, adding commas
+to numbers, capitalizing words, or whatever you need) you can do so
+using a canonicalizer.
 
-This is just a method titled C<canonicalize_FIELD> where C<FIELD> is the name of the field be normalized. Here is an example:
+This is just a method titled C<canonicalize_FIELD> where C<FIELD> is
+the name of the field be normalized. Here is an example:
 
   sub canonicalize_foo {
       my ($self, $value) = @_;
@@ -1127,21 +1274,28 @@ This is just a method titled C<canonicalize_FIELD> where C<FIELD> is the name of
       return $normal_form;
   }
 
-In this case, all values in the "foo" field will be changed into lower case.
+In this case, all values in the "foo" field will be changed into lower
+case.
 
-While doing this you might also want to call the L</canonicalization_note> to inform the client of the modification:
+While doing this you might also want to call the
+L</canonicalization_note> to inform the client of the modification:
 
   my $normal_form = lc($value);
   $self->canonicalization_note( 
       foo => _('Foo values are always in lowercase.'));
 
-If the "foo" field has "ajax canoncalizes" set in the action schema, then this process will be performed automatically as the form is being filled without reloading the page.
+If the "foo" field has "ajax canoncalizes" set in the action schema,
+then this process will be performed automatically as the form is being
+filled without reloading the page.
 
 =head2 Validation
 
-If a value must follow a certain format, you can provide a validation method for fields to make sure that no value enters the database until it is in a valid form.
+If a value must follow a certain format, you can provide a validation
+method for fields to make sure that no value enters the database until
+it is in a valid form.
 
-A validation method is one named C<validate_FIELD> where C<FIELD> is the name of the field being checked. Here is an example:
+A validation method is one named C<validate_FIELD> where C<FIELD> is
+the name of the field being checked. Here is an example:
 
   sub validate_foo {
       my ($self, $value) = @_;
@@ -1161,15 +1315,26 @@ A validation method is one named C<validate_FIELD> where C<FIELD> is the name of
       return 1;
   }
 
-Here the "foo" field should not contain uppercase letters and must not contain the characters '-', '*', '+', or '?'. You can use L</validation_error> and L</validation_warning> to return the results of your validation to the user or simply return 1 to indicate a valid value.
+Here the "foo" field should not contain uppercase letters and must not
+contain the characters '-', '*', '+', or '?'. You can use
+L</validation_error> and L</validation_warning> to return the results
+of your validation to the user or simply return 1 to indicate a valid
+value.
 
-If you just have a list of valid values, you may want to use the C<valid_values> schema parameter to perform this task instead.
+If you just have a list of valid values, you may want to use the
+C<valid_values> schema parameter to perform this task instead.
 
 =head2 Autocompletion
 
-Autocompletion provides a way of suggesting choices to the client based upon partial data entry. This doesn't necessarily force the client to use one of the choices given but gives hints in an application specific way.
+Autocompletion provides a way of suggesting choices to the client
+based upon partial data entry. This doesn't necessarily force the
+client to use one of the choices given but gives hints in an
+application specific way.
 
-To create an autocompletion field, you implement a method named C<autocomplete_FIELD> where C<FIELD> is the field to autocomplete. This is generally done with fields rendered as 'Text'. Here is an example:
+To create an autocompletion field, you implement a method named
+C<autocomplete_FIELD> where C<FIELD> is the field to
+autocomplete. This is generally done with fields rendered as
+'Text'. Here is an example:
 
   sub autocomplete_foo {
       my ($self, $value) = @_;
@@ -1188,16 +1353,25 @@ To create an autocompletion field, you implement a method named C<autocomplete_F
       return map { $_->name } @{ $foos->items_array_ref };
   }
 
-In this example, the "foo" field is autocompleted from names matched from the C<MyApp::Model::Foo> table. The match, in this case, matches any substring found in the database. I could have matched any item that starts with the string, ends with the string, matches other fields than the one returned, etc. It's up to you to decide.
+In this example, the "foo" field is autocompleted from names matched
+from the C<MyApp::Model::Foo> table. The match, in this case, matches
+any substring found in the database. I could have matched any item
+that starts with the string, ends with the string, matches other
+fields than the one returned, etc. It's up to you to decide.
 
-Note also that I have untainted the value coming in to make sure a malicious user doesn't get anyway. You should always perform a check like this when data is coming in from an outside source.
+Note also that I have untainted the value coming in to make sure a
+malicious user doesn't get anyway. You should always perform a check
+like this when data is coming in from an outside source.
 
-If you need a more complicated solution, you can return the autocompletion values as a list of hash references containing the keys C<value> and (optionally) C<label>:
+If you need a more complicated solution, you can return the
+autocompletion values as a list of hash references containing the keys
+C<value> and (optionally) C<label>:
 
   return map { { value => $_->name, label => $_->label } }
             @{ $foos->items_array_ref };
 
-In this case, the labels will be shown to the client, but the selected value would be returned to your application.
+In this case, the labels will be shown to the client, but the selected
+value would be returned to your application.
 
 =cut
 
@@ -1205,7 +1379,8 @@ sub autogenerated {0}
 
 =head1 SEE ALSO
 
-L<Jifty>, L<Jifty::API>, L<Jifty::Action::Record>, L<Jifty::Result>, L<Jifty::Param::Schema>, L<Jifty::Manual::Actions>
+L<Jifty>, L<Jifty::API>, L<Jifty::Action::Record>, L<Jifty::Result>,
+L<Jifty::Param::Schema>, L<Jifty::Manual::Actions>
 
 =head1 LICENSE
 

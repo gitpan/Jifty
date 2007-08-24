@@ -5,6 +5,12 @@ package Jifty::Web::Form::Field::Select;
 
 use base qw/Jifty::Web::Form::Field/;
 
+=head1 NAME
+
+Jifty::Web::Form::Field::Select - Add a list/popup menu control to your forms
+
+=head1 METHODS
+
 =head2 render_widget
 
 Renders the select widget.
@@ -17,6 +23,7 @@ sub render_widget {
     $field .= qq! name="@{[ $self->input_name ]}"!;
     $field .= qq! id="@{[ $self->element_id ]}"!;
     $field .= $self->_widget_class;
+    $field .= $self->javascript;
     $field .= qq!      >\n!;
     for my $opt (@{ $self->action->available_values($self->name) }) {
         my $display = $opt->{'display'};

@@ -8,6 +8,7 @@ requires('Calendar::Simple');
 requires('Class::Accessor'); # Class::Accessor::Fast
 requires('Class::Container');
 requires('Class::Data::Inheritable');
+requires('Class::Trigger' => '0.12');
 requires('CGI' => '3.19');
 requires('CGI::Cookie::Splitter');
 requires('Crypt::CBC');
@@ -24,6 +25,8 @@ requires('Email::LocalDelivery');
 requires('Email::MIME');
 requires('Email::MIME::Creator');
 requires('Email::MIME::ContentType');
+requires('Email::MIME::CreateHTML');
+requires('Email::MIME::Modifier');
 requires('Email::Send' => '1.99_01'); # Email::Send::Jifty::Test
 requires('Email::Simple');
 requires('Email::Simple::Creator');
@@ -42,29 +45,33 @@ requires('HTTP::Server::Simple::Recorder');
 requires('Hash::Merge');
 requires('Hook::LexWrap');
 requires('IPC::PubSub' => '0.23' );
-requires('Jifty::DBI' => '0.40' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
+requires('IPC::Run3');
+requires('Jifty::DBI' => '0.42' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
 requires('Locale::Maketext::Extract' => '0.20');
 requires('Locale::Maketext::Lexicon' => '0.60');
 requires('Log::Log4perl' => '1.04');
 requires('LWP::UserAgent'); # Net::HTTP
 requires('MIME::Types');
-requires('Module::Pluggable' => '3.1'); # Module::Pluggable::Object
+requires('Module::Pluggable' => '3.5'); # Module::Pluggable::Object
 requires('Module::Pluggable::Object');
 requires('Module::CoreList');
 requires('Module::Refresh');
 requires('Module::ScanDeps');
 requires('Object::Declare' => '0.13');
+requires('PadWalker');
 requires('Params::Validate');
 requires('Scalar::Defer' => '0.10');
 requires('Shell::Command');
 requires('String::Koremutake');
 requires('SQL::ReservedWords');
-requires('Template::Declare' => '0.07');                # Template::Declare::Tags
+requires('Template::Declare' => '0.26');                # Template::Declare::Tags
 requires('Test::Base');
+requires('Test::LongString');
+requires('Test::Log4perl');
 requires('Test::More' => 0.62 ),
 requires('Test::Pod::Coverage'),
 requires('Test::WWW::Mechanize' => 1.04 ),
-requires('WWW::Mechanize' => 1.12 ),
+requires('WWW::Mechanize' => 1.30 ),
 requires('UNIVERSAL::require');
 requires('URI');
 requires('XML::Writer' => '0.601');
@@ -125,6 +132,28 @@ features(
         -default => 0,
         recommends('PAR::Dist::FromCPAN'),
     ],
+    'OpenID Login Plugin' => [
+        -default => 0,
+        recommends('Net::OpenID::Consumer'),
+        recommends('Cache::FileCache'),
+        recommends('LWPx::ParanoidAgent'),
+    ],
+    'Facebook Login Plugin' => [
+        -default => 0,
+        recommends('WWW::Facebook::API' => '0.3.6'),
+    ],
+    'Jifty console' => [
+        -default => 0,
+        recommends('Devel::EvalContext'),
+    ],
+    'Chart Plugin (none of these must be installed for Charts to work)' => [
+        -default => 0,
+        recommends('Chart::Base'),
+        recommends('GD'),          # for a testing hack
+        recommends('GD::Graph'),
+        recommends('XML::Simple'),
+        recommends('Image::Info'), # for testing
+    ],
 );
 
 
@@ -140,7 +169,7 @@ install_script('bin/jifty');
 install_share;
 
 # Test all of our sub-dist tests too
-tests('t/*.t t/*/t/*.t');
+tests('t/*.t t/*/*.t t/*/*/*.t t/*/*/*/*.t');
 
 WriteAll;
 

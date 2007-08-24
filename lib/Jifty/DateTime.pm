@@ -16,6 +16,15 @@ into the proper timezone.
 
 =cut
 
+BEGIN {
+    # we spent about 30% of the time in validate during 'require
+    # DateTime::Locale' which isn't necessary at all
+    require Params::Validate;
+    no warnings 'redefine';
+    local *Params::Validate::validate = sub { pop @_, return @_ };
+    require DateTime::Locale;
+}
+
 use base qw(Jifty::Object DateTime);
 
 
@@ -51,6 +60,7 @@ Return timezone if the current user has it
 sub current_user_has_timezone {
     my $self = shift;
     $self->_get_current_user();
+    return unless $self->current_user->can('user_object');
     my $user_obj = $self->current_user->user_object or return;
     my $f = $user_obj->can('time_zone') or return;
     return $f->($user_obj);
@@ -93,6 +103,36 @@ sub new_from_string {
         $self->set_time_zone( $tz );
     }
     return $self;
+}
+
+=head2 friendly_date
+
+Returns the date given by this C<Jifty::DateTime> object. It will display "today"
+for today, "tomorrow" for tomorrow, or "yesterday" for yesterday. Any other date
+will be displayed in ymd format.
+
+=cut
+
+sub friendly_date {
+    my $self = shift;
+    my $ymd = $self->ymd;
+
+    my $rel = DateTime->now(time_zone => $self->time_zone);
+    if ($ymd eq $rel->ymd) {
+        return "today";
+    }
+    
+    $rel->subtract(days => 1);
+    if ($ymd eq $rel->ymd) {
+        return "yesterday";
+    }
+    
+    $rel->add(days => 2);
+    if ($ymd eq $rel->ymd) {
+        return "tomorrow";
+    }
+    
+    return $ymd;
 }
 
 1;

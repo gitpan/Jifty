@@ -1,6 +1,97 @@
 /* An empty class so we can create things inside it */
 var Jifty = Class.create();
 
+Jifty.Web = Class.create();
+Jifty.Web.current_actions = new Array;
+Jifty.Web.new_action = function() {
+    var args = _get_named_args(arguments);
+    var a;
+    Jifty.Web.current_actions.each(function(x) { if (x.moniker == args.moniker) a = x });
+    if (!a) throw "hate";
+    
+    return a;
+};
+
+Jifty.web = function() { return Jifty.Web };
+
+function _get_named_args(args) {
+    var result = {};
+    for (var i = 0; i < args.length; i+=2) {
+	result[args[i]] = args[i+1];
+    }
+    return result;
+
+}
+
+function _get_onclick(action_hash, name, args, path) {
+    var onclick = 'if(event.ctrlKey||event.metaKey||event.altKey||event.shiftKey) return true; return update('
+    + JSON.stringify({'continuation': {},
+		      'actions': action_hash,
+		      'fragments': [{'mode': 'Replace', 'args': args, 'region': name, 'path': path}]})
+    +', this)';
+    onclick = onclick.replace(/"/g, "'"); //"' )# grr emacs!
+	return onclick;
+}
+// XXX
+var hyperlink  = function() {
+    var args = _get_named_args(arguments);
+    var current_region = Jifty.Web.current_region;
+    var onclick = _get_onclick({}, current_region.name, current_region.args, args.onclick[0].replace_with);
+    outs( a(function() { attr(function()
+			      {return ['onclick', onclick, 'href', '#']});
+	    return args.label
+		}));
+}
+
+var render_param = function(a, field) { outs(a.render_param(field)) };
+var form_return  = function() {
+    var args = _get_named_args(arguments);
+    var action_hash = {};
+    action_hash[args.submit.moniker] = 1;
+    // XXX: fix the fabricated refresh-self
+    // XXX: implicit onclick only for now
+
+    // $self->_push_onclick($args, { refresh_self => 1, submit => $args->{submit} });
+    // @args{qw/mode path region/} = ('Replace', Jifty->web->current_region->path, Jifty->web->current_region);
+
+    var current_region = Jifty.Web.current_region;
+    var onclick = _get_onclick(action_hash, current_region.name, current_region.args, current_region.path);
+    outs(
+	 div(function() {
+		 attr(function() { return ['class', 'submit_button'] });
+		 return input(function() { attr(function()
+						{return ['type', 'submit',
+							 'onclick', onclick,
+							 'class', 'widget button',
+							 'id', 'S' + (++SERIAL + SERIAL_postfix),
+							 'value', args.label,
+							 'name', 'J:V-region-__page-signup_widget=_signup|J:ACTIONS=signupnow'] })});
+		     }));
+
+};
+
+function register_action(a) {
+    outs(div(function() {
+		attr(function() { return ['class', 'hidden'] });
+		return input(function() { attr(function() {
+				return ['type', 'hidden',
+					'name', a.register_name(),
+					'id', a.register_name(),
+					'value', a.actionClass] }) } ) } ));
+    /* XXX: fallback values */
+}
+
+function apply_cached_for_action(code, actions) {
+    Jifty.Web.current_actions = actions;
+    this['out_buf'] = '';
+    this['outs'] = function(text) { this.out_buf += text };
+    actions.each(register_action);
+    var foo = code();
+    return foo;
+    alert(foo);
+    throw 'not yet';
+}
+
 /* Actions */
 var Action = Class.create();
 Action.prototype = {
@@ -121,7 +212,11 @@ Action.prototype = {
                     a['fields'][Form.Element.getField(f)] = {};
                 var field = Form.Element.getField(f);
                 var type = Form.Element.getType(f);
-                    
+
+                // XXX: fallback value being an array makes server
+                // upset, we don't think that should happen anyway
+                if (type == 'fallback' && a['fields'][field][type])
+                    continue                    
                 a['fields'][field][type] = this._mergeValues(a['fields'][field][type],
                                                              Form.Element.getValue(f));
             }
@@ -165,11 +260,13 @@ Action.prototype = {
                                     if (field.nodeName == 'error' || field.nodeName == 'warning') {
                                         var err_div = document.getElementById(field.getAttribute("id"));
                                         if (err_div != null) {
+                                            Element.show(err_div);
                                             err_div.innerHTML = field.firstChild.data;
                                         }
                                     } else if (field.nodeName == 'ok') {
                                         var err_div = document.getElementById(field.getAttribute("id"));
                                         if (err_div != null) {
+                                            Element.hide(err_div);
                                             err_div.innerHTML = '';
                                         }
                                     }
@@ -181,6 +278,7 @@ Action.prototype = {
                                     if (field.nodeName == 'canonicalization_note')  {
                                         var note_div= document.getElementById(field.getAttribute("id"));
                                         if (note_div != null) {
+                                            Element.show(note_div);
                                             note_div.innerHTML = field.firstChild.data;
                                         }
                                     }
@@ -213,7 +311,7 @@ Action.prototype = {
         hide_wait_message();
     },
 
-    disable_input_fields: function() {
+    disable_input_fields: function(disabled_elements) {
         var disable = function() {
             var elt = arguments[0];
             // Disabling hidden elements seems to  make IE sad for some reason
@@ -221,6 +319,7 @@ Action.prototype = {
                 // Triggers https://bugzilla.mozilla.org/show_bug.cgi?id=236791
                 elt.blur();
                 elt.disabled = true;
+                disabled_elements.push(elt);
             }
         };
         this.fields().each(disable);
@@ -231,10 +330,145 @@ Action.prototype = {
         var enable = function() { arguments[0].disabled = false; };
         this.fields().each( enable );
         this.buttons().each( enable );
-    }
+    },
+
+
+    /* client side logic extracted from Jifty::Action */
+    _action_spec: function() {
+	if (!this.s_a) {
+	    /* XXX: make REST client accessible */
+	    var Todo = new AsynapseRecord('todo');
+	    this.s_a = $H(Todo.eval_ajax_get('/=/action/'+this.actionClass+'.js'));
+	}
+	
+	return this.s_a
+    },
+    argument_names: function() {
+	return this._action_spec().keys();
+    },
+
+    render_param: function(field) {
+	var a_s = this._action_spec();
+	var type = 'text';
+	var f = new ActionField(field, a_s[field], this);
+	return f.render();
+    },
+    register_name: function() { return this.register.id }
+
 };
 
+var SERIAL_postfix = Math.ceil(10000*Math.random());
+var SERIAL = 0;
+ActionField = Class.create();
+ActionField.prototype = {
+ initialize: function(name, args, action) {
+	this.name = name;
+	this.label = args.label;
+	this.hints = args.hints;
+	this.mandatory = args.mandatory;
+	this.ajax_validates = args.ajax_validates;
+	this.current_value = action.data_structure().fields[name].value;
+        this.error = action.result.field_error[name];
+	this.action = action;
+	if (!this.render_mode) this.render_mode = 'update';
+	this.type = 'text';
+    },
 
+ render: function() {
+	if (this.render_mode == 'read')
+	    return this.render_wrapper
+		(this.render_preamble,
+		 this.render_label,
+		 this.render_value);
+	else
+	    return this.render_wrapper
+	    (this.render_preamble,
+	     this.render_label,
+	     this.render_widget,
+	     this.render_autocomplete_div,
+	     this.render_inline_javascript,
+	     this.render_hints,
+	     this.render_errors,
+	     this.render_warnings,
+	     this.render_canonicalization_notes);
+    },
+ render_wrapper: function () {
+	var classes = ['form_field'];
+	if (this.mandatory) classes.push('mandatory');
+	if (this.name) classes.push('argument-'+this.name);
+	var args = arguments;
+	var tthis = this;
+	return div(function() {
+		attr(function(){return ['class', classes.join(' ')]});
+		var buf = new Array;
+		for (var i = 0; i < args.length; ++i) {
+		    buf.push(typeof(args[i]) == 'function' ? args[i].apply(tthis) : args[i]);
+		}
+		return buf.join('');
+	    });
+    },
+    render_preamble: function() {
+	var tthis = this;
+	return span(function(){attr(function(){return ['class', "preamble"]});
+		return tthis.preamble });
+    },
+
+    render_label: function() {
+	var tthis = this;
+	if(this.render_mode == 'update')
+	    return label(function(){attr(function(){return['class', "label", 'for', tthis.element_id()]});
+		    return tthis.label });
+	else
+	    return span(function(){attr(function(){return['class', "label" ]});
+		    return tthis.label });
+    },
+ input_name: function() {
+	return ['J:A:F', this.name, this.action.moniker].join('-');
+    },
+ render_hints: function() {
+	var tthis = this;
+	return span(function(){attr(function(){return ['class', "hints"]});
+		return tthis.hints });
+    },
+
+ render_errors: function() {
+	if (!this.action) return '';
+	var tthis = this;
+	// XXX: post-request handler needs to extract field error messages
+	return span(function(){attr(function(){return ['class', "error", 'id', 'errors-'+tthis.input_name()]});
+		return tthis.error });
+    },
+
+ render_widget: function () {
+	var tthis = this;
+	return input(function(){
+		    attr(function(){
+			    var fields = ['type', tthis.type];
+			    if (tthis.input_name) fields.push('name', tthis.input_name());
+			    fields.push('id', tthis.element_id());
+			    if (tthis.current_value) fields.push('value', tthis.current_value);
+			    fields.push('class', tthis._widget_class().join(' '));
+			    if (tthis.max_length) fields.push('size', tthis.max_length, 'maxlength', tthis.max_length);
+			    if (tthis.disable_autocomplete) fields.push('autocomplete', "off");
+			    //" " .$self->other_widget_properties;
+			    return fields;
+			})});
+    },
+ _widget_class: function() {
+	var classes = ['form_field'];
+	if (this.mandatory)      classes.push('mandatory');
+	if (this.name)           classes.push('argument-'+this.name);
+	if (this.ajax_validates) classes.push('ajaxvalidation');
+	return classes;
+    },
+
+ element_id: function() { if(!this._element_id) this._element_id = this.input_name() + '-S' + (++SERIAL + SERIAL_postfix);
+			  return this._element_id; },
+ __noSuchMethod__: function(name) {
+	return '<!-- '+name+' not implemented yet -->';
+    }
+
+};
 
 /* Forms */
 Object.extend(Form, {
@@ -245,7 +479,7 @@ Object.extend(Form, {
 
         for (var i = 0; i < possible.length; i++) {
             if (Form.Element.getType(possible[i]) == "registration")
-                elements.push(new Action(Form.Element.getMoniker(possible[i])));
+                elements.push(Form.Element.getAction(possible[i]));
         }
         
         return elements;
@@ -260,6 +494,7 @@ Object.extend(Form, {
 });
 
 
+var current_actions = $H();
 
 /* Fields */
 Object.extend(Form.Element, {
@@ -283,9 +518,10 @@ Object.extend(Form.Element, {
     // Takes an element or an element id
     getAction: function (element) {
         element = $(element);    
-
         var moniker = Form.Element.getMoniker(element);
-        return new Action(moniker);
+	if (!current_actions[moniker])
+	    current_actions[moniker] = new Action(moniker);
+	return current_actions[moniker];
     },
 
     // Returns the name of the field
@@ -482,6 +718,9 @@ Behaviour.register({
 
             Element.addClassName( e, "jifty_enter_handler_attached" );
         }
+    },
+    '.form_field .error, .form_field .warning, .form_field .canonicalization_note': function(e) {
+        if ( e.innerHTML == "" ) Element.hide(e);
     }
 });
 
@@ -648,6 +887,42 @@ function prepare_element_for_update(f) {
 
     return f;    
 }
+
+var CACHE = {};
+
+
+var walk_node = function(node, table) {
+    for (var child = node.firstChild;
+         child != null;
+         child = child.nextSibling) {
+        var name = child.nodeName.toLowerCase();
+        if (table[name])
+	    table[name](child);
+    }
+}
+
+var extract_cacheable = function(fragment, f) {
+    walk_node(fragment,
+    { cacheable: function(fragment_bit) {
+            var c_type = fragment_bit.getAttribute("type");
+            var textContent = '';
+            if (fragment_bit.textContent) {
+                textContent = fragment_bit.textContent;
+            } else if (fragment_bit.firstChild) {
+                textContent = fragment_bit.firstChild.nodeValue;
+            } 
+	    try {
+		var cache_func = eval(textContent);
+		CACHE[f['path']] = { 'type': c_type, 'content': cache_func };
+	    }
+	    catch(e) { 
+		alert(e);
+		alert(textContent);
+	    }
+        }
+    });
+};
+
 // applying updates from a fragment
 //   - fragment: the fragment from the server
 //   - f: fragment spec
@@ -655,11 +930,10 @@ var apply_fragment_updates = function(fragment, f) {
     // We found the right fragment
     var dom_fragment = fragments[f['region']];
     var new_dom_args = $H();
+
     var element = f['element'];
-    for (var fragment_bit = fragment.firstChild;
-	 fragment_bit != null;
-	 fragment_bit = fragment_bit.nextSibling) {
-	if (fragment_bit.nodeName == 'argument') {
+    walk_node(fragment,
+    { argument: function(fragment_bit) {
 	    // First, update the fragment's arguments
 	    // with what the server actually used --
 	    // this is needed in case there was
@@ -671,7 +945,8 @@ var apply_fragment_updates = function(fragment, f) {
 		textContent = fragment_bit.firstChild.nodeValue;
 	    }
 	    new_dom_args[fragment_bit.getAttribute("name")] = textContent;
-	} else if (fragment_bit.nodeName.toLowerCase() == 'content') {
+	},
+      content: function(fragment_bit) {
 	    var textContent = '';
 	    if (fragment_bit.textContent) {
 		textContent = fragment_bit.textContent;
@@ -686,11 +961,14 @@ var apply_fragment_updates = function(fragment, f) {
 	    } else {
 		Element.update(element, textContent.stripScripts());
 	    }
-	    // We need to give the browser some "settle" time before we eval scripts in the body
-	    setTimeout((function() { this.evalScripts() }).bind(textContent), 10);
-	    Behaviour.apply(element);
+	    // We need to give the browser some "settle" time before
+	    // we eval scripts in the body
+        YAHOO.util.Event.onAvailable(element.id, function() {
+            (function() { this.evalScripts() }).bind(textContent)();
+        });
+        Behaviour.apply(element);
 	}
-    }
+    });
     dom_fragment.setArgs(new_dom_args);
 
     // Also, set us up the effect
@@ -719,7 +997,6 @@ var apply_fragment_updates = function(fragment, f) {
 //     - 'mode' is one of 'Replace', or the name of a Prototype Insertion
 //     - 'effect' is the name of a Prototype Effect
 function update() {
-    // If we don't have XMLHttpRequest, bail and fallback on full-page
     // loads
     if(!Ajax.getTransport()) return true;
     // XXX: prevent default behavior in IE
@@ -727,12 +1004,14 @@ function update() {
         window.event.returnValue = false;
     }
 
-    show_wait_message();
     var named_args = arguments[0];
     var trigger    = arguments[1];
 
     // The YAML/JSON data structure that will be sent
     var request = $H();
+
+    // Keep track of disabled elements
+    var disabled_elements = $A();
 
     // Set request base path
     request['path'] = '/__jifty/webservices/xml';
@@ -740,27 +1019,103 @@ function update() {
     // Grab extra arguments (from a button)
     var button_args = Form.Element.buttonFormElements(trigger);
 
+    var form = Form.Element.getForm(trigger);
+    // If the action is null, take all actions
+    if (named_args['actions'] == null) {
+        named_args['actions'] = {};
+        // default to disable fields
+        if (form)
+            Form.getActions(form).map(function(x){
+                named_args['actions'][x.moniker] = 1;
+            });
+    }
+    var optional_fragments;
+    if (form && form['J:CALL']) 
+	optional_fragments = [ prepare_element_for_update({'mode':'Replace','args':{},'region':'__page','path': null}) ];
     // Build actions structure
+    var has_request = 0;
     request['actions'] = $H();
     for (var moniker in named_args['actions']) {
         var disable = named_args['actions'][moniker];
         var a = new Action(moniker, button_args);
+	current_actions[moniker] = a; // XXX: how do i make this bloody singleton?
+        // Special case for Redirect, allow optional, implicit __page
+        // from the response to be used.
+        if (a.actionClass == 'Jifty::Action::Redirect')
+            optional_fragments = [ prepare_element_for_update({'mode':'Replace','args':{},'region':'__page','path': a.fields().last().value}) ];
+        a.result = {}; a.result.field_error = {};
         if (a.register) {
             if (a.hasUpload())
                 return true;
             if(disable) {
-                a.disable_input_fields();
+                a.disable_input_fields(disabled_elements);
             }
             request['actions'][moniker] = a.data_structure();
+            ++has_request;
         }
+
     }
 
     request['fragments'] = $H();
+    var update_from_cache = new Array;
+
     // Build fragments structure
     for (var i = 0; i < named_args['fragments'].length; i++) {
         var f = named_args['fragments'][i];
         f = prepare_element_for_update(f);
         if (!f) continue;
+
+        var cached = CACHE[f['path']];
+        if (cached && cached['type'] == 'static') {
+            var my_fragment = document.createElement('fragment');
+            var content_node = document.createElement('content');
+	    var cached_result;
+
+	    Jifty.Web.current_region = fragments[f['region']];
+	    try { cached_result = apply_cached_for_action(cached['content'], []) }
+	    catch (e) { alert(e) }
+
+            content_node.textContent = cached_result;
+            my_fragment.appendChild(content_node);
+            my_fragment.setAttribute('id', f['region']);
+
+            update_from_cache.push(function(){ apply_fragment_updates(my_fragment, f);
+ } );
+            continue;
+        }
+	else if (cached && cached['type'] == 'action') {
+            var my_fragment = document.createElement('fragment');
+            var content_node = document.createElement('content');
+
+            my_fragment.appendChild(content_node);
+            my_fragment.setAttribute('id', f['region']);
+            update_from_cache.push(function(){
+		    var cached_result;
+		    Jifty.Web.current_region = fragments[f['region']];
+		    try {
+			cached_result = apply_cached_for_action(cached['content'], Form.getActions(form));
+		    }
+		    catch (e) { alert(e); throw e }
+		    content_node.textContent = cached_result;
+		    apply_fragment_updates(my_fragment, f);
+ } );
+            continue;
+	}
+        else if (cached && cached['type'] == 'crudview') {
+	    try { // XXX: get model class etc as metadata in cache 
+		// XXX: kill dup code
+	    var Todo = new AsynapseRecord('todo');
+	    var record = Todo.find(f['args']['id']);
+            var my_fragment = document.createElement('fragment');
+            var content_node = document.createElement('content');
+            content_node.textContent = cached['content'](record);
+            my_fragment.appendChild(content_node);
+            my_fragment.setAttribute('id', f['region']);
+            update_from_cache.push(function(){ apply_fragment_updates(my_fragment, f); } );
+	    } catch (e) { alert(e) };
+	    continue;
+	}
+
         // Update with all new values
         var name = f['region'];
         var fragment_request = fragments[name].data_structure(f['path'], f['args']);
@@ -771,41 +1126,76 @@ function update() {
 
         // Push it onto the request stack
         request['fragments'][name] = fragment_request;
+        ++has_request;
     }
+
+    if (!has_request) {
+        for (var i = 0; i < update_from_cache.length; i++)
+            update_from_cache[i]();
+        return false;
+    }
+
+    show_wait_message();
 
     // And when we get the result back..
     var onSuccess = function(transport, object) {
         // Grab the XML response
         var response = transport.responseXML.documentElement;
+
+	// Get action results
+        walk_node(response,
+	{ result: function(result) {
+		var moniker = result.getAttribute("moniker");
+		walk_node(result,
+			  { field: function(field) {
+				  var error = field.getElementsByTagName('error')[0];
+				  if (error) {
+				      var text = error.textContent
+					  ? error.textContent
+					  : (error.firstChild ? error.firstChild.nodeValue : '');
+				      var action = current_actions[moniker];
+				      action.result.field_error[field.getAttribute("name")] = text;
+				      }
+			      }});
+	    }});
+
+        for ( var i = 0; i < disabled_elements.length; i++ ) {
+            disabled_elements[i].disabled = false;
+        }
+
+	// empty known action. XXX: we should only need to discard actions being submitted
+
         // Loop through the result looking for it
+        var expected_fragments = optional_fragments ? optional_fragments : named_args['fragments'];
         for (var response_fragment = response.firstChild;
              response_fragment != null && response_fragment.nodeName == 'fragment';
              response_fragment = response_fragment.nextSibling) {
 
-            var f; 
-            for (var i = 0; i < named_args['fragments'].length; i++) {
-                f = named_args['fragments'][i];
-                if (response_fragment.getAttribute("id") == f['region'])
-                    break;
-            }
-            if (response_fragment.getAttribute("id") != f['region'])
+            var exp_id = response_fragment.getAttribute("id");
+            var f = expected_fragments.find(function(f) { return exp_id == f['region'] });
+            if (!f)
                 continue;
 
-	    try {
-            apply_fragment_updates(response_fragment, f);
-	    }catch (e) { alert(e) }
+            try {
+                apply_fragment_updates(response_fragment, f);
+            }catch (e) { alert(e) }
+            extract_cacheable(response_fragment, f);
         }
-        for (var result = response.firstChild;
-             result != null;
-             result = result.nextSibling) {
-            if (result.nodeName == 'result') {
+
+	update_from_cache.each(function(x) { x() });
+
+        walk_node(response,
+	{ result: function(result) {
                 for (var key = result.firstChild;
                      key != null;
                      key = key.nextSibling) {
                     show_action_result(result.getAttribute("moniker"),key);
                 }
-            }
-        }
+            },
+	  redirect: function(redirect) {
+                document.location =  redirect.firstChild.firstChild.nodeValue;
+	}});
+	current_actions = $H();
     };
     var onFailure = function(transport, object) {
         hide_wait_message_now();
@@ -814,10 +1204,8 @@ function update() {
 
         Jifty.failedRequest = transport;
 
-        var keys = request["actions"].keys();
-        for ( var i = 0; i < keys.length; i++ ) {
-            var a = new Action( request["actions"][ keys[i] ].moniker );
-            a.enable_input_fields();
+        for ( var i = 0; i < disabled_elements.length; i++ ) {
+            disabled_elements[i].disabled = false;
         }
     };
 
@@ -828,6 +1216,9 @@ function update() {
         var k = keys[i];
         request['variables']['region-'+k] = current_args[k];
     }
+
+    // Build continuation structure
+    request['continuation'] = named_args['continuation'];
 
     // Push any state variables which we set into the forms
     for (var i = 0; i < document.forms.length; i++) {

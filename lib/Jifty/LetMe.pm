@@ -84,7 +84,7 @@ sub _user_from_email {
     my $currentuser_object_class = Jifty->app_class("CurrentUser");
     my $u = $currentuser_object_class->new( email => $email )->user_object;
     # we want to be able to get at their auth token.
-    $u->current_user(Jifty->app_class('CurrentUser')->superuser);
+    $u->current_user( $currentuser_object_class->superuser );
     return $u;
 }
 
@@ -97,7 +97,6 @@ sub _generate_digest {
     return '' unless ($user->auth_token);
 
 
-    Jifty->log->debug($user->id."Creating a digest of", join (', ', $user->auth_token, $self->path, $self->until));
     # build an md5sum of the email token and until and our secret
     my $digest = Digest::MD5->new();
     $digest->add( $user->auth_token );
@@ -221,7 +220,6 @@ sub as_encoded_token {
 sub _generate_token {
     my $self = shift;
     my %args = (email => undef, @_);
-    warn "Generating a token for ".YAML::Dump(\%args);
     return  join ('/', 
         $args{'email'},
         $self->path,

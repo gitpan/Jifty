@@ -21,7 +21,7 @@ than the pure-perl Jifty standalone server.  C<FastCGI> is what you're looking f
 
  # These two lines are FastCGI-specific; skip them to run in vanilla CGI mode
  AddHandler fastcgi-script fcgi
- FastCgiServer /path/to/your/jifty/app/bin/jifty
+ FastCgiServer /path/to/your/jifty/app/bin/jifty -initial-env JIFTY_COMMAND=fastcgi 
 
  DocumentRoot /path/to/your/jifty/app/share/web/templates
  ScriptAlias / /path/to/your/jifty/app/bin/jifty/
@@ -90,11 +90,13 @@ sub run {
     my $conf = Jifty->config->framework('Web')->{'FastCGI'} || {};
     $self->{maxrequests} ||= $conf->{MaxRequests};
 
+    my $PATH = $ENV{'PATH'} || '/bin:/usr/bin';
+
     my $requests = 0;
     while ( my $cgi = CGI::Fast->new ) {
         # the whole point of fastcgi requires the env to get reset here..
         # So we must squash it again
-        $ENV{'PATH'}   = '/bin:/usr/bin';
+        $ENV{'PATH'}   = $PATH;
         $ENV{'SHELL'}  = '/bin/sh' if defined $ENV{'SHELL'};
         $ENV{'PATH_INFO'}   = $ENV{'SCRIPT_NAME'}
             if $ENV{'SERVER_SOFTWARE'} =~ /^lighttpd\b/;

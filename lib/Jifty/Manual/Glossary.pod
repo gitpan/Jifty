@@ -102,12 +102,14 @@ Jifty uses L<Jifty::DBI> to store its data (though might use other storage tools
 
 =item moniker
 
-Every instance of a L<Jifty::Action> has a B<moniker>.  A moniker is
-an arbitrary-length nonempty string containing no semicolons.
-Monikers serve as identifiers for actions, to associate arguments with
-actions and to access specific actions "by name".  Monikers need not
-be globally unique, but they must be unique within a single request.
+Every instance of a L<Jifty::Action> has a B<moniker>.  Monikers
+serve as identifiers for actions, to associate arguments with actions
+and to access specific actions "by name".  Monikers need not be
+globally unique, but they must be unique within a single request.
 Monikers have no semantic meaning. See L<Jifty::Action/monikers>
+
+A moniker is an arbitrary-length nonempty string containing no
+semicolons. It may not begin with a digit.
 
 =item parameter
 
@@ -138,6 +140,10 @@ ran.  See L<Jifty::Response>.
 The answer to a L</action>, it contains information about if the action was a
 success or failure, and further detail about why or how.  It can also contain
 arbitrary "content".  See L<Jifty::Result>.
+
+=item return
+
+After performing a L</tangent> a user may perform a L</return> to invoke the L</continuation> created by the original tangent.
 
 =item schema
 
@@ -173,6 +179,10 @@ A property of L</form field>s.  If a field is "sticky," values that the user
 entered appear there again when the page is rendered again, avoiding making the
 user type them again.  Most L</action>s have form fields which are sticky on
 failure, so the user can update the information and try again.
+
+=item tangent
+
+A tangent is a link or redirect that causes Jifty to save the current state into a L</continuation> for a later L</return>. This operation is handy for situations when you want to jump to another page or form, but return to this page when the user is done with the "tangent" page. Because of the use of continuations, this can be especially handy because a user could go on multiple tangents and eventually return to the start.
 
 =item upgrade
 

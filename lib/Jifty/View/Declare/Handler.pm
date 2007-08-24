@@ -5,13 +5,12 @@ use strict;
 
 use base qw/Jifty::Object Class::Accessor/;
 use Template::Declare;
-use Encode ();
 
 __PACKAGE__->mk_accessors(qw/root_class/);
 
 =head1 NAME
 
-Jifty::View::Declare::Handler
+Jifty::View::Declare::Handler - The Jifty view handler for Template::Declare
 
 =head1 METHODS
 
@@ -67,20 +66,30 @@ Render a template. Expects that the template and any jifty methods called intern
 =cut
 
 sub show {
-    my $self          = shift;
+    my $self     = shift;
     my $template = shift;
 
-    no warnings qw/redefine utf8/;
+    no warnings qw/redefine/;
     local *Jifty::Web::out = sub {
         shift;    # Turn the method into a function
         goto &Template::Declare::Tags::outs_raw;
     };
-    my $content =Template::Declare::Tags::show($template);
-        unless ( Jifty->handler->apache->http_header_sent ||Jifty->web->request->is_subrequest ) {
-            Jifty->handler->apache->send_http_header();
-        }
-    print STDOUT $content;
-    Encode::_utf8_on($content);
+    
+    my $content = Template::Declare::Tags::show_page( $template, Jifty->web->request->arguments );
+    return unless defined $content && length $content;
+
+    my $r = Jifty->handler->apache;
+    $r->content_type || $r->content_type('text/html; charset=utf-8'); # Set up a default
+    unless ( Jifty->handler->apache->http_header_sent || Jifty->web->request->is_subrequest ) {
+        Jifty->handler->apache->send_http_header;
+    }
+
+    binmode *STDOUT;
+    if ( my ($enc) = $r->content_type =~ /charset=([\w-]+)$/ ) {
+        print STDOUT Encode::encode($enc, $content);
+    } else {
+        print STDOUT $content;
+    }
     return undef;
 }
 
