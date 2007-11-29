@@ -17,7 +17,7 @@ This library provides page wrappers
 
 use Jifty::View::Declare::Helpers;
 
-__PACKAGE__->mk_accessors(qw(content_code done_header _title));
+__PACKAGE__->mk_accessors(qw(content_code done_header _title _meta));
 use constant allow_single_page => 1;
 
 =head2 new
@@ -32,6 +32,9 @@ sub new {
 
     my ($title) = get_current_attr(qw(title));
     $self->_title($title);
+
+    $self->_title($self->_meta->{title})
+	if $self->_meta && $self->_meta->{title};
 
     return $self;
 }
@@ -185,10 +188,12 @@ Renders the keybinding and PubSub javascript as well as the wait message
 =cut
 
 sub render_jifty_page_detritus {
-
+    show('/app_page_footer') if Template::Declare->resolve_template('/app_page_footer' => 1); # the 1 is 'show_private'
     show('/keybindings');
     with( id => "jifty-wait-message", style => "display: none" ),
         div { _('Loading...') };
+    with( id => "jifty-result-popup" ),
+        div { };
 
     # This is required for jifty server push.  If you maintain your own
     # wrapper, make sure you have this as well.

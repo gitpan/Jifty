@@ -33,12 +33,34 @@ column 'created_on' =>
   type is 'datetime',
   is immutable,
   default is defer { DateTime->now },
-  filters are 'Jifty::DBI::Filter::DateTime';
+  filters are qw(Jifty::Filter::DateTime Jifty::DBI::Filter::Date);
 column 'uuid' => is UUID;
 };
 
 
 # Your model-specific methods go here.
+
+sub current_time
+{
+    Jifty::DateTime->now();
+}
+
+sub time_zone
+{
+    'America/Anchorage'
+}
+
+sub current_user_can {
+    my $self = shift;
+    my $right = shift;
+    my %args = @_;
+
+    return 1 if $self->SUPER::current_user_can($right => %args);
+    
+    return 1 if $self->current_user->id and $self->id and $self->current_user->id == $self->id;
+
+    return 0;
+}
 
 1;
 

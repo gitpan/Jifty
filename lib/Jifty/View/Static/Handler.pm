@@ -192,8 +192,9 @@ sub mime_type {
         # MIME::Types returns application/javascript for .js, but Opera
         # chokes on ajax-fetched JS that has a type other than the one below
         # JSAN.js fetches JS via Ajax when it loads JSAN modules
-        'js' => 'application/x-javascript',
-        'htc' => 'text/x-component',
+        'js'   => 'application/x-javascript',
+        'json' => 'application/json; charset=UTF-8',
+        'htc'  => 'text/x-component',
     );
 
     return ($type_override{$1})
@@ -242,6 +243,9 @@ sub send_file {
         $apache->header_out( Status => 200 );
         $apache->content_type($mime_type);
         my $now = time();
+     
+        $apache->header_out('Cache-Control' =>  'max-age=259200, public');
+
         $apache->header_out(Expires =>  HTTP::Date::time2str($now + 31536000));  # Expire in a year
         $apache->header_out('Last-Modified' =>  HTTP::Date::time2str( $file_info[9]));
         $apache->header_out('Content-Length' => $file_info[7]) unless ($compression eq 'gzip');  
@@ -250,10 +254,10 @@ sub send_file {
         $apache->send_http_header();
 
         if ($compression eq 'gzip') {
-        undef $/;
-        binmode STDOUT;
-        # XXX TODO: Cache this
-        print STDOUT Compress::Zlib::memGzip(<$fh>);
+            local $/;
+            binmode STDOUT;
+            # XXX TODO: Cache this
+            print STDOUT Compress::Zlib::memGzip(<$fh>);
         } else{
             $apache->send_fd($fh);
         }

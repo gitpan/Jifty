@@ -36,7 +36,7 @@ unique id -- it should consist of only letters and numbers.
 The path to the fragment that this page region contains.  Defaults to
 C</__jifty/empty>, which, as its name implies, is empty.
 
-=item defaults (optional)
+=item arguments (optional) (formerly 'defaults')
 
 Specifies an optional set of parameter defaults.  These should all be
 simple scalars, as they might be passed across HTTP if AJAX is used.
@@ -82,6 +82,9 @@ sub new {
                 @_
                );
 
+
+    $args{'arguments'} ||= delete $args{'defaults'};
+
     # Name is required
     if (not defined $args{name}) {
         warn "Name is required for page regions.";
@@ -89,16 +92,16 @@ sub new {
     }
 
     # References don't go over HTTP very well
-    if (grep {ref $_} values %{$args{defaults}}) {
-        warn "Reference '$args{defaults}{$_}' passed as default for '$_' to region '$args{name}'"
-          for grep {ref $args{defaults}{$_}} keys %{$args{defaults}};
+    if (grep {ref $_} values %{$args{arguments}}) {
+        warn "Reference '$args{arguments}{$_}' passed as default for '$_' to region '$args{name}'"
+          for grep {ref $args{arguments}{$_}} keys %{$args{arguments}};
         return;
     }
 
     $self->name($args{name});
     $self->qualified_name(Jifty->web->qualified_region($self));
     $self->default_path($args{path});
-    $self->default_arguments($args{defaults});
+    $self->default_arguments($args{arguments});
     $self->force_arguments($args{force_arguments});
     $self->force_path($args{force_path});
     $self->arguments({});
@@ -310,13 +313,14 @@ sub render_as_subrequest {
     $subrequest->path( $self->path );
     $subrequest->top_request( Jifty->web->request->top_request );
 
+    my %args;
     if ($self->path =~ m/\?/) {
 	# XXX: this only happens if we are redirect within region AND
 	# with continuation, which is already taken care of by the
 	# clone.
 	my ($path, $arg) = split(/\?/, $self->path, 2);
 	$subrequest->path( $path );
-	my %args = (map { split /=/, $_ } split /&/, $arg);
+	%args = (map { split /=/, $_ } split /&/, $arg);
 	if ($args{'J:C'}) {
 	    $subrequest->continuation($args{'J:C'});
 	}
@@ -327,6 +331,13 @@ sub render_as_subrequest {
     }
     # $subrequest->clear_actions;
     local Jifty->web->{request} = $subrequest;
+    if ($args{'J:RETURN'}) {
+	my $top = Jifty->web->request->top_request;
+	my $cont = Jifty->web->session->get_continuation($args{'J:RETURN'});
+	$cont->return;
+	# need to set this as subrequest again as it's clobbered by the return
+	Jifty->web->request->top_request($top);
+    }
 
     # While we're inside this region, have Mason to tack its response
     # onto a variable and not send headers when it does so

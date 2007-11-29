@@ -5,13 +5,15 @@ package Jifty;
 use IPC::PubSub 0.22;
 use Data::UUID;
 use encoding 'utf8';
+use Class::Trigger;
+
 BEGIN { 
     # Work around the fact that Time::Local caches TZ on first require
     local $ENV{'TZ'} = "GMT";
     require Time::Local;
 
     # Declare early to make sure Jifty::Record::schema_version works
-    $Jifty::VERSION = '0.70824';
+    $Jifty::VERSION = '0.71129';
 }
 
 =head1 NAME
@@ -100,7 +102,7 @@ probably a better place to start.
 use base qw/Jifty::Object/;
 use Jifty::Everything;
 
-use vars qw/$HANDLE $CONFIG $LOGGER $HANDLER $API $CLASS_LOADER $PUB_SUB @PLUGINS/;
+use vars qw/$HANDLE $CONFIG $LOGGER $HANDLER $API $CLASS_LOADER $PUB_SUB $WEB @PLUGINS/;
 
 =head1 METHODS
 
@@ -146,6 +148,7 @@ sub new {
     # Setup the defaults
     my %args = (
         no_handle        => 0,
+        pre_init         => 0,
         logger_component => undef,
         @_
     );
@@ -170,10 +173,10 @@ sub new {
     my @plugins;
     my @plugins_to_load = @{Jifty->config->framework('Plugins')};
     my $app_plugin = Jifty->app_class('Plugin');
+    # we are pushing prereq to plugin, hence the 3-part for.
     for (my $i = 0; my $plugin = $plugins_to_load[$i]; $i++) {
-
         # Prepare to learn the plugin class name
-        my $plugin_name = (keys %{$plugin})[0];
+        my ($plugin_name) = keys %{$plugin};
         my $class;
 
         # Is the plugin name a fully-qualified class name?
@@ -188,7 +191,8 @@ sub new {
         }
 
         # Load the plugin options
-        my %options = %{ $plugin->{ $plugin_name } };
+        my %options = (%{ $plugin->{ $plugin_name } },
+                        _pre_init => $args{'pre_init'} );
 
         # Load the plugin code
         Jifty::Util->require($class);
@@ -236,6 +240,10 @@ sub new {
     # Run the App::start() method if it exists for app-specific initialization
     $app->start()
         if $app->can('start');
+
+    # For plugins that want all the above initialization, but want to run before
+    # we begin serving requests
+    Jifty->call_trigger('post_init');
 }
 
 # Explicitly destroy the classloader; if this happens during global
@@ -338,8 +346,7 @@ An accessor for the L<Jifty::Web> object that the web interface uses.
 =cut
 
 sub web {
-    $HTML::Mason::Commands::JiftyWeb ||= Jifty::Web->new();
-    return $HTML::Mason::Commands::JiftyWeb;
+    return $Jifty::WEB ||= Jifty::Web->new();
 }
 
 =head2 subs
@@ -408,7 +415,9 @@ Find plugins by name.
 sub find_plugin {
     my $self = shift;
     my $name = shift;
-    return grep { $_->isa($name) } Jifty->plugins;
+
+    my @plugins = grep { $_->isa($name) } Jifty->plugins;
+    return wantarray ? @plugins : $plugins[0];
 }
 
 =head2 class_loader
@@ -434,6 +443,13 @@ single argument.  This method is automatically called by L</new>.
 =item no_handle
 
 Defaults to false. If true, Jifty won't try to set up a database handle
+
+=item pre_init
+
+Defaults to false. If true, plugins are notificed that this is a
+pre-init, any trigger registration in C<init()> should not happen
+during this stage.  Note that model mixins's register_triggers is
+unrelated to this.
 
 =back
 

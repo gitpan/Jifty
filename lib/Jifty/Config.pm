@@ -16,7 +16,7 @@ Jifty::Config - the configuration handler for Jifty
 
 This class is automatically loaded during Jifty startup. It contains the configuration information loaded from the F<config.yml> file (generally stored in the F<etc> directory of your application, but see L</load> for the details). This configuration file is stored in L<YAML> format.
 
-This configuration file contains two major sections named "C<framework>" and "C<application>". The framework section contains Jifty-specific configuration options and the application section contains whatever configuration options you want to use with your application. (I.e., if there's any configuration information your application needs to know at startup, this is a good place top put it.)
+This configuration file contains two major sections named "C<framework>" and "C<application>". The framework section contains Jifty-specific configuration options and the application section contains whatever configuration options you want to use with your application. (I.e., if there's any configuration information your application needs to know at startup, this is a good place to put it.)
 
 =cut
 
@@ -96,6 +96,9 @@ framework will look for a test configuration file, specified in either
 the framework's C<TestConfig> or the C<JIFTY_TEST_CONFIG> environment
 variable.
 
+Note that the test config may be drawn from several files if you use
+L<Jifty::Test>. See the documentation of L<Jifty::Test::load_test_configs>.
+
 Values in the test configuration will clobber the site configuration.
 Values in the site configuration file clobber those in the vendor
 configuration file. Values in the vendor configuration file clobber
@@ -146,6 +149,9 @@ sub load {
     # Load the site configuration file
     my $site = $self->load_file(
         Jifty::Util->absolute_path(
+            # Note: $ENV{'JIFTY_SITE_CONFIG'} is already considered
+            #       in ->_default_config_files(), but we || here again
+            #       in case someone overrided _default_config_files().
             $self->framework('SiteConfig') || $ENV{'JIFTY_SITE_CONFIG'}
         )
     );
@@ -222,7 +228,9 @@ sub _default_config_files {
     my $self = shift;
     my $config  = {
         framework => {
-            SiteConfig => 'etc/site_config.yml'
+            SiteConfig => (
+                $ENV{JIFTY_SITE_CONFIG} || 'etc/site_config.yml'
+            )
         }
     };
     return $self->_expand_relative_paths($config);
@@ -281,6 +289,7 @@ sub guess {
                 Backend => 'Memcached',
             },
             Database         => {
+                AutoUpgrade => 1,
                 Database =>  $db_name,
                 Driver   => "SQLite",
                 Host     => "localhost",

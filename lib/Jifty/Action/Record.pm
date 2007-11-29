@@ -249,6 +249,10 @@ sub arguments {
                         collection => $collection
                     }
                 ];
+                unshift @{ $info->{valid_values} }, {
+                    display => _('no value'),
+                    value   => '',
+                } unless $column->mandatory;
             } 
             
             # If the reference is X-to-many instead, skip it
@@ -473,6 +477,12 @@ sub _setup_event_before_action {
 sub _setup_event_after_action {
     my $self = shift;
     my $event_info = shift;
+
+    unless (defined $event_info->{record_id}) {
+        $event_info->{record_id} = $self->record->id;
+        $event_info->{record_class} = ref($self->record);
+        $event_info->{action_class} = ref($self);
+    }
 
     # Add a few more bits about the result
     $event_info->{result} = $self->result;    

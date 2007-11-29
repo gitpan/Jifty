@@ -26,7 +26,7 @@ In your Mason templates:
 
 =head2 C<_>
 
-This module provides a method named C<_>, which allows you to quickly and easily include localized strings in your application. The first argument is the string to translated. If that string contains placeholders, the remaining arguments are used to replace the placeholders. The placeholders in the form of "%1" where the number is the number of the argument used to replace it:
+This module provides a method named C<_>, which allows you to quickly and easily include localized strings in your application. The first argument is the string to be translated. If that string contains placeholders, the remaining arguments are used to replace the placeholders. The placeholders in the form of "%1" where the number is the number of the argument used to replace it:
 
   _('Welcome %1 to the %2', 'Bob', 'World');
 
@@ -71,6 +71,25 @@ sub new {
     my $lang = Jifty->config->framework('L10N')->{'Lang'};
     $lang = [defined $lang ? $lang : ()] unless ref($lang) eq 'ARRAY';
 
+    # Allow hard-coded allowed-languages in the config file
+    my $allowed_lang = Jifty->config->framework('L10N')->{'AllowedLang'};
+    $allowed_lang = [defined $allowed_lang ? $allowed_lang : ()] unless ref($allowed_lang) eq 'ARRAY';
+
+    if (@$allowed_lang) {
+        my $allowed_regex = join '|', map {
+            my $it = $_;
+            $it =~ tr<-A-Z><_a-z>; # lc, and turn - to _
+            $it =~ tr<_a-z0-9><>cd;  # remove all but a-z0-9_
+            $it;
+        } @$allowed_lang;
+
+        foreach my $lang ($self->available_languages) {
+            # "AllowedLang: zh" should let both zh_tw and zh_cn survive,
+            # so we just check ^ but not $.
+            $lang =~ /^$allowed_regex/ or delete $Jifty::I18N::{$lang.'::'};
+        }
+    }
+
     my $lh = $class->get_handle(@$lang);
 
     $DynamicLH = \$lh unless @$lang; 
@@ -106,6 +125,16 @@ sub new {
     return $self;
 }
 
+=head2 available_languages
+
+Return an array of available languages
+
+=cut
+
+sub available_languages {
+    return map { /^(\w+)::/ ? $1 : () } sort keys %Jifty::I18N::;
+}
+
 =head2 _get_file_patterns
 
 Get list of patterns for all PO files in the project.
@@ -133,13 +162,29 @@ sub _get_file_patterns {
 
 =head2 get_language_handle
 
-Get the lanauge language for this request.
+Get the language handle for this request.
 
 =cut
 
 sub get_language_handle {
+    # XXX: subrequest should not need to get_handle again.
     my $self = shift;
-    $$DynamicLH = $self->get_handle() if $DynamicLH;
+    my $lang = Jifty->web->session->get('jifty_lang');
+    $$DynamicLH = $self->get_handle($lang ? $lang : ()) if $DynamicLH;
+}
+
+=head2 get_current_language
+
+Get the current language for this request, formatted as a Locale::Maketext
+subclass string (i.e., C<zh_tw> instead of C<zh-TW>).
+
+=cut
+
+sub get_current_language {
+    return unless $DynamicLH;
+
+    my ($lang) = ref($$DynamicLH) =~ m/::(\w+)$/;
+    return $lang;
 }
 
 =head2 refresh
@@ -183,9 +228,15 @@ sub promote_encoding {
     my $class = shift;
     my $string = shift;
     my $content_type = shift;
+    my $charset;
 
-    $content_type = Email::MIME::ContentType::parse_content_type($content_type) if $content_type;
-    my $charset = $content_type->{attributes}->{charset} if $content_type;
+    # Don't bother parsing the Content-Type header unless it mentions "charset".
+    # This is to avoid the "Unquoted / not allowed in Content-Type" warnings when
+    # the Base64-encoded MIME boundary string contains "/".
+    if ($content_type and $content_type =~ /charset/i) {
+        $content_type = Email::MIME::ContentType::parse_content_type($content_type);
+        $charset = $content_type->{attributes}->{charset};
+    }
 
     # XXX TODO Is this the right thing? Maybe we should just return
     # the string as-is.

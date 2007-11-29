@@ -6,6 +6,15 @@ use strict;
 Jifty::Filter::DateTime -- A Jifty::DBI filter to work with
                           Jifty::DateTime objects
 
+=head1 SYNOPSIS
+
+   # use it with Jifty::DBI::Filter::Date or J::D::F::DateTime
+    column created =>
+      type is 'timestamp',
+      filters are qw( Jifty::Filter::DateTime Jifty::DBI::Filter::DateTime),
+      label is 'Created',
+      is immutable;
+
 =head1 DESCRIPTION
 
 Jifty::Filter::DateTime promotes DateTime objects to Jifty::DateTime
@@ -48,6 +57,10 @@ sub decode {
         $args{$_} = $$value_ref->$_ if(defined($$value_ref->$_));
     }
 
+    # the floating timezone indicates a date, so we don't want to set any
+    # other timezone on it
+    $args{time_zone} = 'floating' if $$value_ref->time_zone =~ /floating/i;
+
     my $dt = Jifty::DateTime->new(%args);
 
     $$value_ref = $dt;
@@ -57,6 +70,11 @@ sub decode {
 
 L<Jifty::DBI::Filter::Date>, L<Jifty::DBI::Filter::DateTime>,
 L<Jifty::DateTime>
+
+=head1 LICENSE
+
+Jifty is Copyright 2005-2007 Best Practical Solutions, LLC.
+Jifty is distributed under the same terms as Perl itself.
 
 =cut
 

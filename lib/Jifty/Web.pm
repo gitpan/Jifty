@@ -49,6 +49,7 @@ __PACKAGE__->javascript_libs([qw(
     scriptaculous/controls.js
     formatDate.js
     template_declare.js
+    loc.js
     jifty.js
     jifty_utils.js
     jifty_subs.js
@@ -74,7 +75,7 @@ __PACKAGE__->javascript_libs([qw(
     css_browser_selector.js
 )]);
 
-use Jifty::DBI::Class::Trigger;
+use Class::Trigger;
 
 =head1 METHODS
 
@@ -564,50 +565,6 @@ sub new_action_from_request {
     );
 }
 
-=head3 new_record_action model => MODELCLASS, record_action => RECORD_ACTION, PARAMHASH
-
-This takes all the same arguments as L</new_action>, except that you specify the C<model> and C<record_action> rather than the C<class>. This helps you create a record action.
-
-You must give the C<model> argument, which may either be an instance of the model or the class name. 
-
-The C<record_action> is optional and defaults to 'Update' if not given. It can be set to 'Create', 'Update', 'Delete', or 'Search'.
-
-For example:
-
-  my $record = MyApp::Model::Employee->new;
-  $record->load(14);
-
-  my $action = Jifty->web->new_record_action(
-      model         => $record,
-      record_action => 'Delete',
-      record        => $record,
-  );
-
-  # $action is now an instance of MyApp::Model::DeleteEmployee
-
-=cut
-
-sub new_record_action {
-    my $self = shift;
-    my %args = (
-        model         => undef,
-        record_action => 'Update',
-        @_
-    );
-
-    # Get the name of the model class and action
-    my $model         = delete $args{model};
-    my $action_class  = blessed $model || $model;
-    my $record_action = delete $args{record_action};
-
-    # Convert it to the action
-    $action_class =~ s/::Model::/::Action::$record_action/;
-
-    # Add it to the arguments and call new_action()
-    $args{class} = $action_class;
-    return $self->new_action( %args );
-}
-
 =head3 failed_actions
 
 Returns an array of L<Jifty::Action> objects, one for each
@@ -696,6 +653,8 @@ sub webservices_redirect {
     my ( $self, $to ) = @_;
     # XXX: move to singlepage plugin
     my ($spa) = Jifty->find_plugin('Jifty::Plugin::SinglePage') or return;
+
+    return if $self->failed_actions;
 
     Jifty->web->request->remove_state_variable( 'region-'.$spa->region_name );
     Jifty->web->request->add_fragment(
@@ -825,6 +784,10 @@ sub _redirect {
     # Headers..
     $apache->header_out( Location => $page );
     $apache->header_out( Status => 302 );
+
+    # cookie has to be sent or returning from continuations breaks
+    Jifty->web->session->set_cookie;
+
     $apache->send_http_header();
 
     # Mason abort, or dispatcher abort out of here
@@ -1116,21 +1079,14 @@ Returns a C<< <link> >> tag for the compressed CSS
 
 sub include_css {
     my $self = shift;
-    my ($ccjs) = Jifty->find_plugin('Jifty::Plugin::CompressedCSSandJS');
-    if ( $ccjs && $ccjs->css_enabled ) {
-        $self->generate_css;
-        $self->out(
-            '<link rel="stylesheet" type="text/css" href="/__jifty/css/'
-            . __PACKAGE__->cached_css_digest . '.css" />'
-        );
-    }
-    else {
-        $self->out(
-            '<link rel="stylesheet" type="text/css" '
-            . 'href="/static/css/main.css" />'
-        );
-    }
-    
+
+    # if there's no trigger, 0 is returned.  if aborted/handled, undef
+    # is returned.
+    defined $self->call_trigger( 'include_css', @_ ) or return '';
+
+    $self->out( '<link rel="stylesheet" type="text/css" '
+            . 'href="/static/css/main.css" />' );
+
     return '';
 }
 
@@ -1146,37 +1102,6 @@ sub add_css {
         @{ Jifty->web->css_files },
         @_
     ]);
-}
-
-=head3 generate_css
-
-Checks if the compressed CSS is generated, and if it isn't, generates
-and caches it.
-
-=cut
-
-sub generate_css {
-    my $self = shift;
-
-    if (not defined __PACKAGE__->cached_css_digest
-            or Jifty->config->framework('DevelMode'))
-    {
-        Jifty->log->debug("Generating CSS...");
-        
-        my @roots = map { Jifty::Util->absolute_path( File::Spec->catdir( $_, 'css' ) ) }
-                        Jifty->handler->view('Jifty::View::Static::Handler')->roots;
-
-        CSS::Squish->roots( @roots );
-        
-        my $css = CSS::Squish->concatenate(
-            map { CSS::Squish->_resolve_file( $_, @roots ) }
-                @{ $self->css_files }
-        );
-
-        __PACKAGE__->cached_css( $css );
-        __PACKAGE__->cached_css_digest( md5_hex( $css ) );
-		__PACKAGE__->cached_css_time( time );
-    }
 }
 
 =head3 include_javascript
@@ -1223,13 +1148,15 @@ sub include_javascript {
 
     # if there's no trigger, 0 is returned.  if aborted/handled, undef
     # is returned.
-    defined $self->call_trigger('include_javascript', @_) or return '';
-
-    for my $file ( @{ __PACKAGE__->javascript_libs } ) {
-        $self->out(
-            qq[<script type="text/javascript" src="/static/js/$file"></script>\n]
-        );
+    if ( defined $self->call_trigger('include_javascript', @_) ) {
+        for my $file ( @{ __PACKAGE__->javascript_libs } ) {
+            $self->out(
+                       qq[<script type="text/javascript" src="/static/js/$file"></script>\n]
+                      );
+        }
     }
+
+    $self->call_trigger('after_include_javascript', @_);
 
     return '';
 }
@@ -1242,10 +1169,7 @@ Pushes files onto C<Jifty->web->javascript_libs>
 
 sub add_javascript {
     my $self = shift;
-    Jifty->web->javascript_libs([
-        @{ Jifty->web->javascript_libs },
-        @_
-    ]);
+    Jifty->web->javascript_libs([ @{ Jifty->web->javascript_libs }, @_ ]);
 }
 
 =head3 add_external_javascript URL1, URL2, ...
@@ -1257,9 +1181,7 @@ Pushes urls onto C<Jifty->web->external_javascript_libs>
 sub add_external_javascript {
     my $self = shift;
     Jifty->web->external_javascript_libs([
-        @{ Jifty->web->external_javascript_libs },
-        @_
-    ]);
+        @{ Jifty->web->external_javascript_libs }, @_ ]);
 }
 
 =head2 STATE VARIABLES

@@ -48,13 +48,27 @@ sub run {
     if ( $self->{create_all_tables} ) {
         $self->create_all_tables();
     } elsif ( $self->{'setup_tables'} ) {
-        $self->upgrade_jifty_tables();
-        $self->upgrade_application_tables();
-        $self->upgrade_plugin_tables();
+        $self->run_upgrades();
     } else {
         print "Done.\n";
     }
 }
+
+
+=head2 run_upgrades
+
+Take the actions we need in order to bring an existing database up to current.
+
+=cut
+
+sub run_upgrades {
+    my $self = shift;
+        $self->upgrade_jifty_tables();
+        $self->upgrade_application_tables();
+        $self->upgrade_plugin_tables();
+
+}
+
 
 =head2 setup_environment
 
@@ -195,7 +209,7 @@ sub create_all_tables {
         for my $plugin (Jifty->plugins) {
             my $plugin_bootstrapper = $plugin->bootstrapper;
             Jifty::Util->require($plugin_bootstrapper);
-            $plugin_bootstrapper->run() if $bootstrapper->can('run');
+            $plugin_bootstrapper->run() if $plugin_bootstrapper->can('run');
         }
     };
     die $@ if $@;
@@ -342,14 +356,50 @@ sub upgrade_plugin_tables {
 
     for my $plugin (Jifty->plugins) {
         my $plugin_class = ref $plugin;
-        my $dbv  = version->new( Jifty::Model::Metadata->load($plugin_class . '_version') || '0.0.1' );
+
+        my $dbv  = Jifty::Model::Metadata->load($plugin_class . '_db_version');
         my $appv = version->new( $plugin->version );
 
-        return unless $self->upgrade_tables( $plugin_class, $dbv, $appv, $plugin->upgrade_class );
-        if ( $self->{print} ) {
-            warn "Need to upgrade ${plugin_class}_db_version to $appv here!";
-        } else {
-            Jifty::Model::Metadata->store( $plugin_class . '_db_version' => $appv );
+        # Upgrade this plugin from dbv -> appv
+        if (defined $dbv) {
+            $dbv = version->new( $dbv );
+
+            next unless $self->upgrade_tables( $plugin_class, $dbv, $appv, $plugin->upgrade_class );
+            if ( $self->{print} ) {
+                warn "Need to upgrade ${plugin_class}_db_version to $appv here!";
+            } else {
+                Jifty::Model::Metadata->store( $plugin_class . '_db_version' => $appv );
+            }
+        }
+
+        # Install this plugin
+        else {
+            my $log = Log::Log4perl->get_logger("SchemaTool");
+            $log->info("Generating SQL to set up $plugin_class...");
+            Jifty->handle->begin_transaction;
+
+            # Create the tables
+            $self->create_tables_for_models(
+                grep { $_->isa('Jifty::DBI::Record') and /^\Q$plugin_class\E::Model::/ }
+                     $self->schema->models);
+            
+            # Save the plugin version to the database
+            Jifty::Model::Metadata->store( $plugin_class . '_db_version' => $appv )
+                unless $self->{print};
+
+            # Run the bootstrapper for initial data
+            unless ($self->{print}) {
+                eval {
+                    my $bootstrapper = $plugin->bootstrapper;
+                    Jifty::Util->require($bootstrapper);
+                    $bootstrapper->run if $bootstrapper->can('run');
+                };
+                die $@ if $@;
+            }
+                
+            # Save them records
+            Jifty->handle->commit;
+            $log->info("Set up $plugin_class version $appv");
         }
     }
 }
@@ -402,20 +452,8 @@ sub upgrade_tables {
         if ($model->can( 'since' ) and defined $model->since and  $appv >= $model->since and $model->since >$dbv ) {
             unshift @{ $UPGRADES{ $model->since } }, $model->printable_table_schema();
         } else {
-            # Go through the columns
+            # Go through the currently-active columns
             for my $col  (grep {not $_->virtual} $model->columns ) {
-
-                # If they're old, drop them
-                if ( defined $col->till and $appv >= $col->till and $col->till > $dbv ) {
-                    push @{ $UPGRADES{ $col->till } }, sub {
-                        my $renamed = $upgradeclass->just_renamed || {};
-
-                        # skip it if this was dropped by a rename
-                        $model->drop_column_in_db($col->name)
-                            unless defined $renamed->{ $model->table }->{'drop'}->{ $col->name };
-                    };
-                }
-
                 # If they're new, add them
                 if ($col->can( 'since' ) and defined $col->since and $appv >= $col->since and $col->since >$dbv ) {
                     unshift @{ $UPGRADES{ $col->since } }, sub {

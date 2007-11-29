@@ -9,19 +9,21 @@ requires('Class::Accessor'); # Class::Accessor::Fast
 requires('Class::Container');
 requires('Class::Data::Inheritable');
 requires('Class::Trigger' => '0.12');
+requires('Clone' => '0.27');
 requires('CGI' => '3.19');
 requires('CGI::Cookie::Splitter');
 requires('Crypt::CBC');
 requires('Crypt::Rijndael');
 requires('Compress::Zlib');
-requires('CSS::Squish' => 0.05 );
+requires('CSS::Squish' => 0.07 );
 requires('DBD::SQLite' => 1.11 );
 requires('Data::Page');
 requires('Data::UUID');
 requires('DateTime');
+requires('DateTime::Locale');
 requires('Date::Manip');
 requires('Email::Folder');
-requires('Email::LocalDelivery');
+requires('Email::LocalDelivery' => 0.217 );
 requires('Email::MIME');
 requires('Email::MIME::Creator');
 requires('Email::MIME::ContentType');
@@ -34,6 +36,8 @@ requires('Exporter::Lite');
 requires('File::Find::Rule');
 requires('File::MMagic');
 requires('File::ShareDir' => '0.04');
+requires('File::Spec' => '3.14');
+requires('File::Temp' => '0.15'); # we need cleanup()
 requires('HTML::Entities');
 requires('HTML::Lint');
 requires('HTML::Mason' => 1.3101);           # HTML::Mason::Exceptions HTML::Mason::FakeApache HTML::Mason::MethodMaker HTML::Mason::Request HTML::Mason::Utils
@@ -46,7 +50,7 @@ requires('Hash::Merge');
 requires('Hook::LexWrap');
 requires('IPC::PubSub' => '0.23' );
 requires('IPC::Run3');
-requires('Jifty::DBI' => '0.42' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
+requires('Jifty::DBI' => '0.47' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
 requires('Locale::Maketext::Extract' => '0.20');
 requires('Locale::Maketext::Lexicon' => '0.60');
 requires('Log::Log4perl' => '1.04');
@@ -66,14 +70,15 @@ requires('String::Koremutake');
 requires('SQL::ReservedWords');
 requires('Template::Declare' => '0.26');                # Template::Declare::Tags
 requires('Test::Base');
-requires('Test::LongString');
 requires('Test::Log4perl');
+requires('Test::LongString');
 requires('Test::More' => 0.62 ),
 requires('Test::Pod::Coverage'),
 requires('Test::WWW::Mechanize' => 1.04 ),
+requires('Test::WWW::Selenium'),
 requires('WWW::Mechanize' => 1.30 ),
 requires('UNIVERSAL::require');
-requires('URI');
+requires('URI' => 1.31);
 requires('XML::Writer' => '0.601');
 requires('XML::Simple');
 requires('XML::XPath');
@@ -106,7 +111,8 @@ features(
         recommends('Test::HTML::Lint'),
         recommends('Test::MockModule' => '0.05'),
         recommends('Test::MockObject' => '1.07'),
-        recommends('Module::Refresh' => '0.09')
+        recommends('Module::Refresh' => '0.09'),
+        recommends('Test::WWW::Declare' => '0.01'),
     ],
     'Development of the jifty framework' => [
         -default => 0,
@@ -154,6 +160,31 @@ features(
         recommends('XML::Simple'),
         recommends('Image::Info'), # for testing
     ],
+    'Memory Leak Plugin' => [
+        -default => 0,
+        recommends('Devel::Events' => '0.02'),
+        recommends('Devel::Events::Handler::ObjectTracker'),
+        recommends('Devel::Events::Generator::Objects'),
+        recommends('Devel::Size'),
+    ],
+    'OAuth Plugin' => [
+        -default => 0,
+        recommends('Net::OAuth::Request' => '0.04'),
+        recommends('Net::OAuth::RequestTokenRequest'),
+        recommends('Net::OAuth::AccessTokenRequest'),
+        recommends('Net::OAuth::ProtectedResourceRequest'),
+
+        recommends('Crypt::OpenSSL::RSA'),
+        recommends('Digest::HMAC_SHA1'),
+    ],
+    'Ldap Plugin' => [
+        -default => 0,
+        recommends('Net::LDAP')
+    ],
+    'CAS Plugin' => [
+        -default => 0,
+        recommends('Authen::CAS::Client')
+    ]
 );
 
 

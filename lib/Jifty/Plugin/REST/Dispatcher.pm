@@ -21,6 +21,7 @@ before qr{^ (/=/ .*) \. (js|json|yml|yaml|perl|pl|xml) $}x => run {
 
 before POST qr{^ (/=/ .*) ! (DELETE|PUT|GET|POST|OPTIONS|HEAD|TRACE|CONNECT) $}x => run {
     $ENV{REQUEST_METHOD} = $2;
+    $ENV{REST_REWROTE_METHOD} = 1;
     dispatch $1;
 };
 
@@ -97,11 +98,24 @@ magical.
 sub stringify {
     # XXX: allow configuration to specify model fields that are to be
     # expanded
-    no warnings 'uninitialized';
-    my @r = map { ref($_) && UNIVERSAL::isa($_, 'Jifty::Record')
-                             ? reference_to_data($_) :
-                  defined $_ ? '' . $_               : undef } @_;
-    return wantarray ? @r : pop @r;
+    my @r;
+
+    for (@_) {
+        if (UNIVERSAL::isa($_, 'Jifty::Record')) {
+            push @r, reference_to_data($_);
+        }
+        elsif (UNIVERSAL::isa($_, 'Jifty::DateTime')) {
+            push @r, _datetime_to_data($_);
+        }
+        elsif (defined $_) {
+            push @r, '' . $_; # force stringification
+        }
+        else {
+            push @r, undef;
+        }
+    }
+
+    return wantarray ? @r : $r[-1];
 }
 
 =head2 reference_to_data
@@ -124,6 +138,7 @@ Current known types:
 
   Jifty::DBI::Collection
   Jifty::DBI::Record
+  Jifty::DateTime
 
 =cut
 
@@ -133,6 +148,7 @@ sub object_to_data {
     my %types = (
         'Jifty::DBI::Collection' => \&_collection_to_data,
         'Jifty::DBI::Record'     => \&_record_to_data,
+        'Jifty::DateTime'        => \&_datetime_to_data,
     );
 
     for my $type ( keys %types ) {
@@ -166,6 +182,46 @@ sub _record_to_data {
                  } $record->readable_attributes;
     return \%data;
 }
+
+sub _datetime_to_data {
+    my $dt = shift;
+
+    # if it looks like just a date, then return just the date portion
+    return $dt->ymd
+        if lc($dt->time_zone->name) eq 'floating'
+        && $dt->hms('') eq '000000';
+
+    # otherwise let stringification take care of it
+    return $dt;
+}
+
+=head2 recurse_object_to_data REF
+
+Takes a reference, and calls C<object_to_data> on it if that is
+meaningful.  If it is an arrayref, or recurses on each element.  If it
+is a hashref, recurses on each value.  Returns the new datastructure.
+
+=cut
+
+sub recurse_object_to_data {
+    my $o = shift;
+    return $o unless ref $o;
+
+    my $updated = object_to_data($o);
+    if ($o ne $updated) {
+        return $updated;
+    } elsif (ref $o eq "ARRAY") {
+        my @a = map {recurse_object_to_data($_)} @{$o};
+        return \@a;
+    } elsif (ref $o eq "HASH") {
+        my %h;
+        $h{$_} = recurse_object_to_data($o->{$_}) for keys %{$o};
+        return \%h;
+    } else {
+        return $o;
+    }
+}
+
 
 =head2 list PREFIX items
 
@@ -680,19 +736,13 @@ sub run_action {
 
     Jifty->api->is_allowed( $action_name ) or abort(403);
 
-    my $params = $action->arguments;
-    for my $key ( keys %$params ) {
-        next if not exists $params->{ $key }{'default_value'};
-        next if $action->has_argument( $key );
-        $action->argument_value( $key => $params->{ $key }{'default_value'} );
-    }
-
     $action->validate;
 
     local $@;
     eval { $action->run };
 
     if ($@) {
+        Jifty->log->warn($@);
         abort(500);
     }
 
@@ -718,11 +768,7 @@ sub run_action {
     for (keys %{$out->{field_warnings}}) {
         delete $out->{field_warnings}->{$_} unless $out->{field_warnings}->{$_};
     }
-    $out->{content} = $result->content;
-
-    for my $key ( keys %{ $out->{content} } ) {
-        $out->{content}{$key} = object_to_data( $out->{content}{$key} );
-    }
+    $out->{content} = recurse_object_to_data($result->content);
     
     outs(undef, $out);
 

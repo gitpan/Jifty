@@ -33,6 +33,14 @@ sub new {
 
 Sets or returns the string that the menu item will be displayed as.
 
+=cut
+
+sub label {
+    my $self = shift;
+    $self->{label} = shift if @_;
+    return $self->{label};
+}
+
 =head2 parent [MENU]
 
 Gets or sets the parent L<Jifty::Web::Menu> of this item; this defaults
@@ -112,14 +120,16 @@ the end of the list, if it is a new C<KEY>.
 sub child {
     my $self = shift;
     my $key = shift;
+    my $proto = ref $self || $self;
+
     if (@_) {
-        $self->{children}{$key} = Jifty::Web::Menu->new({parent => $self,
-                                                        sort_order => ($self->{children}{$key}{sort_order}
-                                                                       || scalar values %{$self->{children}}),
-                                                        label => $key,
-                                                        escape_label => 1,
-                                                        @_
-                                                       });
+        $self->{children}{$key} = $proto->new({parent => $self,
+                                               sort_order => ($self->{children}{$key}{sort_order}
+                                                          || scalar values %{$self->{children}}),
+                                               label => $key,
+                                               escape_label => 1,
+                                               @_
+                                             });
         Scalar::Util::weaken($self->{children}{$key}{parent});
         # Activate it
         if (my $url = $self->{children}{$key}->url and Jifty->web->request) {
@@ -231,7 +241,7 @@ sub render_as_hierarchical_menu_item {
     my @kids = $self->children;
     my $id   = Jifty->web->serial;
     Jifty->web->out( qq{<li class="toplevel }
-            . ( $self->active ? 'active' : 'closed' ) . qq{">}
+            . ( $self->active ? 'active' : 'closed' ) .' '.($self->class||"").' '. qq{">}
             . qq{<span class="title">} );
     Jifty->web->out( $self->as_link );
     Jifty->web->out(qq{</span>});
@@ -244,7 +254,7 @@ sub render_as_hierarchical_menu_item {
                 . $id
                 . qq{">} );
         for (@kids) {
-            Jifty->web->out(qq{<li class="submenu }.($_->active ? 'active' : '' ).qq{">});
+            Jifty->web->out(qq{<li class="submenu }.($_->active ? 'active' : '' ).' '. ($_->class || "").qq{">});
 
             # We should be able to get this as a string.
             # Either stringify the link object or output the label

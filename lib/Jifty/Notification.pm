@@ -19,7 +19,7 @@ Jifty::Notification - Send emails from Jifty
 =head1 USAGE
 
 It is recommended that you subclass L<Jifty::Notification> and
-override C<body>, C<html-body>, C<subject>, C<recipients>, and C<from>
+override C<body>, C<html_body>, C<subject>, C<recipients>, and C<from>
 for each message.  (You may want a base class to provide C<from>,
 C<preface> and C<footer> for example.)  This lets you keep all of your
 notifications in the same place.
@@ -94,7 +94,7 @@ sub send_one_message {
     my $self       = shift;
     my @recipients = $self->recipients;
     my $to         = join( ', ',
-        map { ( $_->can('email') ? $_->email : $_ ) } grep {$_} @recipients );
+        map { ( ref $_ && $_->can('email') ? $_->email : $_ ) } grep {$_} @recipients );
     $self->log->debug("Sending a ".ref($self)." to $to"); 
     return unless ($to);
     my $message = "";

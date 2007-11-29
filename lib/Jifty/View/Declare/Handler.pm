@@ -3,7 +3,7 @@ package Jifty::View::Declare::Handler;
 use warnings;
 use strict;
 
-use base qw/Jifty::Object Class::Accessor/;
+use base qw/Jifty::Object Class::Accessor::Fast/;
 use Template::Declare;
 
 __PACKAGE__->mk_accessors(qw/root_class/);
@@ -76,11 +76,12 @@ sub show {
     };
     
     my $content = Template::Declare::Tags::show_page( $template, Jifty->web->request->arguments );
-    return unless defined $content && length $content;
+    return unless defined $content;
 
     my $r = Jifty->handler->apache;
     $r->content_type || $r->content_type('text/html; charset=utf-8'); # Set up a default
     unless ( Jifty->handler->apache->http_header_sent || Jifty->web->request->is_subrequest ) {
+        Jifty->web->session->set_cookie;
         Jifty->handler->apache->send_http_header;
     }
 
