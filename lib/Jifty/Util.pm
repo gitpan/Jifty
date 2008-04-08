@@ -118,10 +118,11 @@ sub share_root {
 
 =head2 app_root
 
-Returns the application's root path.  This is done by searching upward
-from the current directory, looking for a directory which contains a
-C<bin/jifty>.  Failing that, it searches upward from wherever the
-executable was found.
+Returns the application's root path.  This is done by returning
+$ENV{'JIFTY_APP_ROOT'} if it exists.  If not, Jifty tries searching
+upward from the current directory, looking for a directory which
+contains a C<bin/jifty>.  Failing that, it searches upward from
+wherever the executable was found.
 
 It C<die>s if it can only find C</usr> or C</usr/local> which fit
 these criteria.
@@ -131,7 +132,7 @@ these criteria.
 sub app_root {
     my $self = shift;
 
-
+    return $ENV{'JIFTY_APP_ROOT'} if ($ENV{'JIFTY_APP_ROOT'});
     return $APP_ROOT if ($APP_ROOT);
     
     my @roots;
@@ -147,10 +148,11 @@ sub app_root {
 
     Jifty::Util->require('ExtUtils::MM') if $^O =~ /(?:MSWin32|cygwin|os2)/;
     Jifty::Util->require('Config');
-    for (@roots) {
-        my @root = File::Spec->splitdir($_);
+    for my $root_path (@roots) {
+        my ($volume, $dirs) = File::Spec->splitpath($root_path, 'no_file');
+        my @root = File::Spec->splitdir($dirs);
         while (@root) {
-            my $try = File::Spec->catdir( @root, "bin", "jifty" );
+            my $try = File::Spec->catpath($volume, File::Spec->catdir( @root, "bin", "jifty" ), '');
             if (# XXX: Just a quick hack
                 # MSWin32's 'maybe_command' sees only file extension.
                 # Maybe we should check 'jifty.bat' instead on Win32,
@@ -163,7 +165,7 @@ sub app_root {
                 and lc($try) ne lc(File::Spec->catdir($Config::Config{bin}, "jifty"))
                 and lc($try) ne lc(File::Spec->catdir($Config::Config{scriptdir}, "jifty")) )
             {
-                return $APP_ROOT = File::Spec->catdir(@root);
+                return $APP_ROOT = File::Spec->catpath($volume, File::Spec->catdir(@root), '');
             }
             pop @root;
         }
@@ -226,7 +228,13 @@ sub make_path {
     my $whole_path = shift;
     return 1 if (-d $whole_path);
     Jifty::Util->require('File::Path');
-    File::Path::mkpath([$whole_path]);
+
+    local $@;
+    eval { File::Path::mkpath([$whole_path]) };
+
+    if ($@) {
+        Jifty->log->fatal("Unable to make path: $whole_path: $@")
+    }
 }
 
 =head2 require PATH
@@ -256,16 +264,21 @@ sub _require {
 
     return 1 if $self->already_required($class);
 
-    my $pkg = $class .".pm";
-    $pkg =~ s/::/\//g;
-    my $retval = eval  {CORE::require "$pkg"} ;
+    # .pm might already be there in a weird interaction in Module::Pluggable
+    my $file = $class;
+    $file .= ".pm"
+        unless $file =~ /\.pm$/;
+
+    $file =~ s/::/\//g;
+
+    my $retval = eval  {CORE::require "$file"} ;
     my $error = $@;
     if (my $message = $error) { 
         $message =~ s/ at .*?\n$//;
-        if ($args{'quiet'} and $message =~ /^Can't locate $pkg/) {
+        if ($args{'quiet'} and $message =~ /^Can't locate $file/) {
             return 0;
         }
-        elsif ( $error !~ /^Can't locate $pkg/) {
+        elsif ( $error !~ /^Can't locate $file/) {
             die $error;
         } else {
             Jifty->log->error(sprintf("$message at %s line %d\n", (caller(1))[1,2]));
@@ -321,6 +334,60 @@ sub generate_uuid {
         require Data::UUID;
         Data::UUID->new;
     })->create_str;
+}
+
+=head2 reference_to_data Object
+
+Provides a saner output format for models than
+C<MyApp::Model::Foo=HASH(0x1800568)>.
+
+=cut
+
+sub reference_to_data {
+    my ($self, $obj) = @_;
+    (my $model = ref($obj)) =~ s/::/./g;
+    my $id = $obj->id;
+
+    # probably a file extension, from the REST rewrite
+    my $extension = $ENV{HTTP_ACCEPT} =~ /^\w+$/ ? ".$ENV{HTTP_ACCEPT}" : '';
+
+    return {
+        jifty_model_reference => 1,
+        id                    => $obj->id,
+        model                 => $model,
+        url                   => Jifty->web->url(path => "/=/model/$model/id/$id$extension"),
+    };
+}
+
+=head2 stringify LIST
+
+Takes a list of values and forces them into strings.  Right now all it does
+is concatenate them to an empty string, but future versions might be more
+magical.
+
+=cut
+
+sub stringify {
+    my $self = shift;
+
+    my @r;
+
+    for (@_) {
+        if (UNIVERSAL::isa($_, 'Jifty::Record')) {
+            push @r, Jifty::Util->reference_to_data($_);
+        }
+        if (UNIVERSAL::isa($_, 'Jifty::DateTime') && $_->is_date) {
+            push @r, $_->ymd;
+        }
+        elsif (defined $_) {
+            push @r, '' . $_; # force stringification
+        }
+        else {
+            push @r, undef;
+        }
+    }
+
+    return wantarray ? @r : $r[-1];
 }
 
 =head1 AUTHOR

@@ -4,7 +4,7 @@ use strict;
 package Jifty::Request;
 
 use base qw/Jifty::Object Class::Accessor::Fast/;
-__PACKAGE__->mk_accessors(qw(_top_request arguments just_validating path continuation_id continuation_type continuation_path));
+__PACKAGE__->mk_accessors(qw(_top_request arguments template_arguments just_validating path continuation_id continuation_type continuation_path));
 
 use Jifty::JSON;
 use Jifty::YAML;
@@ -80,6 +80,7 @@ sub new {
     $self->{'state_variables'} = {};
     $self->{'fragments'} = {};
     $self->arguments({});
+    $self->template_arguments({});
 
     my %args = @_;
     for (keys %args) {
@@ -217,6 +218,7 @@ sub from_data_structure {
             path      => $f->{path},
             arguments => $f->{args},
             wrapper   => $f->{wrapper} || 0,
+            in_form   => $f->{in_form},
         );
         while ( ref $f->{parent} eq "HASH" and $f = $f->{parent} ) {
             $current = $current->parent(
@@ -359,6 +361,28 @@ sub argument {
     $val;
 }
 
+=head2 template_argument KEY [=> VALUE]
+
+Sets an argument for the current template.  Template arguments, unlike
+values set via L</argument>, B<cannot> add actions, change action
+argument, or change state variables.  They are also not stored in
+continuations.
+
+=cut
+
+sub template_argument {
+    my $self = shift;
+
+    my $key = shift;
+    $self->template_arguments({}) unless $self->template_arguments;
+    if (@_) {
+        my $value = shift;
+        $self->template_arguments->{$key} = $value;
+    }
+    defined(my $val = $self->template_arguments->{$key}) or return undef;
+    $val;
+}
+
 =head2 delete KEY
 
 Removes the argument supplied -- this is the opposite of L</argument>,
@@ -370,6 +394,11 @@ sub delete {
     my $self = shift;
 
     my $key = shift;
+    $self->template_arguments({}) unless $self->template_arguments;
+    if (exists $self->template_arguments->{$key}) {
+        delete $self->template_arguments->{$key};
+        return;
+    }
     delete $self->arguments->{$key};
     if ($key =~ /^J:A-(?:(\d+)-)?(.+)/s) {
         $self->remove_action($2);
@@ -532,6 +561,10 @@ sub save_continuation {
     # continuation" into the continuation!
     $self->continuation_path(undef);
 
+    # Clear out the (locally-set) template arguments, which would
+    # bloat the continuation, and can be entirely re-generated.
+    $self->template_arguments({});
+
     my $c = Jifty::Continuation->new(
         request  => $self,
         response => Jifty->web->response,
@@ -564,14 +597,31 @@ sub call_continuation {
 
 =head2 return_from_continuation
 
+Returns from the current continuation, if there is one.  If the
+request path doesn't match, we call the continuation again, which
+should redirect to the right place.  If we have to do this, we return
+true, which should be taken as a sign to not process the reqest
+further.
+
 =cut
 
 sub return_from_continuation {
     my $self = shift;
     return unless $self->continuation_type and $self->continuation_type eq "return" and $self->continuation;
-    return $self->continuation->call unless $self->continuation->return_path_matches;
+    unless ($self->continuation->return_path_matches) {
+        # This aborts via Jifty::Dispatcher::_abort -- but we're not
+        # in the dispatcher yet, so it would go uncaught.  Catch it
+        # here.
+        eval {
+            $self->continuation->call;
+        };
+        my $err = $@;
+        warn $err if $err and $err ne "ABORT";
+        return 1;
+    }
     $self->log->debug("Returning from continuation ".$self->continuation->id);
-    return $self->continuation->return;
+    $self->continuation->return;
+    return undef;
 }
 
 =head2 path
@@ -805,12 +855,13 @@ sub add_fragment {
                 path      => undef,
                 arguments => undef,
                 wrapper   => undef,
+                in_form   => undef,
                 @_
                );
 
     my $fragment = $self->{'fragments'}->{ $args{'name'} } || Jifty::Request::Fragment->new;
 
-    for my $k (qw/name path wrapper/) {
+    for my $k (qw/name path wrapper in_form/) {
         $fragment->$k($args{$k}) if defined $args{$k};
     } 
     
@@ -943,7 +994,7 @@ A small package that encapsulates the bits of a state variable:
 
 package Jifty::Request::Fragment;
 use base 'Class::Accessor::Fast';
-__PACKAGE__->mk_accessors( qw/name path wrapper arguments parent/ );
+__PACKAGE__->mk_accessors( qw/name path wrapper in_form arguments parent/ );
 
 =head2 Jifty::Request::Fragment
 
@@ -954,6 +1005,8 @@ A small package that encapsulates the bits of a fragment request:
 =head3 path [PATH]
 
 =head3 wrapper [BOOLEAN]
+
+=head3 in_form [BOOLEAN]
 
 =head3 argument NAME [VALUE]
 

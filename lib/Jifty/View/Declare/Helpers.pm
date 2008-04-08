@@ -9,7 +9,7 @@ our @EXPORT = (
     qw(hyperlink tangent redirect new_action
     form_submit form_return form_next_page page content
     wrapper request get set render_param current_user
-    render_action render_region),
+    render_action render_region js_handlers),
     @Template::Declare::Tags::EXPORT,
     @Template::Declare::Tags::TagSubs,  # Backward compatibility only
     @Template::Declare::Tags::TAG_SUB_LIST,
@@ -228,16 +228,28 @@ Returns arguments as set in the dispatcher or with L</set> below.
 If called in scalar context, pulls the first item in C<args> and returns it.
 If called in list context, returns the values of all items in C<args>.
 
-
-
 =cut
 
 sub get {
     if (wantarray) {
-        map { request->argument($_) } @_;
+        map { _get_single($_) } @_;
     } else {
-        request->argument( $_[0] );
+        _get_single($_[0]);
     }
+}
+
+sub _get_single {
+    my $v = request->template_argument($_[0]) || request->argument( $_[0] );
+    return $v if defined $v;
+
+    if (request->top_request ne request() and $v = request->top_request->template_argument($_[0])) {
+        if (ref $v) {
+            warn("The template argument '$_[0]' was not explicitly passed to the current region ('@{[request->path]}'), and thus will not work if the region is ever refreshed.  Unfortunately, it is a reference, so it can't be passed explicitly either.  You'll need to explicitly pass some stringification of what it is to the region.".Carp::longmess);
+        } else {
+            warn("The template argument '$_[0]' was not explicitly passed to the the current region ('@{[request->path]}'), and thus will not work if the region is ever refreshed.  Try passing it explicitly?");
+        }
+    }
+    return undef;
 }
 
 
@@ -245,13 +257,12 @@ sub get {
 
 Sets arguments for later grabbing with L<get>.
 
-
 =cut
 
 
 sub set {
     while ( my ( $arg, $val ) = splice(@_, 0, 2) ) {
-        request->argument( $arg => $val );
+        request->template_argument( $arg => $val );
     }
 
 }
@@ -356,7 +367,26 @@ sub wrapper {
     }
 }
 
+=head2 js_handlers
 
+Allows you to put javascript handlers, a la
+L<Jifty::Web::Form::Element>, onto arbitrary HTML elements:
+
+  div {
+      js_handlers {
+          onclick => { path => "/some/region/path" }
+      }
+  }
+
+=cut
+
+sub js_handlers(&;@) {
+    my $code = shift;
+    my $element = Jifty::Web::Form::Element->new({$code->()});
+    my %js = $element->javascript_attrs;
+    Template::Declare::Tags::append_attr($_ => $js{$_}) for keys %js;
+    return @_;
+}
 
 
 1;

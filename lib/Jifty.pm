@@ -13,7 +13,7 @@ BEGIN {
     require Time::Local;
 
     # Declare early to make sure Jifty::Record::schema_version works
-    $Jifty::VERSION = '0.71129';
+    $Jifty::VERSION = '0.80408';
 }
 
 =head1 NAME
@@ -222,6 +222,12 @@ sub new {
     # Save the class loader for later reference
     Jifty->class_loader($class_loader);
     $class_loader->require;
+
+    # Cache triggers on our model classes (the classloader does this
+    # for app model classes)
+    $_->finalize_triggers
+        for grep { $_->can('finalize_triggers') }
+        qw/Jifty::Model::Metadata Jifty::Model::Session/;
 
     # Configure the request handler and action API handler
     Jifty->handler(Jifty::Handler->new());

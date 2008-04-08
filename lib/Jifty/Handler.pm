@@ -92,23 +92,41 @@ sub new {
 
 Returns a list of modules implementing view for your Jifty application.
 
-XXX TODO: this should take pluggable views
+You can override this by specifying: 
+
+  framework:
+      View:
+         Handlers:
+            - Jifty::View::Something::Handler
+            - Jifty::View::SomethingElse::Handler
+
 
 =cut
 
-
-sub view_handlers { qw(Jifty::View::Static::Handler Jifty::View::Declare::Handler Jifty::View::Mason::Handler)}
+sub view_handlers {
+    @{Jifty->config->framework('View')->{'Handlers'}}
+}
 
 
 =head2 fallback_view_handler
 
 Returns the object for our "last-resort" view handler. By default, this is the L<HTML::Mason> handler.
 
+You can override this by specifying: 
+
+  framework:
+      View:
+         FallbackHandler: Jifty::View::Something::Handler
+
 =cut
 
 
 
-sub fallback_view_handler { my $self = shift; return $self->view('Jifty::View::Mason::Handler') }
+sub fallback_view_handler { 
+   my $self = shift; 
+    return $self->view(Jifty->config->framework('View')->{'FallbackHandler'});
+    
+}
 
 =head2 setup_view_handlers
 
@@ -224,8 +242,12 @@ sub handle_request {
         Jifty::I18N->get_language_handle;
 
         # Return from the continuation if need be
-        Jifty->web->request->return_from_continuation;
-        $self->dispatcher->handle_request();
+        unless (Jifty->web->request->return_from_continuation) {
+            $self->dispatcher->handle_request();
+        } 
+
+        $self->call_trigger('before_cleanup', $args{cgi});
+
         $self->cleanup_request();
     }
 
@@ -241,8 +263,10 @@ It flushes the session to disk, as well as flushing L<Jifty::DBI>'s cache.
 
 sub cleanup_request {
     my $self = shift;
+
     # Clean out the cache. the performance impact should be marginal.
     # Consistency is improved, too.
+
     Jifty->web->session->unload();
     Jifty::Record->flush_cache if Jifty::Record->can('flush_cache');
     $self->cgi(undef);

@@ -44,7 +44,8 @@ aid in placing them in L<HTML::Mason> components.
 
 use base 'Jifty::Web::Form::Element';
 
-use Scalar::Util;
+use Scalar::Util qw/weaken/;
+use Scalar::Defer qw/force/;
 use HTML::Entities;
 
 # We need the anonymous sub because otherwise the method of the base class is
@@ -69,9 +70,7 @@ sub new {
         render_mode   => 'update' });
     my $args = ref($_[0]) ? $_[0] : {@_};
 
-    my $subclass = ucfirst($args->{render_as} || $args->{type} || 'text');
-    $subclass = 'Jifty::Web::Form::Field::' . $subclass unless $subclass =~ /::/;
-    bless $self, $subclass if Jifty::Util->require($subclass);
+    $self->rebless( $args->{render_as} || $args->{type} || 'text' );
 
     for my $field ( $self->accessors() ) {
         $self->$field( $args->{$field} ) if exists $args->{$field};
@@ -82,21 +81,35 @@ sub new {
     # but ignore that if the field is a container in the model
     my ($key, $value) = Jifty::Request::Mapper->query_parameters($self->input_name, $self->current_value);
     if ($key ne $self->input_name && !$self->action->arguments->{$self->name}{container}) {
-        Jifty::Util->require('Jifty::Web::Form::Field::Hidden');
-        bless $self, "Jifty::Web::Form::Field::Hidden";
+        $self->rebless('Hidden');
         $self->input_name($key);
         $self->default_value($value);
         $self->sticky_value(undef);
     }
 
     # now that the form field has been instantiated, register the action with the form.
-    if ($self->action and not (Jifty->web->form->has_action($self->action))) {
+    if ($self->action and Jifty->web->form->is_open and not (Jifty->web->form->printed_actions->{$self->action->moniker})) {
         Jifty->web->form->register_action( $self->action);
         Jifty->web->form->print_action_registration($self->action->moniker);
     }
     return $self;
 }
 
+=head2 $self->rebless($widget)
+
+Turn the current blessed class into the given widget class.
+
+=cut
+
+sub rebless {
+    my ($self, $widget) = @_;
+    my $widget_class = $widget =~ m/::/ ? $widget : "Jifty::Web::Form::Field::".ucfirst($widget);
+
+    $self->log->error("Invalid widget class $widget_class")
+        unless Jifty::Util->require($widget_class);
+
+    bless $self, $widget_class;
+}
 
 =head2 accessors
 
@@ -296,13 +309,17 @@ L<Jifty::Web::Form::Field/form_field>.
 =cut
 
 sub action {
-    my $self   = shift;
-    my $action = $self->_action(@_);
+    my $self = shift;
 
-    # If we're setting the action, we need to weaken
-    # the reference to not get caught in a loop
-    Scalar::Util::weaken( $self->{_action} ) if @_;
-    return $action;
+    if (@_) {
+        $self->_action(@_);
+
+        # weaken our circular reference
+        weaken $self->{_action};
+    }
+
+    return $self->_action;
+
 }
 
 =head2 current_value
@@ -322,7 +339,10 @@ sub current_value {
     if ($self->sticky_value and $self->sticky) {
         return $self->sticky_value;
     } else {
-        return $self->default_value;
+        # the force is here because very often this will be a Scalar::Defer object that we REALLY 
+        # want to be able to check definedness on.
+        # Because of a core limitation in perl, Scalar::Defer can't return undef for an object.
+        return force $self->default_value;
     }
 }
 
@@ -384,9 +404,7 @@ sub render_inline_javascript {
     );
     
     if($javascript =~ /\S/) {
-        Jifty->web->out(qq{<script type="text/javascript"><!--
-    $javascript
---></script>
+        Jifty->web->out(qq{<script type="text/javascript">$javascript</script>
 });
     }
 }
@@ -460,6 +478,7 @@ an empty string.
 
 sub render_label {
     my $self = shift;
+    return '' unless defined $self->label and length $self->label;
     if ( $self->render_mode eq 'update' ) {
         Jifty->web->out(
 qq!<label class="label @{[$self->classes]}" for="@{[$self->element_id ]}">@{[_($self->label) ]}</label>\n!
@@ -489,7 +508,7 @@ sub render_widget {
     $field .= qq! name="@{[ $self->input_name ]}"! if ($self->input_name);
     $field .= qq! title="@{[ $self->title ]}"! if ($self->title);
     $field .= qq! id="@{[ $self->element_id ]}"!;
-    $field .= qq! value="@{[Jifty->web->escape($self->current_value)]}"! if defined $self->current_value;
+    $field .= qq! value="@{[$self->canonicalize_value(Jifty->web->escape($self->current_value))]}"! if defined $self->current_value;
     $field .= $self->_widget_class; 
     $field .= qq! size="@{[ $self->max_length() ]}" maxlength="@{[ $self->max_length() ]}"! if ($self->max_length());
     $field .= qq! autocomplete="off"! if defined $self->disable_autocomplete;
@@ -501,6 +520,17 @@ sub render_widget {
 }
 
 
+=head2 canonicalize_value
+
+Called when a value is about to be displayed. Can be overridden to, for example,
+display only the yyyy-mm-dd portion of a DateTime.
+
+=cut
+
+sub canonicalize_value {
+    my $self = shift;
+    return $_[0];
+}
 
 =head2 other_widget_properties
 
@@ -549,9 +579,9 @@ Renders a "view" version of the widget for field. Usually, this is just plain te
 sub render_value {
     my $self  = shift;
     my $field = '<span';
-    $field .= qq! class="@{[ $self->classes ]}"> !;
+    $field .= qq! class="@{[ $self->classes ]} value"> !;
     # XXX: force stringify the value because maketext is buggy with overloaded objects.
-    $field .= Jifty->web->escape("@{[$self->current_value]}") if defined $self->current_value;
+    $field .= $self->canonicalize_value(Jifty->web->escape("@{[$self->current_value]}")) if defined $self->current_value;
     $field .= qq!</span>\n!;
     Jifty->web->out($field);
     return '';
@@ -589,9 +619,7 @@ sub render_autocomplete {
     my $self = shift;
     return unless $self->autocompleter;
     $self->render_autocomplete_div;
-    Jifty->web->out(qq{<script type="text/javascript"><!--
-    @{[$self->autocomplete_javascript]}
---></script>});
+    Jifty->web->out(qq{<script type="text/javascript">@{[$self->autocomplete_javascript]}</script>});
     return '';
 }
 

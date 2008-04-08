@@ -10,8 +10,9 @@ requires('Class::Container');
 requires('Class::Data::Inheritable');
 requires('Class::Trigger' => '0.12');
 requires('Clone' => '0.27');
-requires('CGI' => '3.19');
+requires('CGI' => '3.30');
 requires('CGI::Cookie::Splitter');
+requires('Class::Inspector' => 1.20); # For File::ShareDir on Win32
 requires('Crypt::CBC');
 requires('Crypt::Rijndael');
 requires('Compress::Zlib');
@@ -24,14 +25,14 @@ requires('DateTime::Locale');
 requires('Date::Manip');
 requires('Email::Folder');
 requires('Email::LocalDelivery' => 0.217 );
-requires('Email::MIME');
-requires('Email::MIME::Creator');
-requires('Email::MIME::ContentType');
+requires('Email::MIME' => 1.861);
+requires('Email::MIME::Creator' => 1.450 );
+requires('Email::MIME::ContentType' => 1.012 );
 requires('Email::MIME::CreateHTML');
-requires('Email::MIME::Modifier');
-requires('Email::Send' => '1.99_01'); # Email::Send::Jifty::Test
-requires('Email::Simple');
-requires('Email::Simple::Creator');
+requires('Email::MIME::Modifier' => 1.442 );
+requires('Email::Send' => '2.0'); # Email::Send::Jifty::Test
+requires('Email::Simple' => 2.003);
+requires('Email::Simple::Creator' => 1.400 );
 requires('Exporter::Lite');
 requires('File::Find::Rule');
 requires('File::MMagic');
@@ -44,13 +45,13 @@ requires('HTML::Mason' => 1.3101);           # HTML::Mason::Exceptions HTML::Mas
 requires('HTML::Mason::Plugin');
 requires('HTTP::Cookies');
 requires('HTTP::Date');
-requires('HTTP::Server::Simple' => '0.26');  # HTTP::Server::Simple::CGI
+requires('HTTP::Server::Simple' => '0.28');  # HTTP::Server::Simple::CGI
 requires('HTTP::Server::Simple::Recorder');
 requires('Hash::Merge');
 requires('Hook::LexWrap');
 requires('IPC::PubSub' => '0.23' );
 requires('IPC::Run3');
-requires('Jifty::DBI' => '0.47' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
+requires('Jifty::DBI' => '0.49' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
 requires('Locale::Maketext::Extract' => '0.20');
 requires('Locale::Maketext::Lexicon' => '0.60');
 requires('Log::Log4perl' => '1.04');
@@ -64,7 +65,7 @@ requires('Module::ScanDeps');
 requires('Object::Declare' => '0.13');
 requires('PadWalker');
 requires('Params::Validate');
-requires('Scalar::Defer' => '0.10');
+requires('Scalar::Defer' => '0.12');
 requires('Shell::Command');
 requires('String::Koremutake');
 requires('SQL::ReservedWords');
@@ -79,6 +80,7 @@ requires('Test::WWW::Selenium'),
 requires('WWW::Mechanize' => 1.30 ),
 requires('UNIVERSAL::require');
 requires('URI' => 1.31);
+requires('URI::Escape');
 requires('XML::Writer' => '0.601');
 requires('XML::Simple');
 requires('XML::XPath');
@@ -90,17 +92,17 @@ if (can_cc()) {
     requires('YAML' => 0.35); 	# Use YAML::Dump for the moment since YAML.pm segfaults on
 				# reading stupidly long (~20K characters) double-quoted
 				# strings, and we need to produce YAML.pm-readable output.
-    requires('JSON::Syck' => 0.15);
+    requires('JSON::Syck' => 0.29);
 }
 else {
     requires('YAML' => 0.35) unless can_use('YAML::Syck' => 0.71);
-    requires('JSON' => 0.01) unless can_use('JSON::Syck' => 0.15);
+    requires('JSON' => 0.01) unless can_use('JSON::Syck' => 0.29);
 }
 
 features(
     'Administrative Interface (web)' => [ 
         -default => 1,
-       requires( 'Pod::Simple') # Pod::Simple::Text Pod::Simple::HTML
+       recommends( 'Pod::Simple') # Pod::Simple::Text Pod::Simple::HTML
     ],
     'Development of a jifty application' => [
         -default => 1,
@@ -152,7 +154,11 @@ features(
         -default => 0,
         recommends('Devel::EvalContext'),
     ],
-    'Chart Plugin (none of these must be installed for Charts to work)' => [
+    'Jifty REPL' => [
+        -default => 0,
+        recommends('Devel::REPL'), # Devel::REPL::Script
+    ],
+    'Chart Plugin (none of these need to be installed for Charts to work)' => [
         -default => 0,
         recommends('Chart::Base'),
         recommends('GD'),          # for a testing hack
@@ -160,22 +166,12 @@ features(
         recommends('XML::Simple'),
         recommends('Image::Info'), # for testing
     ],
-    'Memory Leak Plugin' => [
+    'Memory Leak Plugins' => [
         -default => 0,
-        recommends('Devel::Events' => '0.02'),
-        recommends('Devel::Events::Handler::ObjectTracker'),
-        recommends('Devel::Events::Generator::Objects'),
+        recommends('Devel::Events::Objects' => '0.02'), # Devel::Events::Handler::ObjectTracker Devel::Events::Generator::Objects
         recommends('Devel::Size'),
-    ],
-    'OAuth Plugin' => [
-        -default => 0,
-        recommends('Net::OAuth::Request' => '0.04'),
-        recommends('Net::OAuth::RequestTokenRequest'),
-        recommends('Net::OAuth::AccessTokenRequest'),
-        recommends('Net::OAuth::ProtectedResourceRequest'),
-
-        recommends('Crypt::OpenSSL::RSA'),
-        recommends('Digest::HMAC_SHA1'),
+        recommends('Devel::Gladiator'),
+        recommends('Proc::ProcessTable'),
     ],
     'Ldap Plugin' => [
         -default => 0,
@@ -184,7 +180,20 @@ features(
     'CAS Plugin' => [
         -default => 0,
         recommends('Authen::CAS::Client')
-    ]
+    ],
+    'Improved halos' => [
+        -default => 0,
+        recommends('Template::Declare' => '0.28'),
+        recommends('Data::Dump::Streamer'),
+    ],
+    'Comment Plugin' => [
+        -default => 0,
+        recommends('HTML::Scrubber'),
+        recommends('MIME::Base64::URLSafe'),
+        recommends('Net::Akismet'),
+        recommends('Regexp::Common'),
+        recommends('Regexp::Common::Email::Address'),
+    ],
 );
 
 

@@ -286,9 +286,10 @@ Action.prototype = {
                                     if (field.nodeName == 'update') {
                                         var field_name = field.getAttribute("name");
                                         for (var form_number = 0 ; form_number < document.forms.length; form_number++) {
-                                            if (document.forms[form_number].elements[field_name] == null)
+                                            var form_field = document.forms[form_number].elements[field_name];
+                                            if (form_field == null || !form_field.hasClassName('ajaxcanonicalization'))
                                                 continue;
-                                            document.forms[form_number].elements[field_name].value = field.firstChild.data;
+                                            form_field.value = field.firstChild.data;
                                         }
                                     }
                                 }
@@ -471,15 +472,20 @@ ActionField.prototype = {
 };
 
 /* Forms */
-Object.extend(Form, {
+Jifty.Form = Class.create();
+
+Object.extend(Jifty.Form, {
+    getElements: function(element) {
+        return Form.getElements(element);
+    },
     // Return an Array of Actions that are in this form
     getActions: function (element) {
         var elements = new Array;
         var possible = Form.getElements(element);
 
         for (var i = 0; i < possible.length; i++) {
-            if (Form.Element.getType(possible[i]) == "registration")
-                elements.push(Form.Element.getAction(possible[i]));
+            if (Jifty.Form.Element.getType(possible[i]) == "registration")
+                elements.push(Jifty.Form.Element.getAction(possible[i]));
         }
         
         return elements;
@@ -493,11 +499,26 @@ Object.extend(Form, {
     }
 });
 
+Object.extend(Form, {
+    // Return an Array of Actions that are in this form
+    getActions: function (element) {
+        // DEPRECATED: use Jifty.Form.getActions instead
+        return Jifty.Form.getActions(element);
+    },
+
+    clearPlaceholders: function(element) {
+        // DEPRECATED: use Jifty.Form.clearPlaceholders instead
+        return Jifty.Form.clearPlaceholders(element);
+    }
+});
+
 
 var current_actions = $H();
 
 /* Fields */
-Object.extend(Form.Element, {
+Jifty.Form.Element = Class.create();
+
+Object.extend(Jifty.Form.Element, {
     // Get the moniker for this form element
     // Takes an element or an element id
     getMoniker: function (element) {
@@ -518,7 +539,7 @@ Object.extend(Form.Element, {
     // Takes an element or an element id
     getAction: function (element) {
         element = $(element);    
-        var moniker = Form.Element.getMoniker(element);
+        var moniker = Jifty.Form.Element.getMoniker(element);
         if (!current_actions.get(moniker))
             current_actions.set(moniker, new Action(moniker));
         return current_actions.get(moniker);
@@ -554,7 +575,7 @@ Object.extend(Form.Element, {
     // Validates the action this form element is part of
     validate: function (element) {
             if(!Element.hasClassName(element, 'validation_disabled')) {
-                Form.Element.getAction(element).validate();
+                Jifty.Form.Element.getAction(element).validate();
             }
     },
 
@@ -575,6 +596,9 @@ Object.extend(Form.Element, {
     // Hence, we may need to walk the DOM.
     getForm: function (element) {
         element = $(element);
+
+        if (!element)
+            return null;
 
         if (element.virtualform)
             return element.virtualform;
@@ -616,7 +640,7 @@ Object.extend(Form.Element, {
 
     buttonActions: function(element) {
         element = $(element);
-        var actions = Form.Element.buttonArguments(element).get('J:ACTIONS');
+        var actions = Jifty.Form.Element.buttonArguments(element).get('J:ACTIONS');
         if(actions) {
             return actions.split(",");
         } else {
@@ -628,14 +652,17 @@ Object.extend(Form.Element, {
         element = $(element);
 
         var extras = $A();
-        var args = Form.Element.buttonArguments(element);
+        if (!element)
+            return extras;
+
+        var args = Jifty.Form.Element.buttonArguments(element);
         var keys = args.keys();
         for (var i = 0; i < keys.length; i++) {
             var e = document.createElement("input");
             e.setAttribute("type", "hidden");
             e.setAttribute("name", keys[i]);
             e.setAttribute("value", args.get(keys[i]));
-            e['virtualform'] = Form.Element.getForm(element);
+            e['virtualform'] = Jifty.Form.Element.getForm(element);
             extras.push(e);
         }
         return extras;
@@ -646,12 +673,12 @@ Object.extend(Form.Element, {
        submit the action associated with the form element.
      */
     clickDefaultButton: function(element) {
-        var action = Form.Element.getAction( element );
+        var action = Jifty.Form.Element.getAction( element );
         if ( action ) {
             var buttons = action.buttons();
             for ( var i = 0; i < buttons.length; i++ ) {
                 var b = buttons[i];
-                if ( Form.Element.buttonActions( b ).indexOf( action.moniker ) >= 0 ) {
+                if ( Jifty.Form.Element.buttonActions( b ).indexOf( action.moniker ) >= 0 ) {
                     b.click();
                     return true;
                 }
@@ -665,9 +692,95 @@ Object.extend(Form.Element, {
         if (    event.keyCode == 13
              && !event.metaKey && !event.altKey && !event.ctrlKey )
         {
-            if ( Form.Element.clickDefaultButton( event.target ) )
+            if ( Jifty.Form.Element.clickDefaultButton( event.target ) )
                 event.preventDefault();
         }
+    }
+
+});
+
+Object.extend(Form.Element, {
+    // Get the moniker for this form element
+    // Takes an element or an element id
+    getMoniker: function (element) {
+        // DEPRECATED: use Jifty.Form.Element.getMoniker instead
+        return Jifty.Form.Element.getMoniker(element);
+    },
+
+    // Get the Action for this form element
+    // Takes an element or an element id
+    getAction: function (element) {
+        // DEPRECATED: use Jifty.Form.Element.getAction instead
+        return Jifty.Form.Element.getAction(element);
+    },
+
+    // Returns the name of the field
+    getField: function (element) {
+        // DEPRECATED: use Jifty.Form.Element.getField instead
+        return Jifty.Form.Element.getField(element);
+    },
+
+    // The type of Jifty form element
+    getType: function (element) {
+        // DEPRECATED: use Jifty.Form.Element.getType instead
+        return Jifty.Form.Element.getType(element);
+    },
+
+    // Validates the action this form element is part of
+    validate: function (element) {
+        // DEPRECATED: use Jifty.Form.Element.validate instead
+        return Jifty.Form.Element.validate(element);
+    },
+
+    // Temporarily disable validation
+            disableValidation: function(element) {
+                // DEPRECATED: use Jifty.Form.Element.disableValidation instead
+                return Jifty.Form.Element.disableValidation(element);
+        },
+
+            //Reenable validation            
+            enableValidation: function(element) {
+                // DEPRECATED: use Jifty.Form.Element.enableValidation instead
+                return Jifty.Form.Element.enableValidation(element);
+        },
+
+
+    // Look up the form that this element is part of -- this is sometimes
+    // more complicated than you'd think because the form may not exist
+    // anymore, or the element may have been inserted into a new form.
+    // Hence, we may need to walk the DOM.
+    getForm: function (element) {
+        // DEPRECATED: use Jifty.Form.Element.getForm instead
+        return Jifty.Form.Element.getForm(element);
+    },
+
+    buttonArguments: function(element) {
+        // DEPRECATED: use Jifty.Form.Element.buttonArguments instead
+        return Jifty.Form.Element.buttonArguments(element);
+    },
+
+    buttonActions: function(element) {
+        // DEPRECATED: use Jifty.Form.Element.buttonActions instead
+        return Jifty.Form.Element.buttonActions(element);
+    },  
+
+    buttonFormElements: function(element) {
+        // DEPRECATED: use Jifty.Form.Element.buttonFormElements instead
+        return Jifty.Form.Element.buttonFormElements(element);
+    },
+
+    /* Someday Jifty may have the concept of "default"
+       buttons.  For now, this clicks the first button that will
+       submit the action associated with the form element.
+     */
+    clickDefaultButton: function(element) {
+        // DEPRECATED: use Jifty.Form.Element.clickDefaultButton instead
+        return Jifty.Form.Element.clickDefaultButton(element);
+    },
+
+    handleEnter: function(event) {
+        // DEPRECATED: use Jifty.Form.Element.handleEnter instead
+        return Jifty.Form.Element.handleEnter(event);
     }
 
 });
@@ -733,11 +846,12 @@ Behaviour.register({
 var fragments = $H();
 var Region = Class.create();
 Region.prototype = {
-    initialize: function(name, args, path, parent) {
+    initialize: function(name, args, path, parent, in_form) {
         this.name = name;
         this.args = $H(args);
         this.path = path;
         this.parent = parent ? fragments.get(parent) : null;
+        this.in_form = in_form;
         if (fragments.get(name)) {
             // If this fragment already existed, we want to wipe out
             // whatever evil lies we might have said earlier; do this
@@ -877,7 +991,7 @@ function prepare_element_for_update(f) {
             }
 
             // Make the region (for now)
-            new Region(name, f['args'], f['path'], f['parent']);
+            new Region(name, f['args'], f['path'], f['parent'], f['parent'] ? fragments.get(f['parent']).in_form : null);
         } else if ((f['path'] != null) && f['toggle'] && (f['path'] == fragments.get(name).path)) {
             // If they set the 'toggle' flag, and clicking wouldn't change the path
             Element.update(element, '');
@@ -961,15 +1075,16 @@ var apply_fragment_updates = function(fragment, f) {
             if (f['mode'] && (f['mode'] != 'Replace')) {
                 var insertion = eval('Insertion.'+f['mode']);
                 new insertion(element, textContent.stripScripts());
+                element = document.getElementById('region-' + f['region']);
             } else {
                 Element.update(element, textContent.stripScripts());
             }
             // We need to give the browser some "settle" time before
             // we eval scripts in the body
-        YAHOO.util.Event.onAvailable(element.id, function() {
-            (function() { this.evalScripts() }).bind(textContent)();
-        });
-        Behaviour.apply(element);
+            YAHOO.util.Event.onAvailable(element.id, function() {
+                (function() { this.evalScripts() }).bind(textContent)();
+            });
+            Behaviour.apply(element);
         }
     });
     dom_fragment.setArgs(new_dom_args);
@@ -1041,6 +1156,8 @@ Jifty.update = function () {
     var has_request = 0;
     request.set('actions', $H());
     for (var moniker in named_args['actions']) {
+        if (moniker == 'extend')
+            continue;
         var disable = named_args['actions'][moniker];
         var a = new Action(moniker, button_args);
             current_actions.set(moniker, a); // XXX: how do i make this bloody singleton?
@@ -1139,6 +1256,9 @@ Jifty.update = function () {
         if (f['is_new'])
             // Ask for the wrapper if we are making a new region
             fragment_request['wrapper'] = 1;
+
+        if (fragments.get(name).in_form)
+            fragment_request['in_form'] = 1;
 
         // Push it onto the request stack
         request.get('fragments').set(name, fragment_request);
@@ -1368,6 +1488,10 @@ Object.extend(Object.extend(Jifty.Autocompleter.prototype, Ajax.Autocompleter.pr
         onHide: this.onHide,
         afterUpdateElement: this.afterUpdate
     });
+
+    if ((document.all)&&(navigator.appVersion.indexOf("MSIE")!=-1)) {
+        Event.observe(this.element, "keydown", this.onKeyPress.bindAsEventListener(this));
+    }
   },
 
   onShow: function(element, update) {
@@ -1447,6 +1571,8 @@ Object.extend(Jifty.Placeholder.prototype, {
   initialize: function(element, text) {
      this.element = $(element);
      this.text = text;
+     this.element.placeholderText = this.text;
+
      Event.observe(element, 'focus', this.onFocus.bind(this));
      Event.observe(element, 'blur', this.onBlur.bind(this));
      this.onBlur();
@@ -1486,7 +1612,14 @@ Object.extend(Jifty.Placeholder, {
   },
             
   clearPlaceholder: function(elt) {
-     if(Jifty.Placeholder.hasPlaceholder(elt)) {
+     // If the element's text isn't the same as its placeholder text, then the
+     // browser screwed up and didn't clear our placeholder. Opera on Mac with
+     // VirtueDesktops does this some times, and I lose data.
+     // These are normalized because sometimes one has \r\n and the other has \n
+     elt.value = elt.value.replace(/\r/g, '');
+     elt.placeholderText = elt.placeholderText.replace(/\r/g, '');
+
+     if(Jifty.Placeholder.hasPlaceholder(elt) && elt.value == elt.placeholderText) {
        elt.value = '';
        Element.removeClassName(elt, 'placeholder');
      }
