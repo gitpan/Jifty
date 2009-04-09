@@ -237,7 +237,7 @@ C<J:> so there won't be a problem.
 
 =head2 Perform database migration
 
-Edit etc/config.yaml and change Database->Version to a proper value
+Edit etc/config.yml and change Database->Version to a proper value
 (say, 0.0.2). Then run
 
     jifty schema --setup
@@ -294,39 +294,6 @@ field is changed.
 	$self->argument_value( other_field => "new value" )
 
 
-=head2 Get the "Edit" links to work in the "Page info" tool
-
-If you click on "Page info", follow an "Edit" link for a fragment,
-and you get an error message saying something like
-
-	You got to a page that we don't think exists...
-
-then you need to ensure that the C<Jifty::Plugin::EditInPlace> has
-been installed correctly. It should be in the F<Jifty/Plugin> directory
-installed with the rest of the Jifty modules.
-
-	perl -MJifty::Util -e 'print Jifty::Util->jifty_root'
-
-will tell you where to look. If it's not there you will need to install
-it manually. If you still have your build files from installing Jifty
-you can find the module in the F<plugins> directory.
-
-Once you have the modules in place, or if they were already present
-you simply need to enable the plugin in your project config file. Edit 
-F<etc/config.yml> and find the "Plugins:" section. It will probably look
-like this
-
-	  Plugins: []
-
-Change it to 
-
-	  Plugins: 
-	    - EditInPlace: {}
-
-Take care the indentation is significant. Use spaces, not tabs.
-Once you have done that you can restart your Jifty application and the
-edit links should then function correctly.
-
 =head2 Use iepngfix.htc to add PNG support in IE5.5+
 
 Jifty has included iepngfix.htc by Angus Turnbull. The HTC file will
@@ -334,7 +301,7 @@ automatically add PNG support to IMG elements and also supports any
 element with a "background-image" CSS property.
 
 If you want to use this fix, please include this one line in your CSS
-file, whit tag names to which you want the script applied:
+file, with tag names to which you want the script applied:
 
     img, div { behavior: url(/static/js/iepngfix.htc) }
 
@@ -370,7 +337,7 @@ Sometimes you need two tables that both depend upon each other. That is, you hav
     column a_record => refers_to ModelA;
   };
 
-Otherwise, everything should work as expected.
+Everything should work as expected.
 
 =head2 Reuse Jifty models and actions outside of a Jifty app
 
@@ -442,7 +409,7 @@ Now, add your records. To create a relationship between a row the two tables:
   $left->load(1);
 
   my $right = MyApp::Model::RightTable->new;
-  $right->laod(1);
+  $right->load(1);
 
   my $link = MyApp::Model::LinkTable->new;
   $link->create(

@@ -13,7 +13,7 @@ BEGIN {
     require Time::Local;
 
     # Declare early to make sure Jifty::Record::schema_version works
-    $Jifty::VERSION = '0.80408';
+    $Jifty::VERSION = '0.90409';
 }
 
 =head1 NAME
@@ -223,12 +223,6 @@ sub new {
     Jifty->class_loader($class_loader);
     $class_loader->require;
 
-    # Cache triggers on our model classes (the classloader does this
-    # for app model classes)
-    $_->finalize_triggers
-        for grep { $_->can('finalize_triggers') }
-        qw/Jifty::Model::Metadata Jifty::Model::Session/;
-
     # Configure the request handler and action API handler
     Jifty->handler(Jifty::Handler->new());
     Jifty->api(Jifty::API->new());
@@ -336,12 +330,17 @@ returns YourApp::Model::Foo.
 
 By the time you get it back, the class will have already been required
 
+Is you pass a hashref as the first argument, it will be treated as
+configuration parameters.  The only existing parameter is C<require>,
+which defaults to true.
+
 =cut
 
 sub app_class {
     shift;
+    my $args = (ref $_[0] ? shift : { require => 1 });
     my $val = join('::', Jifty->config->framework('ApplicationClass'), @_);
-    Jifty::Util->try_to_require($val);
+    Jifty::Util->try_to_require($val) if $args->{require};
     return $val;
 }
 
@@ -372,8 +371,9 @@ Returns an IPC::PubSub object for the current application.
 =cut
 
 sub bus {
-
-    unless ($PUB_SUB) {
+    my $class = shift;
+    my %args = ( connect => 1, @_ );
+    if (not $PUB_SUB and $args{connect}) {
         my @args;
 
         my $backend = Jifty->config->framework('PubSub')->{'Backend'};
@@ -482,6 +482,10 @@ sub setup_database_connection {
         Jifty->handle( $handle_class->new );
         Jifty->handle->connect();
 
+        # Clean out any stale Cache::Memcached connections
+        $Jifty::DBI::Record::Memcached::MEMCACHED->disconnect_all
+            if $Jifty::DBI::Record::Memcached::MEMCACHED;
+
         # Make sure the app version matches the database version
         Jifty->handle->check_schema_version()
             unless $args{'no_version_check'};
@@ -518,7 +522,7 @@ Jesse Vincent, Alex Vandiver and David Glasser.
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2006 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2009 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 

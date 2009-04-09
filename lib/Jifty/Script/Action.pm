@@ -2,27 +2,23 @@ use warnings;
 use strict;
 
 package Jifty::Script::Action;
-use base qw/App::CLI::Command/;
-
-
+use base qw/Jifty::Script/;
 
 =head1 NAME
 
 Jifty::Script::Action - Add an action class to your Jifty application
 
-=head1 DESCRIPTION
+=head1 SYNOPSIS
 
-This creates a skeleton of a new action class for your jifty
-application, complete with a skeleton of a test suite for it,
-as well.
+    jifty action --name NewAction
+    jifty action --help
+    jifty action --man
 
-=head1 API
-
-=head2 options
+=head1 OPTIONS
 
 There are only two possible options to this script:
 
-=over
+=over 8
 
 =item --name NAME (required)
 
@@ -34,16 +30,34 @@ By default, this will stop and warn you if any of the files it is
 going to write already exist.  Passing the --force flag will make it
 overwrite the files.
 
+=item B<--help>
+
+Print a brief help message and exits.
+
+=item B<--man>
+
+Prints the manual page and exits.
+
 =back
 
 =cut
 
 sub options {
-    (
-     'n|name=s' => 'name',
-     'force'    => 'force',
-    )
+    my $self = shift;
+    return (
+        $self->SUPER::options,
+        'n|name=s' => 'name',
+        'force'    => 'force',
+    );
 }
+
+=head1 DESCRIPTION
+
+This creates a skeleton of a new action class for your jifty
+application, complete with a skeleton of a test suite for it,
+as well.
+
+=head1 METHODS
 
 =head2 run
 
@@ -54,15 +68,26 @@ well as a skeleton tests file.
 
 sub run {
     my $self = shift;
+
+    $self->print_help;
     
     my $action = $self->{name} || '';
-    die "You need to give your new action a --name\n"
-      unless $action =~ /\w+/;
+    $self->print_help("You need to give your new action a --name")
+        unless $action =~ /\w+/;
 
     Jifty->new( no_handle => 1 );
     my $root = Jifty::Util->app_root;
     my $appclass = Jifty->config->framework("ApplicationClass");
-    my $appclass_path =  File::Spec->catfile(split(/::/,Jifty->config->framework("ApplicationClass")));
+    my $appclass_path =  File::Spec->catfile(split(/::/,$appclass));
+
+    # Detect if they're creating an App::Action::UpdateWidget, for example
+    my $subclass = "Jifty::Action";
+    if ($action =~ /^(Create|Search|Execute|Update|Delete)(.+)$/) {
+        my($type, $model) = ($1, $2);
+        $model = Jifty->app_class( Model => $model );
+        $subclass = Jifty->app_class( Action => Record => $type )
+            if grep {$_ eq $model} Jifty->class_loader->models;
+    }
 
     my $actionFile = <<"EOT";
 use strict;
@@ -75,7 +100,7 @@ use warnings;
 =cut
 
 package @{[$appclass]}::Action::@{[$action]};
-use base qw/@{[$appclass]}::Action Jifty::Action/;
+use base qw/@{[$appclass]}::Action @{[$subclass]}/;
 
 use Jifty::Param::Schema;
 use Jifty::Action schema {

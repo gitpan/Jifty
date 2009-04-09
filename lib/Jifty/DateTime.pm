@@ -47,47 +47,57 @@ use base qw(Jifty::Object DateTime);
 
 =head2 new ARGS
 
-See L<DateTime/new>. If we get what appears to be a date, then we
-keep this in the floating datetime. Otherwise, set this object's
-timezone to the current user's time zone, if the current user has a
-method called C<time_zone>.  
+See L<DateTime/new>. If we get what appears to be a date, then we keep this in
+the floating datetime. Otherwise, set this object's timezone to the current
+user's time zone, if the current user's user object has a method called
+C<time_zone>. 
 
 =cut
 
 sub new {
     my $class = shift;
-    my %args  = (@_);
+    my %args  = (
+        current_user     => undef,
+        time_zone        => undef,
+        input_time_zone  => undef,
+        output_time_zone => undef,
+        @_,
+    );
 
-    my $replace_tz = delete $args{_replace_time_zone};
+    my ($input_time_zone, $output_time_zone);
+    $input_time_zone = delete($args{input_time_zone})   || $args{time_zone};
+    $output_time_zone = delete($args{output_time_zone}) || $args{time_zone};
 
-    my $self  = $class->SUPER::new(%args);
+    my $current_user = delete $args{current_user};
 
-    # XXX What if they really mean midnight offset by time zone?
+    my $self = $class->SUPER::new(%args, time_zone => $input_time_zone);
 
-    #     this behavior is (sadly!) consistent with
-    #     DateTime->truncate(to => 'day') and Jifty::DateTime::new_from_string
-    #     suggestions for improvement are very welcome
+    my $is_date = $self->hms eq '00:00:00'
+               && $self->time_zone->name eq 'floating';
 
-    # Do not bother with time zones unless time is used, we assume that
-    # 00:00:00 implies that no time is used
-    if ($self->hour || $self->minute || $self->second) {
+    # The output time_zone is the *current user's* time zone. It's okay that
+    # $current_user can be undef; we'll still find and set the right current
+    # user then set the time zone.
+    $self->current_user($current_user);
 
-        # Unless the user has explicitly said they want a time zone,
-        # we want to convert to the end-user's timezone. If we ignore
-        # $args{time_zone}, then DateTime::from_epoch will get very confused
-        if (!$args{time_zone} || $replace_tz) {
-            if (my $tz = $self->current_user_has_timezone) {
-                # XXX: we do this because of the floating timezone
-                $self->set_time_zone("UTC");
-
-                $self->set_time_zone( $tz );
-            }
-        }
+    if ($output_time_zone) {
+        $self->set_time_zone($output_time_zone);
     }
+    # If we were given a date, then we need to make sure its output time zone
+    # is Floating and it's set to 00:00:00.
+    # This sucks when you want a timestamp (not just a datestamp) at midnight
+    # in the floating time zone but we don't have any better way to make this
+    # work.
+    elsif ($is_date) {
+        $self->set_time_zone('floating');
 
-    # No time, just use the floating time zone
-    else {
-        $self->set_time_zone("floating");
+        # Without this check we loop infinitely, because set_hour constructs
+        # a new Jifty::DateTime object.
+        if ($self->hms ne '00:00:00') {
+            $self->set_hour(0);
+            $self->set_minute(0);
+            $self->set_second(0);
+        }
     }
 
     return $self;
@@ -95,24 +105,34 @@ sub new {
 
 =head2 now ARGS
 
-See L<DateTime/now>. If a time_zone argument is passed in, then this method
+See L<DateTime/now>. If a time_zone argument is passed in, then this wrapper
 is effectively a no-op.
 
 OTHERWISE this will always set this object's timezone to the current user's
-timezone (or UTC if that's not available). Without this, DateTime's C<now> will
-set the timezone to UTC always (by passing C<< time_zone => 'UTC' >> to
-C<Jifty::DateTime::new>. We want Jifty::DateTime to always reflect the current
+timezone. Without this, DateTime's C<now> will set the timezone to UTC always
+(by passing C<< time_zone => 'UTC' >> to C<Jifty::DateTime::new>. We want
+Jifty::DateTime to always reflect the current
 user's timezone (unless otherwise requested, of course).
 
 =cut
 
 sub now {
     my $class = shift;
-    my %args  = @_;
-    my $self  = $class->SUPER::now(%args);
+    my %args  = (
+        current_user => undef,
+        #time_zone => undef, # DateTime doesn't like undef time_zone
+        @_,
+    );
 
-    $self->set_current_user_timezone()
-        unless $args{time_zone};
+    my $current_user = delete $args{current_user};
+    my $self = $class->SUPER::now(%args);
+
+    $self->current_user($current_user);
+
+    # We set time_zone here since saying
+    # "Jifty::DateTime->now(time_zone => 'UTC')" is obviously referring the
+    # output time zone; the input time zone doesn't matter at all.
+    $self->set_time_zone($args{time_zone}) if $args{time_zone};
 
     return $self;
 }
@@ -125,11 +145,21 @@ See L<DateTime/from_epoch> and L<Jifty::DateTime/now>.
 
 sub from_epoch {
     my $class = shift;
-    my %args  = @_;
-    my $self  = $class->SUPER::from_epoch(%args);
+    my %args  = (
+        current_user => undef,
+        #time_zone => undef, # DateTime doesn't like undef time_zone
+        @_,
+    );
 
-    $self->set_current_user_timezone()
-        unless $args{time_zone};
+    my $current_user = delete $args{current_user};
+    my $self = $class->SUPER::from_epoch(%args);
+
+    $self->current_user($current_user);
+
+    # We set time_zone here since saying
+    # "Jifty::DateTime->now(time_zone => 'UTC')" is obviously referring the
+    # output time zone; the input time zone doesn't matter at all.
+    $self->set_time_zone($args{time_zone}) if $args{time_zone};
 
     return $self;
 }
@@ -138,12 +168,24 @@ sub from_epoch {
 
 When setting the current user, update the timezone appropriately.
 
+If an C<undef> current user is passed, this method will find the correct
+current user and set the time zone.
+
 =cut
 
 sub current_user {
     my $self = shift;
     return $self->SUPER::current_user unless @_;
+
+    # $date->current_user(undef) will not remove the current user, but it will
+    # calculate who the current user is for setting the time zone
+    if (@_ == 1 && !defined($_[0])) {
+        shift;
+        $self->_get_current_user;
+    }
+
     my $ret = $self->SUPER::current_user(@_);
+
     $self->set_current_user_timezone();
     return $ret;
 }
@@ -188,19 +230,21 @@ Returns the Jifty::DateTime object itself.
 
 sub set_current_user_timezone {
     my $self    = shift;
-    my $default = shift || 'GMT';
+    my $default = shift || 'UTC';
     my $tz = $self->current_user_has_timezone || $default;
 
     $self->set_time_zone($tz);
     return $self;
 }
 
-=head2 new_from_string STRING
+=head2 new_from_string STRING[, ARGS]
 
 Take some user defined string like "tomorrow" and turn it into a
-C<Jifty::Datetime> object.  If the string appears to be a _date_, keep
-it in the floating timezone, otherwise, set it to the current user's
-timezone.
+C<Jifty::Datetime> object. If a C<time_zone> argument is passed in, that is
+used for the B<input> time zone.
+
+If the string appears to be a _date_, the B<output> time zone will be floating.
+Otherwise, the B<output> time zone will be the current user's time zone.
 
 As of this writing, this uses L<Date::Manip> along with some internal
 hacks to alter the way L<Date::Manip> normally interprets week day
@@ -211,6 +255,11 @@ names. This may change in the future.
 sub new_from_string {
     my $class  = shift;
     my $string = shift;
+    my %args = (
+        time_zone => undef,
+        @_,
+    );
+
     my $epoch;
 
     # Hack to use Date::Manip to flexibly scan dates from strings
@@ -223,7 +272,10 @@ sub new_from_string {
             $string = "next $string";
         }
 
-        my $offset = $class->get_tz_offset;
+        my $offset = $class->get_tz_offset(
+            $args{time_zone} ? (time_zone => $args{time_zone}) : (),
+        );
+
         my $dt_now = $class->now;
         my $now = $dt_now->ymd . ' ' . $dt_now->hms;
 
@@ -241,13 +293,13 @@ sub new_from_string {
     return undef unless $epoch;
 
     # Build a DateTime object from the Date::Manip value and setup the TZ
-    my $self = $class->from_epoch( epoch => $epoch, time_zone => 'GMT' );
+    my $self = $class->from_epoch( epoch => $epoch, time_zone => 'UTC' );
     if (my $tz = $self->current_user_has_timezone) {
-        if ($self->hour || $self->minute || $self->second) {
-            $self->set_time_zone( $tz );
+        if ($self->hms(':') ne '00:00:00') {
+            $self->set_time_zone($tz);
         }
         else {
-            $self->set_time_zone("floating")
+            $self->set_time_zone("floating");
         }
     }
 
@@ -286,7 +338,7 @@ sub friendly_date {
     if ($ymd eq $tomorrow->ymd) {
         return "tomorrow";
     }
-    
+
     # None of the above, just spit out the date
     return $ymd;
 }
@@ -311,22 +363,27 @@ sub is_date {
     return 1;
 }
 
-=head2 get_tz_offset [DateTime] -> String
+=head2 get_tz_offset
 
-Returns the offset for the current user's timezone. If there is no current
+Returns the offset for a time zone. If there is no current
 user, or the current user's time zone is unset, then UTC will be used.
 
-The optional DateTime argument lets you calculate an offset for some time other
+The optional datetime argument lets you calculate an offset for some time other
 than "right now".
 
 =cut
 
 sub get_tz_offset {
     my $self = shift;
-    my $dt   = shift || DateTime->now();
+    my %args = (
+        datetime  => DateTime->now,
+        time_zone => $self->current_user_has_timezone || 'UTC',
+        @_,
+    );
 
-    $dt->set_time_zone( $self->current_user_has_timezone || 'UTC' );
+    my $dt = $args{datetime}->clone;
 
+    $dt->set_time_zone($args{time_zone});
     return $dt->strftime("%z");
 }
 
@@ -340,9 +397,7 @@ sub jifty_serialize_format {
     my $dt = shift;
 
     # if it looks like just a date, then return just the date portion
-    return $dt->ymd
-        if lc($dt->time_zone->name) eq 'floating'
-        && $dt->hms('') eq '000000';
+    return $dt->ymd if $dt->is_date;
 
     # otherwise let stringification take care of it
     return $dt;

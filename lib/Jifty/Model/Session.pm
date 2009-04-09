@@ -51,6 +51,8 @@ sub since { '0.60428' }
 
 =head2 current_user
 
+=head2 current_user_can
+
 Everyone is treated as the superuser when dealing with session
 objects.  This avoids infinite recursion, as otherwise it would try to
 look up the current user in the session object to find out who we
@@ -58,7 +60,9 @@ are...
 
 =cut
 
-sub current_user { return Jifty->app_class('CurrentUser')->superuser }
+my $SUPERUSER;
+sub current_user { return $SUPERUSER ||= Jifty->app_class('CurrentUser')->superuser }
+sub current_user_can {return 1;}
 
 =head2 new_session_id
 

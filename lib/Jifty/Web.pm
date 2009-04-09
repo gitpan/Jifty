@@ -20,7 +20,7 @@ use base qw/Class::Accessor::Fast Class::Data::Inheritable Jifty::Object/;
 use vars qw/$SERIAL @JS_INCLUDES/;
 
 __PACKAGE__->mk_accessors(
-    qw(next_page force_redirect request response session temporary_current_user _current_user _state_variables)
+    qw(next_page force_redirect request response session temporary_current_user)
 );
 
 __PACKAGE__->mk_classdata($_)
@@ -38,27 +38,26 @@ __PACKAGE__->javascript_libs([qw(
     jsan/Upgrade/Array/push.js
     jsan/DOM/Events.js
     json.js
-    prototype.js
-    jquery-1.2.1.js
+    jquery-1.2.6.js
+    iutil.js
+    iautocompleter.js
+    jifty_interface.js
     jquery_noconflict.js
+    jquery.jgrowl.js
     behaviour.js
-    scriptaculous/builder.js
-    scriptaculous/effects.js
-    scriptaculous/controls.js
     formatDate.js
-    template_declare.js
     jifty.js
     jifty_utils.js
     jifty_subs.js
     jifty_smoothscroll.js
     calendar.js
+    datetime.js
     dom-drag.js
     halo.js
     combobox.js
     key_bindings.js
     context_menu.js
     bps_util.js
-    rico.js
     yui/yahoo.js
     yui/dom.js
     yui/event.js
@@ -71,6 +70,7 @@ __PACKAGE__->javascript_libs([qw(
     app_behaviour.js
     css_browser_selector.js
     cssQuery-jquery.js
+    jquery.timepickr.js
 )]);
 
 use Class::Trigger;
@@ -110,8 +110,8 @@ Send a string to the browser. The default implementation uses Mason->out;
 =cut
 
 sub out {
-    my $m = shift->mason;
-    $m ? $m->out(@_) : Jifty::View::out_method(@_);
+    shift;
+    Jifty->handler->buffer->append(@_);
 }
 
 
@@ -138,9 +138,9 @@ sub url {
         # Explicit flag needed because URI->new("noscheme") is structurally
         # different from URI->new("http://smth"). Clunky, but works.
         my $dirty;
-        if ($http_host_env !~ m{^https?://}) {
+        if ($http_host_env !~ m{^http(s?)://}) {
             $dirty++;
-            $http_host_env = "http://" . $http_host_env;
+            $http_host_env = (Jifty->web->is_ssl ? "https" : "http") ."://$http_host_env";
         }
         $uri = URI->new($http_host_env);
         if ($dirty && (my $req_uri_env = $ENV{REQUEST_URI})) {
@@ -243,24 +243,24 @@ sub current_user {
         my $currentuser_obj = shift;
         $self->session->set(
             'user_id' => $currentuser_obj ? $currentuser_obj->id : undef );
-        $self->_current_user( $currentuser_obj || undef );
+        $self->{current_user} = ( $currentuser_obj || undef );
     }
 
     my $object;
 
     if ( defined $self->temporary_current_user ) {
         return $self->temporary_current_user;
-    } elsif ( defined $self->_current_user ) {
-        return $self->_current_user;
+    } elsif ( defined $self->{current_user} ) {
+        return $self->{current_user};
     } elsif ( my $id = $self->session->get('user_id') ) {
-         $object = Jifty->app_class("CurrentUser")->new( id => $id );
+         $object = Jifty->app_class({require => 0}, "CurrentUser")->new( id => $id );
     } elsif ( Jifty->config->framework('AdminMode')) {
-         $object = Jifty->app_class("CurrentUser")->superuser;
+         $object = Jifty->app_class({require => 0}, "CurrentUser")->superuser;
     } else {
-         $object = Jifty->app_class("CurrentUser")->new;
+         $object = Jifty->app_class({require => 0}, "CurrentUser")->new;
     }
     
-    $self->_current_user($object);
+    $self->{current_user} = $object;
     return $object;
 }
 
@@ -359,8 +359,8 @@ sub _validate_request_actions {
                 $self->log->warn( "Attempt to call denied action '"
                         . $request_action->class
                         . "'" );
-                Carp::cluck;
-                $self->log->error("NOTICE! A cross-site scriptng security fix has been installed so that actions are now by default DENIED during GET requests. You must specifically whitelist safe actions using this in your dispatcher: before '*' => run { Jifty->api->allow('SafeAction') }; - We apologize for the inconvenience.");
+                $self->log->warn( Jifty->api->explain($request_action->class ) );
+                $self->log->error("NOTICE! A cross-site scripting security fix has been installed so that actions are now by default DENIED during GET requests. You must specifically whitelist safe actions using this in your dispatcher: before '*' => run { Jifty->api->allow('SafeAction') }; - We apologize for the inconvenience.") if $self->request->request_method eq "GET";
                 push @denied_actions, $request_action;
                 next;
             }
@@ -464,6 +464,8 @@ sub form {
 Creates a new action (an instance of a subclass of
 L<Jifty::Action>). The named arguments passed to this method are
 passed on to the C<new> method of the action named in C<CLASS>.
+If you pass an odd number of arguments, then the first argument
+is interpreted as C<class>.
 
 =head3 Arguments
 
@@ -506,6 +508,9 @@ field at that time.
 sub new_action {
     my $self = shift;
 
+    # Handle new_action('CreateFoo', moniker => 'create_foo')
+    unshift @_, 'class' if @_ % 2;
+
     my %args = (
         class     => undef,
         moniker   => undef,
@@ -527,10 +532,9 @@ sub new_action {
     # Prepend the base path (probably "App::Action") unless it's there already
     $class = Jifty->api->qualify($class);
 
-    my $loaded = Jifty::Util->require( $class );
     # The implementation class is provided by the client, so this
     # isn't a "shouldn't happen"
-    return unless $loaded;
+    return unless Jifty::Util->require( $class );
 
     my $action;
     # XXX TODO bullet proof
@@ -714,8 +718,8 @@ sub redirect {
         my $request = Jifty::Request->new();
         $request->add_state_variable( key => $_->key, value => $_->value )
           for $self->request->state_variables;
-        $request->add_state_variable( key => $_, value => $self->_state_variables->{$_} )
-          for keys %{ $self->_state_variables };
+        $request->add_state_variable( key => $_, value => $self->{state_variables}->{$_} )
+          for keys %{ $self->{state_variables} };
         for (@actions) {
             my $new_action = $request->add_action(
                 moniker   => $_->moniker,
@@ -732,8 +736,12 @@ sub redirect {
         }
         my %parameters = ($page->parameters);
         $request->argument($_ => $parameters{$_}) for keys %parameters;
-        $request->path($page->url);
 
+        # Apache, lighttpd, and HSS all do one pass of unescaping on
+        # PATH_INFO, which is what $request->path is normally set to.
+        # We should replicate that here.
+        $request->path( URI::Escape::uri_unescape( $page->url ) );
+        $request->request_method("GET"); # ..effectively.
         $request->continuation($self->request->continuation);
         my $cont = Jifty::Continuation->new(
             request  => $request,
@@ -774,9 +782,8 @@ sub _redirect {
     # This is designed to work under CGI or FastCGI; will need an
     # abstraction for mod_perl
 
-    # Clear out the mason output, if any
-    $self->mason->clear_buffer if $self->mason;
-    Template::Declare->buffer->clear if(Template::Declare->buffer);
+    # Clear out the output, if any
+    Jifty->handler->buffer->clear;
 
     my $apache = Jifty->handler->apache;
 
@@ -788,7 +795,7 @@ sub _redirect {
     # cookie has to be sent or returning from continuations breaks
     Jifty->web->session->set_cookie;
 
-    $apache->send_http_header();
+    Jifty->handler->send_http_header;
 
     # Mason abort, or dispatcher abort out of here
     $self->mason->abort if $self->mason;
@@ -828,7 +835,7 @@ sub tangent {
     my $self = shift;
 
     if (@_ == 1  ) {
-        Jifty->log->error("Jifty::Web->tangent takes a paramhash. Perhaps you passed '".$_[0]."' , rather than 'url => ".$_[0]."'");
+        $self->log->error("Jifty::Web->tangent takes a paramhash. Perhaps you passed '".$_[0]."' , rather than 'url => ".$_[0]."'");
         die; 
     }
     my $clickable = Jifty::Web::Form::Clickable->new(
@@ -869,7 +876,11 @@ I<PARAMHASH>.
 
 sub link {
     my $self = shift;
-    return Jifty::Web::Form::Clickable->new(@_)->generate;
+    if (not defined wantarray) {
+        Jifty::Web::Form::Clickable->new(@_)->generate->render;
+    } else {
+        return Jifty::Web::Form::Clickable->new(@_)->generate;
+    }
 }
 
 =head3 return PARAMHASH
@@ -1084,15 +1095,15 @@ sub include_css {
     # is returned.
     defined $self->call_trigger( 'include_css', @_ ) or return '';
 
-    $self->out( '<link rel="stylesheet" type="text/css" '
-            . 'href="/static/css/main.css" />' );
+    $self->out( qq[<link rel="stylesheet" type="text/css" href="/static/css/$_" />\n] )
+        for @{ Jifty->web->css_files };
 
     return '';
 }
 
 =head3 add_css FILE1, FILE2, ...
 
-Pushes files onto C<Jifty->web->css_files>
+Pushes files onto C<< Jifty->web->css_files >>
 
 =cut
 
@@ -1163,7 +1174,7 @@ sub include_javascript {
 
 =head3 add_javascript FILE1, FILE2, ...
 
-Pushes files onto C<Jifty->web->javascript_libs>
+Pushes files onto C<< Jifty->web->javascript_libs >>
 
 =cut
 
@@ -1193,7 +1204,7 @@ sub remove_javascript {
 
 =head3 add_external_javascript URL1, URL2, ...
 
-Pushes urls onto C<Jifty->web->external_javascript_libs>
+Pushes urls onto C<< Jifty->web->external_javascript_libs >>
 
 =cut
 
@@ -1238,9 +1249,9 @@ sub set_variable {
     my $value = shift;
 
     if (!defined($value)) {
-        delete $self->_state_variables->{$name};
+        delete $self->{state_variables}{$name};
     } else {
-        $self->_state_variables->{$name} = $value;
+        $self->{state_variables}{$name} = $value;
     }
 
 }
@@ -1257,7 +1268,7 @@ versions of Jifty
 
 sub state_variables {
     my $self = shift;
-    return %{ $self->_state_variables };
+    return %{ $self->{state_variables} };
 }
 
 =head3 clear_state_variables
@@ -1269,7 +1280,7 @@ Remove all the state variables to be serialized for the next request.
 sub clear_state_variables {
     my $self = shift;
 
-    $self->_state_variables({});
+    $self->{state_variables} = {};
 }
 
 =head2 REGIONS
@@ -1325,8 +1336,8 @@ sub replace_current_region {
 
 =head3 current_region
 
-Returns the name of the current L<Jifty::Web::PageRegion>, or undef if
-there is none.
+Returns the current L<Jifty::Web::PageRegion>, or undef if there is
+none.
 
 =cut
 
@@ -1342,13 +1353,23 @@ sub current_region {
 Returns the fully qualified name of the current
 L<Jifty::Web::PageRegion>, or the empty string if there is none.  If
 C<REGION> is supplied, gives the qualified name of C<REGION> were it
-placed in the current region.
+placed in the current region. You may also use a literal region name.
 
 =cut
 
 sub qualified_region {
     my $self = shift;
-    return join( "-", map { $_->name } @{ $self->{'region_stack'} || [] }, @_ );
+    join "-",
+        map { ref($_) ? $_->name : $_ }
+            @{ $self->{'region_stack'} || [] }, @_;
 }
+
+=head2 is_ssl
+
+Indicates whether the current request was made using SSL.
+
+=cut
+
+sub is_ssl { $ENV{HTTPS} }
 
 1;

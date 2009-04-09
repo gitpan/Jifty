@@ -55,8 +55,11 @@ L<Jifty::Dispatcher>.
 
 
 use Storable 'dclone';
+$Storable::Deparse = 1;
+$Storable::Eval = 1;
+$Storable::forgive_me = 1;
 
-use base qw/Class::Accessor::Fast/;
+use base qw/Class::Accessor::Fast Jifty::Object/;
 
 __PACKAGE__->mk_accessors(qw(id parent
                              request response code
@@ -173,7 +176,7 @@ proper path, with that continuation.
 sub call {
     my $self = shift;
 
-    Jifty->log->debug("Redirect to @{[$self->request->path]} via continuation");
+    $self->log->debug("Redirect to @{[$self->request->path]} via continuation");
     if (Jifty->web->request->argument('_webservice_redirect')) {
         # for continuation - perform internal redirect under webservices.
         Jifty->web->webservices_redirect($self->request->path);
@@ -183,7 +186,7 @@ sub call {
     # If we needed to fix up the path (it contains invalid
     # characters) then warn, because this may cause infinite
     # redirects
-    Jifty->log->warn("Redirect to '@{[$self->request->path]}' contains unsafe characters")
+    $self->log->warn("Redirect to '@{[$self->request->path]}' contains unsafe characters")
         if $self->request->path =~ m{[^A-Za-z0-9\-_.!~*'()/?&;+]};
 
     # Clone our request

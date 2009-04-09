@@ -1,8 +1,6 @@
 use strict;
 use warnings;
-use lib 't/lib';
-use Jifty::SubTest;
-use Jifty::Test tests => 10;
+use Jifty::Test::Dist tests => 10;
 use Jifty::Test::WWW::Selenium;
 use utf8;
 
@@ -27,7 +25,11 @@ is( $sel->get_alert,
     'please use Jifty.update instead of update.',
     'bare update is deprecated'
 );
+
+sleep 2;
+
 $html = $sel->get_html_source;
+
 like( $html, qr/original content/, 'replace content correctly' );
 unlike( $html, qr{args:/content\.html}, 'replaced by javascript' );
 

@@ -37,9 +37,9 @@ definitions in a single request.
 =head2 Assembly of CSS definitions
 
 When Jifty assembles all CSS definitions (which is internally done
-inside L<Jifty::Web> by the method C<include_css>, a single file,
+inside L<Jifty::Web> by the method C<include_css>), a single file,
 C<main.css> is included into the generated HTML code of the current
-page. This file consists of a series of C<@include> directives that
+page. This file consists of a series of C<@import> directives that
 reference every single CSS file to get used.
 
 =head2 Expansion of CSS definitions
@@ -126,15 +126,9 @@ libraries, like
 
 =over
 
-=item C<Prototype> L<http://prototype.conio.net>
+=item C<jQuery> L<http://jquery.com/>
 
-Prototype is a toolkit for providing AJAX support. This is a library
-some others depend on.
-
-=item C<scriptaculous.js> L<http://script.aculo.us/>
-
-This library provides support for animation with effects, drag & drop,
-AJAX controls and DOM utilities.
+jQuery is a fast, concise, JavaScript Library that simplifies how you traverse HTML documents, handle events, perform animations, and add Ajax interactions to your web pages.
 
 =item C<Rico> L<http://openrico.org>
 

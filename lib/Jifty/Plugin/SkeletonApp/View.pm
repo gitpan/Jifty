@@ -10,7 +10,7 @@ use Scalar::Defer;
 
 =head1 NAME
 
-Jifty::Plugin::SkeletonApp::View
+Jifty::Plugin::SkeletonApp::View - Default fragments for your pages
 
 =head1 DESCRIPTION
 
@@ -23,12 +23,11 @@ a dispatcher or the other plugins that implement it.
 =cut
 
 private template 'salutation' => sub {
+    my $cu = Jifty->web->current_user;
     div {
     attr {id => "salutation" };
-        if (    Jifty->web->current_user->id
-            and Jifty->web->current_user->user_object )
-        {
-            _( 'Hiya, %1.', Jifty->web->current_user->username );
+        if ( $cu->id and $cu->user_object ) {
+            _( 'Hiya, %1.', $cu->username );
         }
         else {
             _("You're not currently signed in.");
@@ -37,9 +36,9 @@ private template 'salutation' => sub {
 };
 
 private template 'menu' => sub {
-    div {
-    attr { id => "navigation" };
-        Jifty->web->navigation->render_as_menu; };
+    div { attr { id => "navigation" };
+        Jifty->web->navigation->render_as_menu;
+    };
 };
 
 template '__jifty/empty' => sub :Static {
@@ -68,8 +67,7 @@ private template 'heading_in_wrapper' => sub {
 };
 
 private template 'keybindings' => sub {
-    div { id is "keybindings";
-      outs_raw('<script type="text/javascript">Jifty.KeyBindings.reset()</script>') };
+    div { id is "keybindings" };
 };
 
 #template 'index.html' => page { { title is _('Welcome to your new Jifty application') } img { src is "/static/images/pony.jpg", alt is _( 'You said you wanted a pony. (Source %1)', 'http://hdl.loc.gov/loc.pnp/cph.3c13461'); }; };

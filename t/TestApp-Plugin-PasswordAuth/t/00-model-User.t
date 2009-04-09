@@ -8,10 +8,10 @@ A basic test harness for the User model.
 
 =cut
 
-use lib 't/lib';
-use Jifty::SubTest;
+use Jifty::Test::Dist tests => 24;
 
-use Jifty::Test tests => 24;
+# force to use English handle to compare strings successfully
+Jifty::I18N->get_language_handle('en');
 
 # Make sure we can load the model
 use_ok('TestApp::Plugin::PasswordAuth::Model::User');

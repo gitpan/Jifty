@@ -3,6 +3,7 @@ use strict;
 
 package Jifty::Subs;
 
+use base qw/Jifty::Object/;
 
 use constant new => __PACKAGE__;
 
@@ -57,6 +58,28 @@ The moniker of the region that updates to this subscription should be rendered i
 
 The path of the fragment used to render items matching this subscription
 
+=item effect
+
+The effect to use when showing the region, if any.
+
+=item effect_args
+
+Arguments to the effect
+
+=item remove_effect
+
+The effect to use when removing the old value of the region, if any.
+
+=item remove_effect_args
+
+Arguments to the remove effect
+
+=item coalesce
+
+If multiple events would cause the update of the given region with the
+same C<render_with> path, merge them and only render the region once,
+with the latest update.
+
 =back
 
 =cut
@@ -65,15 +88,21 @@ sub add {
     my $class = shift;
     my $args = {@_};
     unless (Jifty->config->framework('PubSub')->{'Enable'}) {
-        Jifty->log->error("PubSub disabled, but $class->add called");
+        $class->log->error("PubSub disabled, but $class->add called");
         return undef;
     }
 
+    $args->{coalesce} = 1 if not exists $args->{coalesce} and $args->{mode} eq "Replace";
+
     my $id          = ($args->{window_id} || Jifty->web->session->id);
-    my $event_class = Jifty->app_class("Event", $args->{class});
+    my $event_class = $args->{class};
+    $event_class = Jifty->app_class("Event", $args->{class}) unless $event_class =~ /^Jifty::Event::/;
 
     my $queries = $args->{queries} || [];
+    my $region  = $args->{region};
     my $channel = $event_class->encode_queries(@$queries);
+    $args->{attrs}{$_} = delete $args->{$_}
+        for grep {exists $args->{$_}} qw/effect effect_args remove_effect remove_effect_args/;
 
     # The ->modify here is calling into the callback sub{...} with
     # the previous value of $_, that is a hashref of channels to
@@ -92,9 +121,9 @@ sub add {
     # including the frament, region, argument and ajax updating mode.
     Jifty->bus->modify(
         "$id-render" => sub {
-            $_->{$channel} = {
+            $_->{$channel}{$region} = {
                 map { $_ => $args->{$_} }
-                    qw/render_with region arguments mode/
+                    qw/render_with region arguments mode coalesce attrs/
             };
         }
     );
@@ -108,7 +137,7 @@ sub add {
         }
     );
 
-    return "$channel!$id";
+    return "$channel!$id!$region";
 }
 
 =head2 cancel CHANNEL_ID
@@ -121,32 +150,36 @@ sub cancel {
     my ($class, $channel_id) = @_;
 
     unless (Jifty->config->framework('PubSub')->{'Enable'}) {
-        Jifty->log->error("PubSub disabled, but $class->add called");
+        $class->log->error("PubSub disabled, but $class->cancel called");
         return undef;
     }
 
-    my ($channel, $id) = split(/!/, $channel_id, 2);
+    my ($channel, $id, $region) = split(/!/, $channel_id, 3);
     my ($event_class)  = split(/-/, $channel);
 
     $id ||= Jifty->web->session->id;
 
-    Jifty->bus->modify(
-        "$event_class-subscriptions" => sub {
-            delete $_->{$channel};
-        }
-    );
-
+    my $last;
     Jifty->bus->modify(
         "$id-render" => sub {
-            delete $_->{$channel};
+            delete $_->{$channel}{$region};
+            $last = 1 unless %{$_->{$channel}};
         }
     );
 
-    Jifty->bus->modify(
-        "$id-subscriber" => sub {
-            if ($_) { $_->unsubscribe($channel) }
-        }
-    );
+    if ($last) {
+        Jifty->bus->modify(
+            "$event_class-subscriptions" => sub {
+                delete $_->{$channel};
+            }
+        );
+
+        Jifty->bus->modify(
+            "$id-subscriber" => sub {
+                if ($_) { $_->unsubscribe($channel) }
+            }
+        );
+    }
 }
 
 =head2 list [window/sessionid]
@@ -157,16 +190,48 @@ Returns a lost of channel ids this session or window is subscribed to.
 
 
 sub list {
-    my $self = shift;
+    my $class = shift;
 
     unless (Jifty->config->framework('PubSub')->{'Enable'}) {
-        Jifty->log->error("PubSub disabled, but $self->add called");
+        $class->log->error("PubSub disabled, but $class->add called");
         return undef;
     }
 
     my $id   = (shift || Jifty->web->session->id);
     my $subscribe = Jifty->bus->modify( "$id-subscriber" ) or return ();
     return $subscribe->channels;
+}
+
+=head2 update_on PARAMHASH
+
+Like L</add>, but provides a sane set of defaults for updating the
+current region, based on inspection of the current region's
+properties.  C<queries> is set to the region's arguments, and C<class>
+is left unspecified.
+
+=cut
+
+sub update_on {
+    my $class = shift;
+
+    my $region = Jifty->web->current_region;
+    unless ($region) {
+        warn "Jifty->subs->update_on called when not in a region";
+        return;
+    }
+
+    my %args = %{ $region->arguments };
+    delete $args{region};
+    delete $args{event};
+
+    $class->add(
+        queries     => [ \%args ],
+        arguments   => \%args,
+        mode        => 'Replace',
+        region      => $region->qualified_name,
+        render_with => $region->path,
+        @_,
+    );
 }
 
 1;

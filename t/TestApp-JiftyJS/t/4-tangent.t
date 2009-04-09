@@ -2,15 +2,17 @@
 
 use strict;
 use warnings;
-use lib 't/lib';
-use Jifty::SubTest;
-use Jifty::Test tests => 17;
+use Jifty::Test::Dist tests => 17;
 use Jifty::Test::WWW::Selenium;
 use utf8;
 
 my $server = Jifty::Test->make_server;
 my $sel    = Jifty::Test::WWW::Selenium->rc_ok($server);
 my $URL    = $server->started_ok;
+
+$sel->open("/");
+$sel->set_speed(1000);
+$sel->pause();
 
 {
     # /tangent/page1 -- tangent --> /tangent/returner -- return --> /tangent/page1

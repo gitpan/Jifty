@@ -4,11 +4,10 @@ use strict;
 package Jifty::Request;
 
 use base qw/Jifty::Object Class::Accessor::Fast/;
-__PACKAGE__->mk_accessors(qw(_top_request arguments template_arguments just_validating path continuation_id continuation_type continuation_path));
+__PACKAGE__->mk_accessors(qw(_top_request arguments template_arguments just_validating path continuation_id future_continuation_id continuation_type continuation_path request_method));
 
 use Jifty::JSON;
 use Jifty::YAML;
-use Storable 'dclone';
 
 =head1 NAME
 
@@ -81,6 +80,7 @@ sub new {
     $self->{'fragments'} = {};
     $self->arguments({});
     $self->template_arguments({});
+    $self->request_method("GET");
 
     my %args = @_;
     for (keys %args) {
@@ -116,6 +116,9 @@ YAML, JSON, etc.  Falls back to query parameters.  Takes a CGI object.
 sub fill {
     my $self = shift;
     my ($cgi) = @_;
+
+    # Store away request method
+    $self->request_method( uc $cgi->request_method );
 
     # Grab content type and posted data, if any
     my $ct   = $ENV{"CONTENT_TYPE"};
@@ -153,7 +156,7 @@ sub from_data_structure {
     my $path = $data->{'path'};
     
     if ($cgi && ! $path) {
-        $path = URI::Escape::uri_unescape($cgi->path_info);
+        $path = $cgi->path_info;
         $path =~ s/\?.*//;
     };
 
@@ -165,8 +168,13 @@ sub from_data_structure {
     $self->just_validating( $data->{validating} ) if $data->{validating};
 
     if ( ref $data->{continuation} eq "HASH" ) {
-        $self->continuation_id( $data->{continuation}{id} );
-        $self->continuation_type( $data->{continuation}{type} || "parent" );
+        # Back-compat
+        $data->{continuation}{current} ||= $data->{continuation}{id};
+        delete $data->{continuation}{id} if ($data->{continuation}{type} || "") eq "parent";
+
+        $self->continuation_id( $data->{continuation}{current} );
+        $self->future_continuation_id( $data->{continuation}{id} );
+        $self->continuation_type( $data->{continuation}{type} );
         $self->continuation_path( $data->{continuation}{create} );
     }
 
@@ -249,9 +257,7 @@ sub from_cgi {
     my $self = shift;
     my ($cgi) = @_;
 
-    # always get the unescaped path for dispatcher, which is already
-    # the case for fastcgi, but not standalone.
-    my $path = URI::Escape::uri_unescape($cgi->path_info);
+    my $path = $cgi->path_info;
     $path =~ s/\?.*//;
     $self->path( $path );
 
@@ -328,17 +334,15 @@ sub argument {
 
         if ($key eq "J:VALIDATE") {
             $self->{validating} = $value;
-        } elsif ($key eq "J:C" and $cont_type ne "return" and $cont_type ne "call") {
-            # J:C Doesn't take preference over J:CALL or J:RETURN
+        } elsif ($key eq "J:C") {
             $self->continuation_id($value);
-            $self->continuation_type("parent");
         } elsif ($key eq "J:CALL" and $cont_type ne "return") {
             # J:CALL doesn't take preference over J:RETURN
-            $self->continuation_id($value);
+            $self->future_continuation_id($value);
             $self->continuation_type("call");
         } elsif ($key eq "J:RETURN") {
             # J:RETURN trumps all
-            $self->continuation_id($value);
+            $self->future_continuation_id($value);
             $self->continuation_type("return");
         } elsif ($key eq "J:PATH") {
             $self->continuation_path($value);
@@ -474,13 +478,18 @@ sub webform_to_data_structure {
     $data->{validating} = $args{'J:VALIDATE'} if defined $args{'J:VALIDATE'} and length $args{'J:VALIDATE'};
 
     # Continuations
-    if ($args{'J:C'} or $args{'J:CALL'} or $args{'J:RETURN'}) {
-        $data->{continuation}{id} = $args{'J:RETURN'} || $args{'J:CALL'} || $args{'J:C'};
-        $data->{continuation}{type} = "parent" if $args{'J:C'};
+    if ($args{'J:C'}) {
+        $data->{continuation}{current} = $args{'J:C'};
+    }
+
+    if ($args{'J:CALL'} or $args{'J:RETURN'}) {
+        $data->{continuation}{id} = $args{'J:RETURN'} || $args{'J:CALL'};
         $data->{continuation}{type} = "call"   if $args{'J:CALL'};
         $data->{continuation}{type} = "return" if $args{'J:RETURN'};
     }
-    $data->{continuation}{create} = $args{'J:PATH'} if $args{'J:CREATE'};
+    if ($args{'J:CREATE'}) {
+        $data->{continuation}{create} = $args{'J:PATH'};
+    }
 
     # Are we only setting some actions as active?
     my $active_actions;
@@ -523,13 +532,13 @@ sub webform_to_data_structure {
 
 =head2 continuation_id [CONTINUATION_ID]
 
-Gets or sets the ID of the continuation associated with the request.
+Gets or sets the ID of the current continuation associated with the request.
 
 =cut
 
 =head2 continuation [CONTINUATION]
 
-Returns the L<Jifty::Continuation> object associated with this
+Returns the current L<Jifty::Continuation> object associated with this
 request, if any.
 
 =cut
@@ -539,9 +548,27 @@ sub continuation {
 
     $self->continuation_id(ref $_[0] ? $_[0]->id : $_[0])
       if @_;
-
+ 
     return undef unless $self->continuation_id;
     return Jifty->web->session->get_continuation($self->continuation_id);
+}
+
+=head2 future_continuation_id
+
+Gets or sets the ID of the continuation that we are about to return or
+call into.
+
+=head2 future_continuation
+
+Returns the L<Jifty::Continuation> that we are about to return or call
+into, if any.
+
+=cut
+
+sub future_continuation {
+    my $self = shift;
+    return undef unless defined $self->future_continuation_id;
+    return Jifty->web->session->get_continuation($self->future_continuation_id);
 }
 
 =head2 save_continuation
@@ -590,9 +617,9 @@ function will throw an exception to its enclosing dispatcher.
 sub call_continuation {
     my $self = shift;
     return if $self->is_subrequest;
-    return unless $self->continuation_type and $self->continuation_type eq "call" and $self->continuation;
-    $self->log->debug("Calling continuation ".$self->continuation->id);
-    return $self->continuation->call;
+    return unless $self->continuation_type and $self->continuation_type eq "call" and $self->future_continuation;
+    $self->log->debug("Calling continuation ".$self->future_continuation->id);
+    return $self->future_continuation->call;
 }
 
 =head2 return_from_continuation
@@ -607,20 +634,20 @@ further.
 
 sub return_from_continuation {
     my $self = shift;
-    return unless $self->continuation_type and $self->continuation_type eq "return" and $self->continuation;
-    unless ($self->continuation->return_path_matches) {
+    return unless $self->continuation_type and $self->continuation_type eq "return" and $self->future_continuation;
+    unless ($self->future_continuation->return_path_matches) {
         # This aborts via Jifty::Dispatcher::_abort -- but we're not
         # in the dispatcher yet, so it would go uncaught.  Catch it
         # here.
         eval {
-            $self->continuation->call;
+            $self->future_continuation->call;
         };
         my $err = $@;
         warn $err if $err and $err ne "ABORT";
         return 1;
     }
-    $self->log->debug("Returning from continuation ".$self->continuation->id);
-    $self->continuation->return;
+    $self->log->debug("Returning from continuation ".$self->future_continuation->id);
+    $self->future_continuation->return;
     return undef;
 }
 

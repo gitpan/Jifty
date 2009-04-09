@@ -8,19 +8,20 @@ use Class::Trigger;
 
 =head1 NAME
 
-Jifty::Plugin::Halo
+Jifty::Plugin::Halo - Provides halos
 
 =head1 DESCRIPTION
 
-This plugin provides L<http://seaside.st|Seasidesque> halos for
-your application. It's included by default when using Jifty. (That's
-a bug).
+This plugin provides L<http://seaside.st|Seasidesque> halos for your
+application. It's included by default when using Jifty with DevelMode
+turned on.
 
 =cut
 
 =head2 init
 
-Only enable halos in DevelMode. Add our instrumentation to L<Template::Declare>.
+Only enable halos in DevelMode. Add our instrumentation to
+L<Template::Declare>.
 
 =cut
 
@@ -28,13 +29,6 @@ sub init {
     my $self = shift;
     return if $self->_pre_init;
     return unless Jifty->config->framework('DevelMode');
-
-    # 0.28 added around_template instrumentation
-    eval { Template::Declare->VERSION('0.28'); 1 }
-        or do {
-            Jifty->log->debug("Template::Declare 0.28 required for TD halos.");
-            return;
-        };
 
     warn "Overwriting an existing Template::Declare->around_template"
         if Template::Declare->around_template;
@@ -72,12 +66,15 @@ sub around_template {
             Jifty->web->escape($deparsed);
         },
     };
+    my $proscribed = $self->is_proscribed($frame);
 
-    Template::Declare->buffer->append($self->halo_header($frame));
+    Template::Declare->buffer->append($self->halo_header($frame))
+        unless $proscribed;
     $orig->();
 
     $frame = $self->pop_frame;
-    Template::Declare->buffer->append($self->halo_footer($frame));
+    Template::Declare->buffer->append($self->halo_footer($frame))
+        unless $proscribed;
 }
 
 =head2 halo_header frame -> string
@@ -197,8 +194,7 @@ sub new_frame {
                 if ($ref) {
                     my $expanded = Jifty->web->serial;
                     my $yaml = Jifty->web->escape(Jifty::YAML::Dump($value));
-                    #$out .= qq{<a href="#" onclick="Element.toggle('$expanded'); return false">$ref</a><div id="$expanded" style="display: none; position: absolute; left: 200px; border: 1px solid black; background: #ccc; padding: 1em; padding-top: 0; width: 300px; height: 500px; overflow: auto"><pre>$yaml</pre></div>};
-                    $out .= qq{<a href="#" onclick="Element.toggle('$expanded'); return false">$ref</a><div id="$expanded" class="halo-argument" style="display: none"><pre>$yaml</pre></div>};
+                    $out .= qq{<a href="#" onclick="jQuery(Jifty.\$('$expanded')).toggle(); return false">$ref</a><div id="$expanded" class="halo-argument" style="display: none"><pre>$yaml</pre></div>};
                 }
                 elsif (defined $value) {
                     $out .= Jifty->web->escape($value);
@@ -289,6 +285,21 @@ sub pop_frame {
     --Jifty->handler->stash->{'_halo_depth'};
 
     return $frame;
+}
+
+=head2 is_proscribed FRAME
+
+Returns true if the given C<FRAME> should not have a halo around it.
+
+=cut
+
+sub is_proscribed {
+    my ($self, $frame) = @_;
+    return 1 if $frame->{'proscribed'};
+
+    $frame->{'proscribed'} = 1 unless Jifty->handler->stash->{'in_body'};
+
+    return $frame->{'proscribed'}? 1 : 0;
 }
 
 1;

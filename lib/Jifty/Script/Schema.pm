@@ -2,31 +2,127 @@ use warnings;
 use strict;
 
 package Jifty::Script::Schema;
-use base qw/App::CLI::Command/;
+use base qw/Jifty::Script/;
 
-use Pod::Usage;
 use version;
 use Jifty::DBI::SchemaGenerator;
 use Jifty::Config;
 use Jifty::Schema;
 
-=head2 options
+=head1 NAME
 
-Returns a hash of all the options this script takes. (See the usage message for details)
+Jifty::Script::Schema - Create SQL to update or create your Jifty app's tables
+
+=head1 SYNOPSIS
+
+  jifty schema --setup      Creates or updates your application's database tables
+
+ Options:
+   --print            Print SQL, rather than executing commands
+
+   --setup            Upgrade or install the database, creating it if need be
+   --create-database  Only creates the database
+   --drop-database    Drops the database
+   --ignore-reserved-words   Ignore any SQL reserved words in schema definition
+   --no-bootstrap     don't run bootstrap
+
+   --help             brief help message
+   --man              full documentation
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--print>
+
+Rather than actually running the database create/update/drop commands,
+Prints the commands to standard output
+
+=item B<--create-database>
+
+Send a CREATE DATABASE command.  Note that B<--setup>, below, will
+automatically send a CREATE DATABASE if it needs one.  This option is
+useful if you wish to create the database without creating any tables
+in it.
+
+=item B<--drop-database>
+
+Send a DROP DATABASE command.  Use this in conjunction with B<--setup>
+to wipe and re-install the database.
+
+=item B<--setup>
+
+Actually set up your app's tables.  This creates the database if need
+be, and runs any commands needed to bring the tables up to date; these
+may include CREATE TABLE or ALTER TABLE commands.  This option is
+assumed if the database does not exist, or the database version is not
+the same as the application's version.
+
+=item B<--ignore-reserved-words>
+
+Ignore any SQL reserved words used in table or column deffinitions, if
+this option is not used and a reserved word is found it will cause an error.
+
+=item B<--no-bootstrap>
+
+don't run Bootstrap, mostly to get rid of creating initial data
+
+=item B<--help>
+
+Print a brief help message and exits.
+
+=item B<--man>
+
+Prints the manual page and exits.
+
+=back
 
 =cut
 
 sub options {
+    my $self = shift;
     return (
+        $self->SUPER::options,
         "setup"                 => "setup_tables",
         "print|p"               => "print",
         "create-database|c"     => "create_database",
         "ignore-reserved-words" => "ignore_reserved",
         "drop-database"         => "drop_database",
-        "help|?"                => "help",
-        "man"                   => "man"
+        "no-bootstrap"          => "no_bootstrap",
     );
 }
+
+=head1 DESCRIPTION
+
+Looks for all model classes of your Jifty application and generates
+SQL statements to create or update database tables for all of the
+models.  It either prints the SQL to standard output (B<--print>) or
+actually issues the C<CREATE TABLE> or C<ALTER TABLE> statements on
+Jifty's database.
+
+(Note that even if you are just displaying the SQL, you need to have
+correctly configured your Jifty database in
+I<ProjectRoot>C</etc/config.yml>, because the SQL generated may depend
+on the database type.)
+
+By default checks for SQL reserved words in your table names and
+column definitions, throwing an error if any are found.  
+
+If you want to permanently turn this behaviour off you can set
+CheckSchema to 0 in the database section of your applications config
+file.
+
+=head1 BUGS
+
+Due to limitations of L<DBIx::DBSchema>, this probably only works with
+PostgreSQL, MySQL and SQLite.
+
+It is possible that some of this functionality should be rolled into
+L<Jifty::DBI::SchemaGenerator>
+
+=cut
+
+=head1 METHODS
 
 =head2 run
 
@@ -96,26 +192,6 @@ sub schema {
     return $self->{'SCHEMA'};
 }
 
-=head2 print_help
-
-Prints out help for the package using pod2usage.
-
-If the user specified --help, prints a brief usage message
-
-If the user specified --man, prints out a manpage
-
-=cut
-
-sub print_help {
-    my $self = shift;
-
-    # Option handling
-    my $docs = \*DATA;
-    pod2usage( -exitval => 1, -input => $docs ) if $self->{help};
-    pod2usage( -exitval => 0, -verbose => 2, -input => $docs )
-        if $self->{man};
-}
-
 =head2 probe_database_existence
 
 Probes our database to see if it exists and is up to date.
@@ -147,11 +223,10 @@ sub probe_database_existence {
 
         # No version table.  Assume the DB is empty.
         $self->{create_all_tables} = 1;
-    } elsif ( $error =~ /database .*? does not exist/i
-        or $error =~ /unknown database/i )
-    {
+    } elsif ( $error =~ /(database .*? (?:does not|doesn't) exist|unknown database)/i) {
 
         # No database exists; we'll need to make one and fill it up
+        $self->{drop_database}     = 0;
         $self->{create_database}   = 1;
         $self->{create_all_tables} = 1;
     } elsif ($error) {
@@ -206,22 +281,25 @@ sub create_all_tables {
             ( ref $plugin ) . '_db_version' => $pluginv );
     }
 
-    # Load initial data
-    eval {
-        my $bootstrapper = Jifty->app_class("Bootstrap");
-        Jifty::Util->require($bootstrapper);
-        $bootstrapper->run() if $bootstrapper->can('run');
+    unless ( $self->{'no_bootstrap'} ) {
 
-        for my $plugin ( Jifty->plugins ) {
-            my $plugin_bootstrapper = $plugin->bootstrapper;
-            Jifty::Util->require($plugin_bootstrapper);
-            $plugin_bootstrapper->run() if $plugin_bootstrapper->can('run');
-        }
-    };
-    die $@ if $@;
+        # Load initial data
+        eval {
+            my $bootstrapper = Jifty->app_class("Bootstrap");
+            Jifty::Util->require($bootstrapper);
+            $bootstrapper->run() if $bootstrapper->can('run');
+
+            for my $plugin ( Jifty->plugins ) {
+                my $plugin_bootstrapper = $plugin->bootstrapper;
+                Jifty::Util->require($plugin_bootstrapper);
+                $plugin_bootstrapper->run() if $plugin_bootstrapper->can('run');
+            }
+        };
+        die $@ if $@;
+    }
 
     # Commit it all
-    Jifty->handle->commit;
+    Jifty->handle->commit or exit 1;
 
     Jifty::Util->require('IPC::PubSub');
     IPC::PubSub->new(
@@ -230,7 +308,7 @@ sub create_all_tables {
             table_prefix => '_jifty_pubsub_',
             db_init      => 1,
         )
-    );
+    )->disconnect;
     $log->info("Set up version $appv, jifty version $jiftyv");
 }
 
@@ -592,7 +670,8 @@ sub _print_upgrades {
 =head2 manage_database_existence
 
 If the user wants the database created, creates the database. If the
-user wants the old database deleted, does that too.
+user wants the old database deleted, does that too.  Exits with a
+return value of 1 if the database drop or create fails.
 
 =cut
 
@@ -605,8 +684,17 @@ sub manage_database_existence {
         $handle->drop_database('print')   if ( $self->{'drop_database'} );
         $handle->create_database('print') if ( $self->{'create_database'} );
     } else {
-        $handle->drop_database('execute')   if ( $self->{'drop_database'} );
-        $handle->create_database('execute') if ( $self->{'create_database'} );
+        if ( $self->{'drop_database'} ) {
+            my $ret = $handle->drop_database('execute');
+            die "Error dropping database: ". $ret->error_message
+                unless $ret or $ret->error_message =~ /database .*?(?:does not|doesn't) exist|unknown database/i;
+        }
+
+        if ( $self->{'create_database'} ) {        
+            my $ret = $handle->create_database('execute');
+            die "Error creating database: ". $ret->error_message unless $ret;
+        }
+
         $handle->disconnect;
         $self->_reinit_handle() if ( $self->{'create_database'} );
     }
@@ -620,102 +708,7 @@ sub _reinit_handle {
 sub _exec_sql {
     my $sql = shift;
     my $ret = Jifty->handle->simple_query($sql);
-    $ret or die "error updating a table: " . $ret->error_message;
+    die "error updating a table: " . $ret->error_message unless $ret;
 }
 
 1;
-
-__DATA__
-
-=head1 NAME
-
-Jifty::Script::Schema - Create SQL to update or create your Jifty app's tables
-
-=head1 SYNOPSIS
-
-  jifty schema --setup      Creates or updates your application's database tables
-
- Options:
-   --print            Print SQL, rather than executing commands
-
-   --setup            Upgrade or install the database, creating it if need be
-   --create-database  Only creates the database
-   --drop-database    Drops the database
-   --ignore-reserved-words   Ignore any SQL reserved words in schema definition
-
-   --help             brief help message
-   --man              full documentation
-
-=head1 OPTIONS
-
-=over 8
-
-=item B<--print>
-
-Rather than actually running the database create/update/drop commands,
-Prints the commands to standard output
-
-=item B<--create-database>
-
-Send a CREATE DATABASE command.  Note that B<--setup>, below, will
-automatically send a CREATE DATABASE if it needs one.  This option is
-useful if you wish to create the database without creating any tables
-in it.
-
-=item B<--drop-database>
-
-Send a DROP DATABASE command.  Use this in conjunction with B<--setup>
-to wipe and re-install the database.
-
-=item B<--setup>
-
-Actually set up your app's tables.  This creates the database if need
-be, and runs any commands needed to bring the tables up to date; these
-may include CREATE TABLE or ALTER TABLE commands.  This option is
-assumed if the database does not exist, or the database version is not
-the same as the application's version.
-
-=item B<--ignore-reserved-words>
-
-Ignore any SQL reserved words used in table or column deffinitions, if
-this option is not used and a reserved word is found it will cause an error.
-
-=item B<--help>
-
-Print a brief help message and exits.
-
-=item B<--man>
-
-Prints the manual page and exits.
-
-=back
-
-=head1 DESCRIPTION
-
-Looks for all model classes of your Jifty application and generates
-SQL statements to create or update database tables for all of the
-models.  It either prints the SQL to standard output (B<--print>) or
-actually issues the C<CREATE TABLE> or C<ALTER TABLE> statements on
-Jifty's database.
-
-(Note that even if you are just displaying the SQL, you need to have
-correctly configured your Jifty database in
-I<ProjectRoot>C</etc/config.yml>, because the SQL generated may depend
-on the database type.)
-
-By default checks for SQL reserved words in your table names and
-column definitions, throwing an error if any are found.  
-
-If you want to permanently turn this behaviour off you can set
-CheckSchema to 0 in the database section of your applications config
-file.
-
-=head1 BUGS
-
-Due to limitations of L<DBIx::DBSchema>, this probably only works with
-PostgreSQL, MySQL and SQLite.
-
-It is possible that some of this functionality should be rolled into
-L<Jifty::DBI::SchemaGenerator>
-
-=cut

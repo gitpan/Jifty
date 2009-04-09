@@ -5,7 +5,7 @@ use base qw/Template::Declare Class::Accessor::Fast/;
 
 =head1 NAME
 
-Jifty::View::Declare::Page
+Jifty::View::Declare::Page - page wrappers
 
 =head1 DESCRIPTION
 
@@ -34,9 +34,26 @@ sub new {
     $self->_title($title);
 
     $self->_title($self->_meta->{title})
-	if $self->_meta && $self->_meta->{title};
+        if $self->_meta && $self->_meta->{title};
 
     return $self;
+}
+
+=head2 render
+
+Renders everything. This main driver of page rendering and called
+right after constructing page object.
+
+=cut
+
+sub render {
+    my $self = shift;
+    # This needs to be private so we can prepend the header at the end
+    Template::Declare->buffer->push(private => 1);
+    $self->render_body( sub { $self->render_page->() } );
+    $self->render_footer;
+    outs_raw(Template::Declare->buffer->pop);
+    return '';
 }
 
 =head2 render_header $title
@@ -56,8 +73,7 @@ sub render_header {
 
     $self->_render_header($self->_title || Jifty->config->framework('ApplicationName'));
 
-    $self->done_header(Template::Declare->buffer->data);
-    Template::Declare->end_buffer_frame;
+    $self->done_header(Template::Declare->buffer->pop);
     return '';
 };
 
@@ -70,7 +86,11 @@ Renders $body_code inside a body tag
 sub render_body {
     my ($self, $body_code) = @_;
 
-    body { $body_code->() };
+    body {
+        Jifty->handler->stash->{'in_body'} = 1;
+        $body_code->();
+        Jifty->handler->stash->{'in_body'} = 0;
+    };
 }
 
 =head2 render_page
@@ -119,19 +139,18 @@ sub mk_title_handler {
     return sub {
         shift;
         for (@_) {
-	    no warnings qw( uninitialized );
+            no warnings qw( uninitialized );
             if ( ref($_) eq 'CODE' ) {
                 Template::Declare->new_buffer_frame;
                 $_->();
                 $self->_title(
-                    $self->_title . Template::Declare->buffer->data );
-                Template::Declare->end_buffer_frame;
+                    $self->_title . Template::Declare->buffer->pop );
             } else {
                 $self->_title( $self->_title . Jifty->web->escape($_) );
             }
         }
         $self->render_header;
-	$self->render_title();
+        $self->render_title();
     };
 }
 
@@ -158,7 +177,9 @@ Renders the page footer and prepends the header to the L<Template::Declare> buff
 sub render_footer {
     my $self = shift;
     outs_raw('</html>');
-    Template::Declare->buffer->data( $self->done_header . Template::Declare->buffer->data );
+    my $ref = Template::Declare->buffer->buffer_ref;
+    $$ref = $self->done_header . $$ref;
+    return '';
 }
 
 =head2 render_pre_content_hook
@@ -192,8 +213,6 @@ sub render_jifty_page_detritus {
     show('/keybindings');
     with( id => "jifty-wait-message", style => "display: none" ),
         div { _('Loading...') };
-    with( id => "jifty-result-popup" ),
-        div { };
 
     # This is required for jifty server push.  If you maintain your own
     # wrapper, make sure you have this as well.
@@ -208,7 +227,10 @@ sub _render_header {
     my $title = shift || '';
     $title =~ s/<.*?>//g;    # remove html
     HTML::Entities::decode_entities($title);
+    my $old = Jifty->handler->stash->{'in_body'};
+    Jifty->handler->stash->{'in_body'} = 0;
     with( title => $title ), show('/header');
+    Jifty->handler->stash->{'in_body'} = $old;
 }
 
 1;

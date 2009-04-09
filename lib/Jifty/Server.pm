@@ -35,11 +35,6 @@ Creates a new C<Jifty::Server> object.
 
 =cut
 
-sub _send_http_status {
-      print STDOUT "HTTP/1.0 ".  (Jifty->handler->apache->{headers_out}->{'Status'} || '200 Jifty OK') .  "\n";
-};
-
-
 sub new {
     my $class = shift;
     my $self  = {};
@@ -47,9 +42,7 @@ sub new {
     $self->setup_jifty(@_);
     $self->recording_on if $ENV{'JIFTY_RECORD'};
 
-
     return ($self);
-
 }
 
 =head2 setup_jifty
@@ -69,12 +62,10 @@ sub setup_jifty {
     $self->port( Jifty->config->framework('Web')->{'Port'} || 8888 );
 }
 
-=head2 handle_request
+=head2 handle_request CGI
 
-Overrives L<HTML::Server::Simple::Mason>'s handle_request method to
-make use of L<Module::Refresh> to refresh any relevant modules, as
-well as to set up the C<$JiftyWeb> global before handling the actual
-request.
+Calls L<Jifty::Handler/handle_request> with the CGI object.  If
+running tests, send test warnings on specific requests.
 
 =cut
 
@@ -83,9 +74,17 @@ sub handle_request {
     my $cgi = shift;
 
     Jifty->handler->handle_request( cgi  => $cgi );
-
 }
 
+=head2 send_http_status
+
+Sends the HTTP status header.
+
+=cut
+
+sub send_http_status {
+    print STDOUT "HTTP/1.0 ".  (Jifty->handler->apache->{headers_out}->{'Status'} || '200 Jifty OK') .  "\n";
+}
 
 =head2 print_banner
 
@@ -133,9 +132,6 @@ parent when the server is ready for requests.
 
 sub after_setup_listener {
     my $self = shift;
-
-    use Hook::LexWrap;
-    wrap 'HTML::Mason::FakeApache::send_http_header', pre => \&_send_http_status;
 
     my $sig = $ENV{JIFTY_SERVER_SIGREADY} or return;
     kill $sig => getppid();

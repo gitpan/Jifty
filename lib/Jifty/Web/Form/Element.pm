@@ -110,13 +110,22 @@ region that the region was given when it was last rendered.
 
 =item effect => STRING
 
-The Scriptaculous visual effect to use when updating or creating the
-fragment.
+The Scriptaculous or jQuery visual effect to use when updating or
+creating the fragment.
 
 =item effect_args => HASHREF
 
 A hashref of arguments to pass to the effect when it is created.  These
 can be used to change the duration of the effect, for instance.
+
+=item remove_effect => STRING
+
+As C<effect>, but for when the previous version of the region is
+removed.
+
+=item remove_effect_args => HASHREF
+
+As C<effect_args>, but for C<remove_effect>.
 
 =item beforeclick => STRING
 
@@ -153,10 +162,13 @@ error from your browser.
 
 =cut
 
-sub handlers { qw(onclick onchange ondblclick onmousedown onmouseup onmouseover 
-                  onmousemove onmouseout onfocus onblur onkeypress onkeydown 
-                  onkeyup onselect) }
+use constant handlers => qw(
+    onclick onchange ondblclick onmousedown onmouseup onmouseover
+    onmousemove onmouseout onfocus onblur onkeypress onkeydown
+    onkeyup onselect
+);
 
+use constant possible_handlers => { map {($_ => 1)} handlers};
 
 
 =head2 accessors
@@ -167,11 +179,10 @@ C<new> parameter hash.
 
 =cut
 
-sub accessors { shift->handlers, qw(class title key_binding key_binding_label id label tooltip continuation rel) }
-__PACKAGE__->mk_accessors(qw(_onclick _onchange _ondblclick _onmousedown _onmouseup _onmouseover 
-                             _onmousemove _onmouseout _onfocus _onblur _onkeypress _onkeydown 
-                             _onkeyup _onselect
-                             class title key_binding key_binding_label id label tooltip continuation rel));
+sub accessors { handlers, qw(class title key_binding key_binding_label id label tooltip continuation rel) }
+
+__PACKAGE__->mk_accessors(map "_$_", handlers);
+__PACKAGE__->mk_accessors(qw(class title key_binding key_binding_label id label tooltip continuation rel) );
 
 =head2 new PARAMHASH OVERRIDE
 
@@ -181,29 +192,24 @@ PARAMHASH, and set with accessors for the hash values in OVERRIDE.
 =cut
 
 sub new {
-    my ($class, $args, $override) = @_;
+    my ($class, $args, $other) = @_;
+    $args = {%{$args}, %{$other || {}}};
     # force using accessor for onclick init
-    for my $trigger ( __PACKAGE__->handlers() ) {
-      if (my $triggerArgs = delete $args->{$trigger}) {
-        $override->{$trigger} = $triggerArgs;
-      }
-    }
+    my $override = {};
+    $override->{$_} = delete $args->{$_}
+        for grep {possible_handlers->{$_} and defined $args->{$_}} keys %{$args};
 
     my $self = $class->SUPER::new($args);
 
-    if ($override) {
-        for my $field ( $self->accessors() ) {
-            # XXX: warn about unexpected ones
-            $self->$field( $override->{$field} ) if exists $override->{$field};
-        }
-    }
+    $self->{handlers_used} = {};
+    $self->$_( $override->{$_} ) for keys %{$override};
 
     return $self;
 }
 
-__PACKAGE__->mk_normalising_accessor($_) for __PACKAGE__->handlers;
+__PACKAGE__->_mk_normalising_accessor($_) for __PACKAGE__->handlers;
 
-sub mk_normalising_accessor {
+sub _mk_normalising_accessor {
     my ($class, $accessor) = @_;
     my $internal_method = "_$accessor";
     no strict 'refs';
@@ -302,6 +308,8 @@ sub _handler_setup {
     my $trigger = shift;
 
     return $self->$trigger unless @_;
+    $trigger =~ s/^_//;
+    $self->{handlers_used}{$trigger} = 1;
 
     my ($arg) = @_;
 
@@ -319,15 +327,13 @@ sub _handler_setup {
 
             my @submit_tmp;
             foreach my $submit ( @{$hook->{submit}}) {
-                if (!ref($submit)){ 
-                        push @submit_tmp, $submit;
-                    } 
-                elsif(blessed($submit)) {
-                        push @submit_tmp, $submit->moniker;
-
+                if (!ref($submit)) {
+                    push @submit_tmp, $submit;
+                } elsif(blessed($submit)) {
+                    push @submit_tmp, $submit->moniker;
                 } else { # it's a hashref
-                        push @submit_tmp, $submit->{'action'}->moniker;
-                        $hook->{'action_arguments'}->{ $submit->{'action'}->moniker } = $submit->{'arguments'};
+                    push @submit_tmp, $submit->{'action'}->moniker;
+                    $hook->{'action_arguments'}->{ $submit->{'action'}->moniker } = $submit->{'arguments'};
                 }
 
             }
@@ -353,6 +359,17 @@ sub _handler_setup {
 
     return $arg;
 
+}
+
+=head2 handlers_used
+
+Returns the names of javascript handlers which exist for this element.
+
+=cut
+
+sub handlers_used {
+    my $self = shift;
+    return keys %{$self->{handlers_used}};
 }
 
 =head2 javascript
@@ -381,9 +398,19 @@ sub javascript_attrs {
     my %response;
 
   HANDLER:
-    for my $trigger ( $self->handlers ) {
-        my $value = $self->$trigger;
+    for my $trigger ( $self->handlers_used ) {
+        # Walk around the Class::Accessor, for speed
+        my $value = $self->{"_$trigger"};
         next unless $value;
+
+        if ( !( $self->handler_allowed($trigger) ) ) {
+            $self->log->error(
+                      "Handler '$trigger' is not supported for field '"
+                    . $self->label
+                    . "' with class "
+                    . ref $self );
+            next;
+        }
 
         my @fragments;
             # if $actions is undef, that means we're submitting _all_ actions in the clickable
@@ -394,19 +421,9 @@ sub javascript_attrs {
         my $beforeclick;
         my $action_arguments = {};
         for my $hook (grep {ref $_ eq "HASH"} (@{$value})) {
-
-            if (!($self->handler_allowed($trigger))) {
-                Jifty->log->error("Handler '$trigger' is not supported for field '" . 
-                                  $self->label . 
-                                  "' with class " . ref $self);
-                next HANDLER;
-            }
-
             my %args;
 
             # Submit action
-          
-            
             if ( exists $hook->{submit} ) {
                 $actions = undef;
                 my $disable_form_on_click = exists $hook->{disable} ? $hook->{disable} : 1;
@@ -478,12 +495,12 @@ sub javascript_attrs {
             $args{toggle} = 1 if $hook->{toggle};
 
             # Effects
-            $args{$_} = $hook->{$_} for grep {exists $hook->{$_}} qw/effect effect_args/;
+            $args{$_} = $hook->{$_} for grep {exists $hook->{$_}} qw/effect effect_args remove_effect remove_effect_args/;
 
             push @fragments, \%args;
         }
 
-        my $string = join ";", (grep {not ref $_} (ref $value eq "ARRAY" ? @{$value} : ($value)));
+        my $string = join ";", grep {not ref $_} @{$value};
         if ( @fragments or ( !$actions || %$actions ) ) {
 
             my $update =
@@ -504,7 +521,8 @@ sub javascript_attrs {
                 : "$update; return true;";
         }
         if ($confirm) {
-            $string = "if(!confirm(" . Jifty::JSON::objToJson($confirm, {singlequote => 1}) . ")) { Event.stop(event); return false }" . $string;
+            my $text = Jifty::JSON::objToJson($confirm, {singlequote => 1});
+            $string = "if(!confirm($text)){ Jifty.stopEvent(event); return false; }" . $string;
         }
         if ($beforeclick) {
            $string = $beforeclick . $string;

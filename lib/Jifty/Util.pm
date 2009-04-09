@@ -14,6 +14,7 @@ Jifty::Util - Things that don't fit anywhere else
 
 use Jifty ();
 use File::Spec ();
+use File::ShareDir ();
 use Cwd ();
 
 use vars qw/%ABSOLUTE_PATH $JIFTY_ROOT $SHARE_ROOT $APP_ROOT/;
@@ -60,10 +61,10 @@ sub canonicalize_path {
             next;
         }
         elsif( $_ ne '..')  {
-        push @newpath, $_ ;
-    } else {
-        pop @newpath;
-    }
+            push @newpath, $_ ;
+        } else {
+            pop @newpath;
+        }
 
     }
 
@@ -101,18 +102,19 @@ of Jifty and it's plugins.
 
 sub share_root {
     my $self = shift;
-
-    
-    Jifty::Util->require('File::ShareDir');
-    $SHARE_ROOT ||=  eval { File::Spec->rel2abs( File::ShareDir::module_dir('Jifty') )};
-    if (not $SHARE_ROOT or not -d $SHARE_ROOT) {
-        # XXX TODO: This is a bloody hack
-        # Module::Install::ShareDir and File::ShareDir don't play nicely
-        # together
+    unless (defined $SHARE_ROOT) {
+        # Try for the local version, first
         my @root = File::Spec->splitdir($self->jifty_root); # lib
         pop @root; # Jifty-version
         $SHARE_ROOT = File::Spec->catdir(@root,"share");
+        undef $SHARE_ROOT unless defined $SHARE_ROOT and -d $SHARE_ROOT and -d File::Spec->catdir($SHARE_ROOT,"web");
+
+        # If that doesn't pass inspection, try File::ShareDir::dist_dir
+        $SHARE_ROOT ||= eval { File::Spec->rel2abs( File::ShareDir::dist_dir('Jifty') )};
+        undef $SHARE_ROOT unless defined $SHARE_ROOT and -d $SHARE_ROOT and -d File::Spec->catdir($SHARE_ROOT,"web");
     }
+
+    die "Can't locate Jifty share root!" unless defined $SHARE_ROOT;
     return ($SHARE_ROOT);
 }
 
@@ -131,6 +133,7 @@ these criteria.
 
 sub app_root {
     my $self = shift;
+    my %args = @_;
 
     return $ENV{'JIFTY_APP_ROOT'} if ($ENV{'JIFTY_APP_ROOT'});
     return $APP_ROOT if ($APP_ROOT);
@@ -172,7 +175,7 @@ sub app_root {
     }
     warn "Can't guess application root from current path ("
         . Cwd::cwd()
-        . ") or bin path ($FindBin::Bin)\n";
+        . ") or bin path ($FindBin::Bin)\n" unless $args{quiet};
     return ''; # returning undef causes tons of 'uninitialized...' warnings.
 }
 
@@ -315,11 +318,10 @@ Helper function to test whether a given class has already been require'd.
 
 =cut
 
-
 sub already_required {
     my ($self, $class) = @_;
-    my $path =  join('/', split(/::/,$class)).".pm";
-    return ( $INC{$path} ? 1 : 0);
+    $class =~ s{::}{/}g;
+    return ( $INC{"$class.pm"} ? 1 : 0);
 }
 
 =head2 generate_uuid

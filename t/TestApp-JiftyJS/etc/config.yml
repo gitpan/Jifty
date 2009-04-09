@@ -4,7 +4,7 @@ framework:
   ApplicationClass: TestApp::JiftyJS
   ApplicationName: TestApp::JiftyJS
   ApplicationUUID: F43CA57E-A4BE-11DC-A07C-465A83BE23AB
-  ConfigFileVersion: 2
+  ConfigFileVersion: 4
   Database: 
     CheckSchema: 1
     Database: testapp_jiftyjs
@@ -24,29 +24,14 @@ framework:
   MailerArgs: []
 
   Plugins: 
-    - 
-      LetMe: {}
-
-    - 
-      SkeletonApp: {}
-
-    - 
-      REST: {}
-
-    - 
-      Halo: {}
-
-    - 
-      ErrorTemplates: {}
-
-    - 
-      OnlineDocs: {}
-
-    - 
-      CompressedCSSandJS: {}
-
-    - 
-      AdminUI: {}
+    - AdminUI: {}
+    - CompressedCSSandJS: {}
+    - ErrorTemplates: {}
+    - Halo: {}
+    - LetMe: {}
+    - OnlineDocs: {}
+    - REST: {}
+    - SkeletonApp: {}
 
   PubSub: 
     Backend: Memcached

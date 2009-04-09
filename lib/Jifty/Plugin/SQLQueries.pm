@@ -10,11 +10,13 @@ our @halo_queries;
 
 =head1 NAME
 
-Jifty::Plugin::SQLQueries
+Jifty::Plugin::SQLQueries - SQL query logging and reporting for your Jifty app
 
 =head1 DESCRIPTION
 
-SQL query logging and reporting for your Jifty app
+SQL query logging and reporting for your Jifty app.  Use this plugin
+if you wish to profile or analyze the database queries Jifty is
+running for individual page loads.
 
 =head1 USAGE
 
@@ -38,6 +40,8 @@ View an individual request's detailed query report (which queries were made,
 where, how long they took, etc)
 
     http://your.app/__jifty/admin/queries/3
+
+=head2 METHODS
 
 =head2 init
 
@@ -77,10 +81,12 @@ sub post_init {
     Jifty->handle->log_sql_statements(1);
     Jifty->handle->log_sql_hook(SQLQueryPlugin => sub {
         my ($time, $statement, $bindings, $duration) = @_;
-        Jifty->log->debug(sprintf 'Query (%.3fs): "%s", with bindings: %s',
+        __PACKAGE__->log->debug(sprintf 'Query (%.3fs): "%s", with bindings: %s',
                             $duration,
                             $statement,
-                            join ', ', @$bindings);
+                            join ', ',
+                                map { defined $_ ? $_ : 'undef' } @$bindings,
+        );
         return Carp::longmess;
     });
 }

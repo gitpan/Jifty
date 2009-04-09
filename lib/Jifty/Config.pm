@@ -9,33 +9,75 @@ Jifty::Config - the configuration handler for Jifty
 
 =head1 SYNOPSIS
 
-  my $app_name = Jifty->config->framework('ApplicationName');
-  my $frobber  = Jifty->config->app('PreferredFrobnicator');
+    # in your application
+    my $app_name = Jifty->config->framework('ApplicationName');
+    my $frobber  = Jifty->config->app('PreferredFrobnicator');
+
+    # sub classing
+    package MyApp::Config;
+    use base 'Jifty::Config';
+
+    sub post_load {
+        my $self = shift;
+        my $stash = $self->stash; # full config in a hash
+
+        ... do something with options ...
+
+        $self->stash( $stash ); # save config
+    }
+
+    1;
 
 =head1 DESCRIPTION
 
 This class is automatically loaded during Jifty startup. It contains the configuration information loaded from the F<config.yml> file (generally stored in the F<etc> directory of your application, but see L</load> for the details). This configuration file is stored in L<YAML> format.
 
-This configuration file contains two major sections named "C<framework>" and "C<application>". The framework section contains Jifty-specific configuration options and the application section contains whatever configuration options you want to use with your application. (I.e., if there's any configuration information your application needs to know at startup, this is a good place to put it.)
+This configuration file contains two major sections named "framework" and "application". The framework section contains Jifty-specific configuration options and the application section contains whatever configuration options you want to use with your application. (I.e., if there's any configuration information your application needs to know at startup, this is a good place to put it.)
+
+Usually you don't need to know anything about this class except
+L<app|/"app VARIABLE"> and L<framework|/"framework VARIABLE"> methods and
+about various config files and order in which they are loaded what
+described in L</load>.
 
 =cut
 
 use Jifty::Util;
 use Jifty::YAML;
-use File::Spec;
-use File::Basename;
-use Log::Log4perl;
+
 use Hash::Merge;
 Hash::Merge::set_behavior('RIGHT_PRECEDENT');
 
-use File::Basename();
 use base qw/Class::Accessor::Fast/;
+__PACKAGE__->mk_accessors(qw/stash/);
 
 use vars qw/$CONFIG/;
 
-__PACKAGE__->mk_accessors(qw/stash/);
+=head1 ACCESSING CONFIG
 
-=head1 METHODS
+=head2 framework VARIABLE
+
+Get the framework configuration variable C<VARIABLE>.
+
+    Jifty->config->framework('ApplicationName')
+
+=cut
+
+sub framework { return shift->_get( framework => @_ ) }
+
+=head2 app VARIABLE
+
+Get the application configuration variable C<VARIABLE>.
+
+    Jifty->config->framework('MyOption');
+
+=cut
+
+sub app { return shift->_get( application => @_ ) }
+
+# A teeny helper for framework and app
+sub _get { return $_[0]->stash->{ $_[1] }{ $_[2] } }
+
+=head1 LOADING
 
 =head2 new PARAMHASH
 
@@ -45,8 +87,7 @@ In general, you never need to call this, just use:
 
 in your application.
 
-This class method instantiates a new C<Jifty::Config> object. This
-object deals with configuration files.  
+This class method instantiates a new C<Jifty::Config> object.
 
 PARAMHASH currently takes a single option
 
@@ -54,7 +95,10 @@ PARAMHASH currently takes a single option
 
 =item load_config
 
-This boolean defaults to true. If true, L</load> will be called upon initialization.
+This boolean defaults to true. If true, L</load> will be called upon
+initialization. Using this object without loading prevents sub-classing
+and only makes sense if you want to generate default config for
+a new jifty application or something like that.
 
 =back
 
@@ -78,18 +122,32 @@ sub new {
 
 =head2 load
 
+Loads all config files for your application and initializes application
+level sub-class.
+
+Called from L<new|/"new PARAMHASH">, takes no arguments,
+returns nothing interesting, but do the following:
+
+=head3 Application config
+
 Jifty first loads the main configuration file for the application, looking for
 the C<JIFTY_CONFIG> environment variable or C<etc/config.yml> under the
 application's base directory.
+
+=head3 Vendor config
 
 It uses the main configuration file to find a vendor configuration
 file -- if it doesn't find a framework variable named 'VendorConfig',
 it will use the C<JIFTY_VENDOR_CONFIG> environment variable.
 
+=head3 Site config
+
 After loading the vendor configuration file (if it exists), the
 framework will look for a site configuration file, specified in either
 the framework's C<SiteConfig> or the C<JIFTY_SITE_CONFIG> environment
 variable. (Usually in C<etc/site_config.yml>.)
+
+=head3 Test config(s)
 
 After loading the site configuration file (if it exists), the
 framework will look for a test configuration file, specified in either
@@ -99,19 +157,37 @@ variable.
 Note that the test config may be drawn from several files if you use
 L<Jifty::Test>. See the documentation of L<Jifty::Test::load_test_configs>.
 
+=head3 Options clobbering
+
 Values in the test configuration will clobber the site configuration.
 Values in the site configuration file clobber those in the vendor
 configuration file. Values in the vendor configuration file clobber
-those in the application configuration file. (See L</WHY SO MANY FILES> for a deeper search for truth on this matter.)
+those in the application configuration file.
+(See L</WHY SO MANY FILES> for a deeper search for truth on this matter.)
+
+=head3 Guess defaults
 
 Once we're all done loading from files, several defaults are
-assumed based on the name of the application -- see L</guess>. 
+assumed based on the name of the application -- see L</guess>.
 
-After we have the config file, we call the coderef in C<$Jifty::Config::postload>, if it exists. This last bit is generally used by the test harness to do a little extra work.
+=head3 Reblessing into application's sub-class
 
-B<SPECIAL PER-VALUE PROCESSING:> If a value begins and ends with "%" (e.g.,
-"%bin/foo%"), converts it with C<Jifty::Util/absolute_path> to an absolute path.
-This is typically unnecessary, but helpful for configuration variables such as C<MailerArgs> that only sometimes specify files.
+Ok, config is ready. Rebless this object into C<YourApp::Config> class
+and call L</post_load> hook, so you can do some tricks detailed in
+L</SUB-CLASSING>.
+
+=head3 Another hook
+
+After we have the config file, we call the coderef in C<$Jifty::Config::postload>,
+if it exists. This last bit is generally used by the test harness to do
+a little extra work.
+
+=head3 B<SPECIAL PER-VALUE PROCESSING>
+
+If a value begins and ends with "%" (e.g., "%bin/foo%"), converts it with
+C<Jifty::Util/absolute_path> to an absolute path. This is typically
+unnecessary, but helpful for configuration variables such as C<MailerArgs>
+that only sometimes specify files.
 
 =cut
 
@@ -119,7 +195,7 @@ sub load {
     my $self = shift;
 
     # Add the default configuration file locations to the stash
-    $self->stash( Hash::Merge::merge( $self->_default_config_files, $self->stash ));
+    $self->merge( $self->_default_config_files );
 
     # Calculate the location of the application etc/config.yml
     my $file = $ENV{'JIFTY_CONFIG'} || Jifty::Util->app_root . '/etc/config.yml';
@@ -128,11 +204,8 @@ sub load {
 
     # Start by loading application configuration file
     if ( -f $file and -r $file ) {
-        $app = $self->load_file($file);
-        $app = Hash::Merge::merge( $self->stash, $app );
-
         # Load the $app so we know where to find the vendor config file
-        $self->stash($app);
+        $self->merge( $self->load_file($file) );
     }
 
     # Load the vendor configuration file
@@ -143,8 +216,7 @@ sub load {
     );
 
     # Merge the app config with vendor config, vendor taking precedent
-    my $config = Hash::Merge::merge( $self->stash, $vendor );
-    $self->stash($config);
+    $self->merge( $vendor );
 
     # Load the site configuration file
     my $site = $self->load_file(
@@ -157,8 +229,7 @@ sub load {
     );
 
     # Merge the app, vendor, and site config, site taking precedent
-    $config = Hash::Merge::merge( $self->stash, $site );
-    $self->stash($config);
+    $self->merge( $site );
 
     # Load the test configuration file
     my $test = $self->load_file(
@@ -168,19 +239,32 @@ sub load {
     );
 
     # Merge the app, vendor, site and test config, test taking precedent
-    $config = Hash::Merge::merge( $self->stash, $test );
-    $self->stash($config);
+    $self->merge( $test );
 
     # Merge guessed values in for anything we didn't explicitly define
     # Whatever's in the stash overrides anything we guess
-    $self->stash( Hash::Merge::merge( $self->guess, $self->stash ));
+    $self->merge( $self->stash, $self->guess );
     
     # There are a couple things we want to guess that we don't want
     # getting stuck in a default config file for an app
-    $self->stash( Hash::Merge::merge( $self->defaults, $self->stash));
+    $self->merge( $self->stash, $self->defaults );
 
     # Bring old configurations up to current expectations
     $self->stash($self->update_config($self->stash));
+
+    # check for YourApp::Config
+    my $app_class = $self->framework('ApplicationClass') . '::Config';
+    # we have no class loader at this moment :(
+    my $found = Jifty::Util->try_to_require( $app_class );
+    if ( $found && $app_class->isa('Jifty::Config') ) {
+        bless $self, $app_class;
+    } elsif ( $found ) {
+        warn "You have $app_class, however it's not an sub-class of Jifty::Config."
+            ." Read `perldoc Jifty::Config` about subclassing. Skipping.";
+    }
+
+    # post load hook for sub-classes
+    $self->post_load;
 
     # Finally, check for global postload hooks (these are used by the
     # test harness)
@@ -188,39 +272,25 @@ sub load {
       if $Jifty::Config::postload;
 }
 
-=head2 framework VARIABLE
+=head2 merge NEW, [FALLBACK]
 
-Get the framework configuration variable C<VARIABLE>.  
-
-=cut
-
-sub framework {
-    my $self = shift;
-    my $var  = shift;
-
-    $self->_get( 'framework', $var );
-}
-
-=head2 app VARIABLE
-
-Get the application configuration variable C<VARIABLE>.
+Merges the given C<NEW> hashref into the stash, with values taking
+precedence over pre-existing ones from C<FALLBACK>, which defaults to
+L</stash>.  This also deals with special cases (MailerArgs,
+Handlers.View) where array reference contents should be replaced, not
+concatenated.
 
 =cut
 
-sub app {
+sub merge {
     my $self = shift;
-    my $var  = shift;
+    my ($new, $fallback) = @_;
+    $fallback ||= $self->stash;
 
-    $self->_get( 'application', $var );
-}
+    delete $fallback->{framework}{MailerArgs} if exists $new->{framework}{MailerArgs};
+    delete $fallback->{framework}{View}{Handlers} if exists $new->{framework}{View}{Handlers};
 
-# A teeny helper for framework and app
-sub _get {
-    my $self    = shift;
-    my $section = shift;
-    my $var     = shift;
-
-    return  $self->stash->{$section}->{$var} 
+    $self->stash(Hash::Merge::merge( $fallback, $new ));
 }
 
 # Sets up the initial location of the site configuration file
@@ -235,6 +305,98 @@ sub _default_config_files {
     };
     return $self->_expand_relative_paths($config);
 }
+
+=head2 post_load
+
+Helper hook for L</SUB-CLASSING> and post processing config. At this
+point does nothing by default. That may be changed so do something like:
+
+    sub post_load {
+        my $self = shift;
+        $self->post_load( @_ );
+        ...
+    }
+
+=cut
+
+sub post_load {}
+
+=head2 load_file PATH
+
+Loads a YAML configuration file and returns a hashref to that file's
+data.
+
+=cut
+
+sub load_file {
+    my $self = shift;
+    my $file = shift;
+
+    # only try to load files that exist
+    return {} unless ( $file && -f $file );
+    my $hashref = Jifty::YAML::LoadFile($file)
+        or die "I couldn't load config file $file: $!";
+
+    # Make sure %path% values are made absolute
+    $hashref = $self->_expand_relative_paths($hashref);
+    return $hashref;
+}
+
+# Does a DFS, turning all leaves that look like C<%paths%> into absolute paths.
+sub _expand_relative_paths {
+    my $self  = shift;
+    my $datum = shift;
+
+    # Recurse through each value in an array
+    if ( ref $datum eq 'ARRAY' ) {
+        return [ map { $self->_expand_relative_paths($_) } @$datum ];
+    } 
+    
+    # Recurse through each value in a hash
+    elsif ( ref $datum eq 'HASH' ) {
+        for my $key ( keys %$datum ) {
+            my $new_val = $self->_expand_relative_paths( $datum->{$key} );
+            $datum->{$key} = $new_val;
+        }
+        return $datum;
+    } 
+    
+    # Do nothing with other kinds of references
+    elsif ( ref $datum ) {
+        return $datum;
+    } 
+    
+    # Check scalars for %path% and convert the enclosed value to an abspath
+    else {
+        if ( defined $datum and $datum =~ /^%(.+)%$/ ) {
+            $datum = Jifty::Util->absolute_path($1);
+        }
+        return $datum;
+    }
+}
+
+=head1 OTHER METHODS
+
+=head2 stash
+
+It's documented only for L</SUB-CLASSING>.
+
+Returns the current config as a hash reference (see below). Plenty of code
+considers Jifty's config as a static thing, so B<don't mess> with it in
+run-time.
+
+    {
+        framework => {
+            ...
+        },
+        application => {
+            ...
+        },
+    }
+
+This method as well can be used to set a new config:
+
+    $config->stash( $new_stash );
 
 =head2 guess
 
@@ -305,7 +467,6 @@ sub guess {
             L10N       => { PoDir => "share/po", },
 
             View => {
-                FallbackHandler => 'Jifty::View::Mason::Handler',
                 Handlers => [
                     'Jifty::View::Static::Handler',
                     'Jifty::View::Declare::Handler',
@@ -334,7 +495,6 @@ sub guess {
     return $self->_expand_relative_paths($guess);
 }
 
-
 =head2 initial_config
 
 Returns a default guessed config for a new application.
@@ -346,18 +506,18 @@ See L<Jifty::Script::App>.
 sub initial_config {
     my $self = shift;
     my $guess = $self->guess(@_);
-    $guess->{'framework'}->{'ConfigFileVersion'} = 3;
+    $guess->{'framework'}->{'ConfigFileVersion'} = 4;
 
     # These are the plugins which new apps will get by default
     $guess->{'framework'}->{'Plugins'} = [
-        { LetMe              => {}, },
-        { SkeletonApp        => {}, },
-        { REST               => {}, },
-        { Halo               => {}, },
-        { ErrorTemplates     => {}, },
-        { OnlineDocs         => {}, },
+        { AdminUI            => {}, },
         { CompressedCSSandJS => {}, },
-        { AdminUI            => {}, }
+        { ErrorTemplates     => {}, },
+        { Halo               => {}, },
+        { LetMe              => {}, },
+        { OnlineDocs         => {}, },
+        { REST               => {}, },
+        { SkeletonApp        => {}, },
     ];
 
     return $guess;
@@ -380,19 +540,25 @@ sub update_config {
         # These are the plugins which old apps expect because their
         # features used to be in the core.
         unshift (@{$config->{'framework'}->{'Plugins'}}, 
-            { SkeletonApp            => {}, },
-            { REST               => {}, },
-            { Halo               => {}, },
-            { ErrorTemplates     => {}, },
-            { OnlineDocs         => {}, },
+            { AdminUI            => {}, },
             { CompressedCSSandJS => {}, },
-            { AdminUI            => {}, }
+            { ErrorTemplates     => {}, },
+            { Halo               => {}, },
+            { OnlineDocs         => {}, },
+            { REST               => {}, },
+            { SkeletonApp        => {}, },
         );
     }
 
     if ( $config->{'framework'}->{'ConfigFileVersion'} < 3) {
         unshift (@{$config->{'framework'}->{'Plugins'}}, 
             { CSSQuery           => {}, }
+        );
+    }
+
+    if ( $config->{'framework'}->{'ConfigFileVersion'} < 4) {
+        unshift (@{$config->{'framework'}->{'Plugins'}}, 
+            { Prototypism        => {}, }
         );
     }
 
@@ -425,60 +591,56 @@ sub defaults {
 
 }
 
-=head2 load_file PATH
+=head1 SUB-CLASSING
 
-Loads a YAML configuration file and returns a hashref to that file's
-data.
+Template for sub-classing you can find in L</SYNOPSIS>.
 
-=cut
+Application config may have ApplicationClass or ApplicationName options,
+so it's B<important> to understand that your class goes into game later.
+Read </load> to understand when C<YourApp::Config> class is loaded.
 
-sub load_file {
-    my $self = shift;
-    my $file = shift;
+Use L</stash> method to get and/or change config.
 
-    # only try to load files that exist
-    return {} unless ( $file && -f $file );
-    my $hashref = Jifty::YAML::LoadFile($file)
-        or die "I couldn't load config file $file: $!";
+L</post_load> hook usually is all you want to (can :) ) sub class. Other
+methods most probably called before your class can operate.
 
-    # Make sure %path% values are made absolute
-    $hashref = $self->_expand_relative_paths($hashref);
-    return $hashref;
-}
+Sub-classing may be useful for:
 
+=over 4
 
-# Does a DFS, turning all leaves that look like C<%paths%> into absolute paths.
-sub _expand_relative_paths {
-    my $self  = shift;
-    my $datum = shift;
+=item * validation
 
-    # Recurse through each value in an array
-    if ( ref $datum eq 'ARRAY' ) {
-        return [ map { $self->_expand_relative_paths($_) } @$datum ];
-    } 
-    
-    # Recurse through each value in a hash
-    elsif ( ref $datum eq 'HASH' ) {
-        for my $key ( keys %$datum ) {
-            my $new_val = $self->_expand_relative_paths( $datum->{$key} );
-            $datum->{$key} = $new_val;
-        }
-        return $datum;
-    } 
-    
-    # Do nothing with other kinds of references
-    elsif ( ref $datum ) {
-        return $datum;
-    } 
-    
-    # Check scalars for %path% and convert the enclosed value to an abspath
-    else {
-        if ( defined $datum and $datum =~ /^%(.+)%$/ ) {
-            $datum = Jifty::Util->absolute_path($1);
-        }
-        return $datum;
-    }
-}
+For example check if file or module exists.
+
+=item * canonicalization
+
+For example turn relative paths into absolute or translate all possible
+variants of an option to a canonic structure
+
+=item * generation
+
+For example generate often used constructions based on other options,
+user of your app can even don't know about them
+
+=item * config upgrades
+
+Jifty has ConfigVersion option you may want to implement something like
+that in your apps
+
+=back
+
+Sub-classing is definitely not for:
+
+=over 4
+
+=item * default values
+
+You have L<so many files|/"WHY SO MANY FILES"> to allow users of your
+app and you to override defaults.
+
+=item * anything else, but configs
+
+=back
 
 =head1 WHY SO MANY FILES
 

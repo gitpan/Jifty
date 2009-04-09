@@ -13,20 +13,23 @@ make up a Jifty application's API
  # Find the full name of an action
  my $class = Jifty->api->qualify('SomeAction');
 
- # Logged users with an ID greater than 10 have restrictions
- if (Jifty->web->current_user->id > 10) {
-     Jifty->api->deny('Foo');
-     Jifty->api->allow('FooBar');
-     Jifty->api->deny('FooBarDeleteTheWorld');
+ # New users cannot run some actions
+ if (Jifty->web->current_user->age < 18) {
+     Jifty->api->deny(qr/Vote|PurchaseTobacco/);
  }
 
- # New users cannot even see some actions
- if (Jifty->web->current_user->age < 18) {
-     Jifty->api->hide(qr/Vote|PurchaseTobacco/);
+ # Some users cannot even see some actions
+ if (Jifty->web->current_user->id > 10) {
+     Jifty->api->hide('Foo');
+     Jifty->api->show('FooBar');
+     Jifty->api->hide('FooBarDeleteTheWorld');
  }
+
+ # Fetch the class names of all actions
+ my @actions = Jifty->api->all_actions;
 
  # Fetch the class names of all the allowed actions
- my @actions = Jifty->api->actions;
+ my @allowed = Jifty->api->actions;
 
  # Fetch all of the visible actions (some of which may not be allowed)
  my @visible = Jifty->api->visible_actions;
@@ -46,7 +49,9 @@ make up a Jifty application's API
 
 =head1 DESCRIPTION
 
-You can fetch an instance of this class by calling L<Jifty/api> in your application. This object can be used to examine the actions available within your application and manage access to those actions.
+You can fetch an instance of this class by calling L<Jifty/api> in
+your application. This object can be used to examine the actions
+available within your application and manage access to those actions.
 
 =cut
 
@@ -62,7 +67,8 @@ __PACKAGE__->mk_accessors(qw(action_limits));
 
 Creates a new C<Jifty::API> object.
 
-Don't use this, see L<Jifty/api> to access a reference to C<Jifty::API> in your application.
+Don't use this, see L<Jifty/api> to access a reference to
+C<Jifty::API> in your application.
 
 =cut
 
@@ -73,7 +79,7 @@ sub new {
     # Setup the basic allow/deny rules
     $self->reset;
 
-    # Find all the actions for the API reference (available at _actions)
+    # Find all the actions for the API reference (available at __actions)
     Jifty::Module::Pluggable->import(
         search_path => [
             Jifty->app_class("Action"),
@@ -81,7 +87,7 @@ sub new {
             map {ref($_)."::Action"} Jifty->plugins,
         ],
         except   => qr/\.#/,
-        sub_name => "_actions",
+        sub_name => "__actions"
     );
 
     return ($self);
@@ -101,7 +107,7 @@ sub qualify {
     my $action = shift;
 
     # Get the application class name
-    my $base_path = Jifty->app_class;
+    my $base_path = Jifty->config->framework('ApplicationClass');
 
     # Return the class now if it's already fully qualified
     return $action
@@ -130,8 +136,9 @@ sub reset {
     # These are the default action limits
     $self->action_limits(
         [
-            { hide => 1, deny => 1, restriction => qr/.*/ },
+            { deny => 1,  hide => 1, restriction => qr/.*/ },
             { allow => 1, show => 1, restriction => qr/^\Q$app_actions\E/ },
+            { deny => 1,  hide => 1, restriction => qr/^\Q$app_actions\E::Record::(Create|Delete|Execute|Search|Update)$/ },
             { allow => 1, show => 1, restriction => 'Jifty::Action::Autocomplete' },
             { allow => 1, show => 1, restriction => 'Jifty::Action::Redirect' },
         ]
@@ -248,6 +255,8 @@ sub restrict {
     my $polarity     = shift;
     my @restrictions = @_;
 
+    my(undef, $file, $line) = (caller(1));
+
     # Check the sanity of the polarity
     die "Polarity must be one of: " . join(', ', sort keys %valid_polarity)
         unless $valid_polarity{$polarity};
@@ -264,20 +273,19 @@ sub restrict {
         $restriction = $self->qualify($restriction)
             unless ref $restriction;
 
-        # Add to list of restrictions
-        push @{ $self->action_limits },
-            { $polarity => 1, restriction => $restriction };
 
-        # Hiding an action also denies it
         if ($polarity eq 'hide') {
+            # Hiding an action also denies it
             push @{ $self->action_limits },
-                { deny => 1, restriction => $restriction };
-        }
-
-        # Allowing an action also shows it
-        if ($polarity eq 'allow') {
+                { deny => 1, hide => 1, restriction => $restriction, from => "$file:$line" };
+        } elsif ($polarity eq 'allow') {
+            # Allowing an action also shows it
             push @{ $self->action_limits },
-                { show => 1, restriction => $restriction };
+                { allow => 1, show => 1, restriction => $restriction, from => "$file:$line" };
+        } else {
+            # Otherwise, add to list of restrictions unmodified
+            push @{ $self->action_limits },
+                { $polarity => 1, restriction => $restriction, from => "$file:$line" };
         }
     }
 }
@@ -358,30 +366,88 @@ sub decide_action_polarity {
     return $valid;
 }
 
+=head2 explain CLASS
+
+Returns a string describing what allow, deny, show, and hide rules
+apply to the class name.
+
+=cut
+
+sub explain {
+    my $self = shift;
+    my $class = shift;
+
+    $class = $self->qualify($class);
+
+    my $str = "";
+    for my $limit ( @{$self->action_limits} ) {
+        next unless $limit->{from};
+        if ( ( ref $limit->{restriction} and $class =~ $limit->{restriction} )
+            or ( $class eq $limit->{restriction} ) )
+        {
+            for my $type (qw/allow deny show hide/) {
+                $str .= ucfirst($type)." at ".$limit->{from}.", matches ".$limit->{restriction}."\n"
+                    if $limit->{$type};
+            }
+        }
+    }
+    return $str;
+}
+
+=head2 all_actions
+
+Lists the class names of all actions for this Jifty application,
+regardless of which are allowed or hidden.  See also L</actions> and
+L</visible_actions>.
+
+=cut
+
+# Plugin actions under Jifty::Plugin::*::Action are mirrored under
+# AppName::Action by Jifty::ClassLoader; this code makes all_actions
+# reflect this mirroring.
+sub all_actions {
+    my $self = shift;
+    unless ( $self->{all_actions} ) {
+        my @actions = $self->__actions;
+        my %seen;
+        $seen{$_}++ for @actions;
+        for (@actions) {
+            if (/^Jifty::Plugin::(.*)::Action::(.*)$/) {
+                my $classname = Jifty->app_class( Action => $2 );
+                push @actions, $classname unless $seen{$classname};
+            }
+        }
+        $self->{all_actions} = \@actions;
+    }
+    return @{ $self->{all_actions} };
+}
+
 =head2 actions
 
 Lists the class names of all of the B<allowed> actions for this Jifty
 application; this may include actions under the C<Jifty::Action::>
-namespace, in addition to your application's actions.
+namespace, in addition to your application's actions.  See also
+L</all_actions> and L</visible_actions>.
 
 =cut
 
 sub actions {
     my $self = shift;
-    return sort grep { not /::SUPER$/ and $self->is_allowed($_) } $self->_actions;
+    return sort grep { $self->is_allowed($_) } $self->all_actions;
 }
 
 =head2 visible_actions
 
 Lists the class names of all of the B<visible> actions for this Jifty
 application; this may include actions under the C<Jifty::Action::>
-namespace, in addition to your application's actions.
+namespace, in addition to your application's actions.  See also
+L</all_actions> and L</actions>.
 
 =cut
 
 sub visible_actions {
     my $self = shift;
-    return sort grep { not /::SUPER$/ and $self->is_visible($_) } $self->_actions;
+    return sort grep { $self->is_visible($_) } $self->all_actions;
 }
 
 =head1 SEE ALSO

@@ -5,7 +5,7 @@ package Jifty::Handler;
 
 =head1 NAME
 
-Jifty::Handler - Methods related to the Mason handler
+Jifty::Handler - Methods related to the finding and returning content
 
 =head1 SYNOPSIS
 
@@ -19,15 +19,16 @@ Jifty::Handler - Methods related to the Mason handler
 
 =head1 DESCRIPTION
 
-L<Jifty::Handler> provides methods required to deal with Mason CGI
-handlers.  
+L<Jifty::Handler> provides methods required to find and return content
+to the browser.  L</handle_request>, for instance, is the main entry
+point for HTTP requests.
 
 =cut
 
-use base qw/Class::Accessor::Fast/;
-use Module::Refresh ();
+use base qw/Class::Accessor::Fast Jifty::Object/;
 use Jifty::View::Declare::Handler ();
 use Class::Trigger;
+use String::BufferStack;
 
 BEGIN {
     # Creating a new CGI object breaks FastCGI in all sorts of painful
@@ -49,21 +50,7 @@ BEGIN {
 
 
 
-__PACKAGE__->mk_accessors(qw(dispatcher _view_handlers  cgi apache stash));
-
-=head2 mason
-
-
-Returns the Jifty c<HTML::Mason> handler. While this "should" be just another template handler,
-we still rely on it for little bits of Jifty infrastructure. Patches welcome.
-
-=cut
-
-sub mason {
-    my $self = shift;
-    return $self->view('Jifty::View::Mason::Handler');
-}
-
+__PACKAGE__->mk_accessors(qw(dispatcher _view_handlers cgi apache stash buffer));
 
 =head2 new
 
@@ -76,14 +63,17 @@ sub new {
     my $self  = {};
     bless $self, $class;
 
-    $self->create_cache_directories();
-
     $self->dispatcher( Jifty->app_class( "Dispatcher" ) );
     Jifty::Util->require( $self->dispatcher );
     $self->dispatcher->import_plugins;
-	eval { Jifty::Plugin::DumpDispatcher->dump_rules };
+    eval { Jifty::Plugin::DumpDispatcher->dump_rules };
 
-    $self->setup_view_handlers();
+    $self->buffer(String::BufferStack->new( out_method => \&Jifty::View::out_method ));
+    {
+        my $buffer = $self->buffer;
+        no warnings 'redefine';
+        *Jifty::Web::out = sub {shift;unshift @_,$buffer;goto \&String::BufferStack::append};
+    }
     return $self;
 }
 
@@ -104,34 +94,20 @@ You can override this by specifying:
 =cut
 
 sub view_handlers {
-    @{Jifty->config->framework('View')->{'Handlers'}}
+    my @default = @{Jifty->config->framework('View')->{'Handlers'}};
+
+    # If there's a (deprecated) fallback handler, and it's not already
+    # in our set of handlers, tack it on the end
+    my $fallback = Jifty->config->framework('View')->{'FallbackHandler'};
+    push @default, $fallback if defined $fallback and not grep {$_ eq $fallback} @default;
+
+    return @default;
 }
 
-
-=head2 fallback_view_handler
-
-Returns the object for our "last-resort" view handler. By default, this is the L<HTML::Mason> handler.
-
-You can override this by specifying: 
-
-  framework:
-      View:
-         FallbackHandler: Jifty::View::Something::Handler
-
-=cut
-
-
-
-sub fallback_view_handler { 
-   my $self = shift; 
-    return $self->view(Jifty->config->framework('View')->{'FallbackHandler'});
-    
-}
 
 =head2 setup_view_handlers
 
 Initialize all of our view handlers. 
-
 
 =cut
 
@@ -142,11 +118,9 @@ sub setup_view_handlers {
     foreach my $class ($self->view_handlers()) {
         $self->_view_handlers->{$class} =  $class->new();
     }
-
 }
 
 =head2 view ClassName
-
 
 Returns the Jifty view handler for C<ClassName>.
 
@@ -155,25 +129,9 @@ Returns the Jifty view handler for C<ClassName>.
 sub view {
     my $self = shift;
     my $class = shift;
+    $self->setup_view_handlers unless $self->_view_handlers;
     return $self->_view_handlers->{$class};
-
 }
-
-
-=head2 create_cache_directories
-
-Attempts to create our app's mason cache directory.
-
-=cut
-
-sub create_cache_directories {
-    my $self = shift;
-
-    for ( Jifty->config->framework('Web')->{'DataDir'} ) {
-        Jifty::Util->make_path( Jifty::Util->absolute_path($_) );
-    }
-}
-
 
 =head2 cgi
 
@@ -210,6 +168,8 @@ sub handle_request {
         @_
     );
 
+    $self->setup_view_handlers() unless $self->_view_handlers;
+
     $self->call_trigger('before_request', $args{cgi});
 
     # this is scoped deeper because we want to make sure everything is cleaned
@@ -222,6 +182,7 @@ sub handle_request {
         local $Jifty::WEB = Jifty::Web->new();
 
         if ( Jifty->config->framework('DevelMode') ) {
+            require Module::Refresh;
             Module::Refresh->refresh;
             Jifty::I18N->refresh;
         }
@@ -236,14 +197,16 @@ sub handle_request {
         for ( Jifty->plugins ) {
             $_->new_request;
         }
-        Jifty->log->info( $self->apache->method . " request for " . Jifty->web->request->path  );
+        $self->log->info( Jifty->web->request->request_method . " request for " . Jifty->web->request->path  );
         Jifty->web->setup_session;
 
         Jifty::I18N->get_language_handle;
 
         # Return from the continuation if need be
         unless (Jifty->web->request->return_from_continuation) {
+            $self->buffer->out_method(\&Jifty::View::out_method);
             $self->dispatcher->handle_request();
+            $self->buffer->flush_output;
         } 
 
         $self->call_trigger('before_cleanup', $args{cgi});
@@ -252,6 +215,24 @@ sub handle_request {
     }
 
     $self->call_trigger('after_request', $args{cgi});
+}
+
+=head2 send_http_header
+
+Sends any relevent HTTP headers, by calling
+L<HTML::Mason::FakeApache/send_http_header>.  If this is running
+inside a standalone server, also sends the HTTP status header first.
+
+Returns false if the header has already been sent.
+
+=cut
+
+sub send_http_header {
+    my $self = shift;
+    return if $self->apache->http_header_sent;
+    $Jifty::SERVER->send_http_status if $Jifty::SERVER;
+    $self->apache->send_http_header;
+    return 1;
 }
 
 =head2 cleanup_request
@@ -272,6 +253,8 @@ sub cleanup_request {
     $self->cgi(undef);
     $self->apache(undef);
     $self->stash(undef);
+    $self->buffer->pop for 1 .. $self->buffer->depth;
+    $self->buffer->clear;
 }
 
 1;

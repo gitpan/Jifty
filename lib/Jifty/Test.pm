@@ -21,6 +21,8 @@ Jifty::Test - Jifty's test module
 =head1 SYNOPSIS
 
     use Jifty::Test tests => 5;
+    # to load po for test:
+    # use Jifty::Test tests => 5, l10n => 1;
 
     # ...all of Test::More's functionality...
     my $model = MyApp::Model::MyModel->new;
@@ -32,6 +34,7 @@ Jifty::Test - Jifty's test module
     my $server = Jifty::Test->make_server;
     my $server_url = $server->started_ok;
     # You're probably also interested in Jifty::Test::WWW::Mechanize
+
 
 =head1 DESCRIPTION
 
@@ -121,8 +124,8 @@ sub import_extra {
     $class->setup($args);
     Test::More->export_to_level(2);
 
-    # Now, clobber Test::Builder::plan (if we got given a plan) so we
-    # don't try to spit one out *again* later
+    # Now, clobber Test::Builder::plan (if we were given a plan) so 
+    # Test::Builder::Module doesn't plan for us
     if ($class->builder->has_plan) {
         no warnings 'redefine';
         *Test::Builder::plan = sub {};
@@ -179,8 +182,12 @@ sub setup {
     require Jifty::Server;
     require Jifty::Script::Schema;
 
+    $args ||= [];
+    my %args = @{$args} % 2 ? (@{$args}, 1) : @{$args};
+    $class->builder->{no_handle} = $args{no_handle};
+
     my $test_config = File::Temp->new( UNLINK => 0 );
-    Jifty::YAML::DumpFile("$test_config", $class->test_config(Jifty::Config->new));
+    Jifty::YAML::DumpFile("$test_config", $class->test_config(Jifty::Config->new, \%args));
     # Invoking bin/jifty and friends will now have the test config ready.
     $ENV{'JIFTY_TEST_CONFIG'} ||= "$test_config";
     $class->builder->{test_config} = $test_config;
@@ -224,6 +231,10 @@ different way.
 sub setup_test_database {
     my $class = shift;
 
+    if ($class->builder->{no_handle}) {
+        Jifty->new( no_handle => 1 );
+        return;
+    }
 
     if ($ENV{JIFTY_FAST_TEST}) {
 	local $SIG{__WARN__} = sub {};
@@ -258,9 +269,9 @@ sub setup_test_database {
 
     Jifty->new( no_handle => 1, pre_init => 1 );
 
-    my $schema = Jifty::Script::Schema->new; $schema->{drop_database}     = 1;
-    $schema->{create_database}   = 1;
-    $schema->{create_all_tables} = 1;
+    my $schema = Jifty::Script::Schema->new;
+    $schema->{drop_database} = 1;
+    $schema->{setup_tables}  = 1;
     $schema->run;
 
     Jifty->new();
@@ -294,9 +305,9 @@ sub load_test_configs {
     my $class = shift;
     my ($test_config_file) = @_;
 
-    # Jifty::SubTest uses chdir which screws up $0, so to be nice it also makes
-    # available the cwd was before it uses chdir.
-    my $cwd = $Jifty::SubTest::OrigCwd;
+    # Jifty::Test::Dist uses chdir which screws up $0, so to be nice
+    # it also makes available the cwd was before it uses chdir.
+    my $cwd = $Jifty::Test::Dist::OrigCwd;
 
     # get the initial test config file, which is the input . "-config.yml"
     $test_config_file = $0 if !defined($test_config_file);
@@ -322,7 +333,7 @@ sub load_test_configs {
             if Jifty::Util->is_app_root($directory);
     }
 
-    Jifty->log->fatal("Stopping looking for test config files after recursing upwards $depth times. Either you have a nonstandard layout or an incredibly deep test hierarchy. If you really do have an incredibly deep test hierarchy, you can set the environment variable JIFTY_TEST_DEPTH to a larger value.");
+    Jifty->log->fatal("Stopping looking for test config files after recursing upwards $depth times. Either you have a nonstandard layout or an incredibly deep test hierarchy. If you really do have an incredibly deep test hierarchy, you can set the environment variable JIFTY_TEST_DEPTH to a larger value.") if (Jifty->logger);
 
     return $test_options;
 }
@@ -368,17 +379,23 @@ test directory.
 
 sub test_config {
     my $class = shift;
-    my ($config) = @_;
+    my ($config, $args) = @_;
 
     my $defaults = {
         framework => {
             Database => {
                 Database => $config->framework('Database')->{Database} . $class->_testfile_to_dbname(),
             },
+            L10N => {
+                Disable => $args->{l10n} ? 0 : 1,
+            },
             Web => {
-                Port => int(rand(5000) + 10000),
+                Port => ($$ % 5000) + 10000,
                 DataDir => File::Temp::tempdir('masonXXXXXXXXXX', CLEANUP => 1)
             },
+            Plugins => [
+                { TestServerWarnings => {} },
+            ],
             Mailer => 'Jifty::Test',
             MailerArgs => [],
             LogLevel => 'WARN',
@@ -431,10 +448,9 @@ sub make_server {
     }
 
     my $server = Jifty::Server->new;
-
+    $Jifty::SERVER = $server;
     return $server;
 }
-
 
 =head2 web
 
@@ -521,6 +537,7 @@ L<Email::MIME> to parse multi-part messages stored in the mailbox.
 =cut
 
 sub messages {
+    return () unless -f mailbox();
     return Email::Folder->new(mailbox())->messages;
 }
 
@@ -601,6 +618,11 @@ END { Jifty::Test->_ending }
 
 sub _ending {
     my $Test = Jifty::Test->builder;
+
+    if (my $plugin = Jifty->find_plugin("Jifty::Plugin::TestServerWarnings")) {
+        warn "Uncaught warning: $_" for $plugin->stashed_warnings;
+    }
+
     # Such a hack -- try to detect if this is a forked copy and don't
     # do cleanup in that case.
     return if $Test->{Original_Pid} != $$;
@@ -611,9 +633,11 @@ sub _ending {
         Jifty::Test->teardown_mailbox;
 
         # Disconnect the PubSub bus, if need be; otherwise we may not
-        # be able to drop the testing database
+        # be able to drop the testing database.  Calling ->bus, if we
+        # never dealt with PubSub in the test, can actually _do_ the
+        # connect now, unless we explicitly tell it not to.
         Jifty->bus->disconnect
-          if Jifty->config and Jifty->bus;
+          if Jifty->config and Jifty->bus( connect => 0 );
 
         # Remove testing db
         if (Jifty->handle && !$ENV{JIFTY_FAST_TEST}) {

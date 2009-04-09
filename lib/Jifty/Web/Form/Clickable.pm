@@ -16,6 +16,8 @@ either a button or a link.
 
 use base 'Jifty::Web::Form::Element';
 
+=head1 METHODS
+
 =head2 accessors
 
 Clickable adds C<url>, C<escape_label>, C<continuation>, C<call>,
@@ -157,8 +159,6 @@ sub new {
 
     my %args = (
         parameters => {},
-        as_button  => 0,
-        as_link    => 0,
         @_,
     );
 
@@ -168,17 +168,19 @@ sub new {
     $args{render_as_link}   = delete $args{as_link};
 
     my $self = $class->SUPER::new(
-        {   class          => '',
-            label          => 'Click me!',
-            url            => $root,
-            escape_label   => 1,
-            tooltip        => '',
-            continuation   => Jifty->web->request->continuation,
-            submit         => [],
-            preserve_state => 0,
-            parameters     => {},
+        {   class            => '',
+            label            => 'Click me!',
+            url              => $root,
+            escape_label     => 1,
+            tooltip          => '',
+            continuation     => Jifty->web->request->continuation,
+            submit           => [],
+            preserve_state   => 0,
+            parameters       => {},
+            render_as_button => 0,
+            render_as_link   => 0,
+            %args,
         },
-        \%args
     );
 
     for (qw/continuation call/) {
@@ -220,7 +222,7 @@ sub new {
 
     # Anything doing fragment replacement needs to preserve the
     # current state as well
-    if ( grep { $self->$_ } $self->handlers or $self->preserve_state ) {
+    if ( grep { $self->$_ } $self->handlers_used or $self->preserve_state ) {
         my %state_vars = Jifty->web->state_variables;
         while ( my ( $key, $val ) = each %state_vars ) {
             if ( $key =~ /^region-(.*?)\.(.*)$/ ) {
@@ -239,51 +241,48 @@ sub new {
     return $self;
 }
 
-=head2 url
+=head2 url [VALUE]
 
-Sets the page that the user will end up on after they click the
-button.  Defaults to the current page.
+Gets or sets the page that the user will end up on after they click
+the button.  Defaults to the current page.
 
-=head2 label
+=head2 label [VALUE]
 
-The text on the clickable object.
+Gets or sets the text on the clickable object.
 
-=head2 escape_label
+=head2 escape_label [VALUE]
 
-If set to true, HTML escapes the content of the label before
-displaying it.  This is only relevant for objects that are rendered as
-HTML links.  The default is true.
+Gets or sets if the label is escaped.  This is only relevant for
+objects that are rendered as HTML links.  The default is true.
 
-=head2 continuation
+=head2 continuation [VALUE]
 
-The current continuation for the link.  Defaults to the current
-continuation now, if there is one.  This may be either a
+Gets or sets the current continuation for the link.  Defaults to the
+current continuation now, if there is one.  This may be either a
 L<Jifty::Continuation> object, or the C<id> of such.
 
-=head2 call
+=head2 call [VALUE]
 
-The continuation to call when the link is clicked.  This will happen
-after actions have run, if any.  Like C<continuation>, this may be a
-L<Jifty::Continuation> object or the C<id> of such.
+Gets or sets the continuation to call when the link is clicked.  This
+will happen after actions have run, if any.  Like C<continuation>,
+this may be a L<Jifty::Continuation> object or the C<id> of such.
 
-=head2 returns
+=head2 returns [VALUE]
 
-Passing this parameter implies the creation of a continuation when the
-link is clicked.  It takes an anonymous hash of return location to
-where the return value is pulled from.  See L<Jifty::Request::Mapper>
-for details.
+Gets or sets the return value mapping from the continuation.  See
+L<Jifty::Request::Mapper> for details.
 
-=head2 submit
+=head2 submit [VALUE]
 
-A list of actions to run when the object is clicked.  This may be an
-array refrence or a single element; each element may either be a
-moniker or a L<Jifty::Action>.  An undefined value submits B<all>
-actions in the form, an empty list reference (the default) submits
-none.
+Gets or sets the list of actions to run when the object is clicked.
+This may be an array refrence or a single element; each element may
+either be a moniker or a L<Jifty::Action>.  An undefined value submits
+B<all> actions in the form, an empty list reference (the default)
+submits none.
 
-=head2 preserve_state
+=head2 preserve_state [VALUE]
 
-A boolean; whether state variables are preserved across the link.
+Gets or sets whether state variables are preserved across the link.
 Defaults to true if there are any AJAX actions on the link, false
 otherwise.
 
@@ -418,7 +417,8 @@ sub parameters {
 
 =head2 post_parameters
 
-The hash of parameters as they would be needed on a POST request.
+Returns the hash of parameters as they would be needed on a POST
+request.
 
 =cut
 
@@ -455,7 +455,8 @@ sub post_parameters {
 
 =head2 get_parameters
 
-The hash of parameters as they would be needed on a GET request.
+Returns the hash of parameters as they would be needed on a GET
+request.
 
 =cut
 
@@ -490,7 +491,8 @@ sub complete_url {
 
 sub _defined_accessor_values {
     my $self = shift;
-    return { map { my $val = $self->$_; defined $val ? ( $_ => $val ) : () }
+    # Note we're walking around Class::Accessor here
+    return { map { my $val = $self->{"_$_"} || $self->{$_}; defined $val ? ( $_ => $val ) : () }
             $self->SUPER::accessors };
 }
 
@@ -580,25 +582,26 @@ parameters.
 
 sub generate {
     my $self = shift;
-    for my $trigger ( $self->handlers ) {
+    my $web = Jifty->web;
+    for my $trigger ( $self->handlers_used ) {
         my $value = $self->$trigger;
         next unless $value;
         my @hooks = @{$value};
         for my $hook (@hooks) {
             next unless ref $hook eq "HASH";
             $hook->{region} ||= $hook->{refresh}
-                || Jifty->web->qualified_region;
+                || $web->qualified_region;
 
             my $region
                 = ref $hook->{region}
                 ? $hook->{region}
-                : Jifty->web->get_region( $hook->{region} );
+                : $web->get_region( $hook->{region} );
 
             if ( $hook->{replace_with} ) {
                 my $currently_shown = '';
                 if ($region) {
 
-                    my $state_var = Jifty->web->request->state_variable(
+                    my $state_var = $web->request->state_variable(
                         "region-" . $region->qualified_name );
                     $currently_shown = $state_var->value if ($state_var);
                 }
@@ -610,7 +613,6 @@ sub generate {
                     $self->region_fragment( $hook->{region},
                         "/__jifty/empty" );
 
-#                    Jifty->web->request->remove_state_variable('region-'.$region->qualified_name);
                 } else {
                     $self->region_fragment( $hook->{region},
                         $hook->{replace_with} );
@@ -622,7 +624,7 @@ sub generate {
             if ( $hook->{submit} ) {
                 $self->{submit} ||= [];
                 for my $moniker ( @{ $hook->{submit} } ) {
-                    my $action = Jifty->web->{'actions'}{$moniker};
+                    my $action = $web->{'actions'}{$moniker};
                     $self->register_action($action);
                     $self->parameter( $action->form_field_name($_),
                         $hook->{action_arguments}{$moniker}{$_} )

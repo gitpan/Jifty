@@ -20,24 +20,12 @@ framework:
   Mailer: IO
   MailerArgs:
     - %log/mail.log%
-
   Plugins: 
+    - AdminUI: {}
     - Authentication::Password: {}
-    - 
-      REST: {}
-
-    - 
-      Halo: {}
-
-    - 
-      OnlineDocs: {}
-
-    - 
-      CompressedCSSandJS: {}
-
-    - 
-      AdminUI: {}
-
+    - CompressedCSSandJS: {}
+    - OnlineDocs: {}
+    - REST: {}
   PubSub: 
     Backend: Memcached
     Enable: ~
@@ -46,7 +34,6 @@ framework:
     BaseURL: http://localhost
     DataDir: var/mason
     Globals: []
-
     MasonConfig: 
       autoflush: 0
       default_escape_flags: h

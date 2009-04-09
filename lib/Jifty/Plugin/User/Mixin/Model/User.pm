@@ -16,8 +16,9 @@ Jifty::Plugin::User::Mixin::Model::User - user model base mixin
  use MyApp::Record schema { 
      # column definitions
  };
- 
- use Jifty::Plugin::User::Mixin::Model::User; # Imports two columns: name and email
+
+ # Import columns: name, email and email_confirmed
+ use Jifty::Plugin::User::Mixin::Model::User;
 
 =head1 DESCRIPTION
 
@@ -52,6 +53,7 @@ use Jifty::Plugin::User::Record schema {
         label is _('Email address'), default is '', is immutable, is distinct;
     column
         email_confirmed => label is _('Email address confirmed?'),
+        render as 'Unrendered',
         type is 'boolean';
 
 };

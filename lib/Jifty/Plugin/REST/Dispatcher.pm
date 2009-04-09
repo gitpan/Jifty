@@ -20,7 +20,7 @@ before qr{^ (/=/ .*) \. (js|json|yml|yaml|perl|pl|xml) $}x => run {
 };
 
 before POST qr{^ (/=/ .*) ! (DELETE|PUT|GET|POST|OPTIONS|HEAD|TRACE|CONNECT) $}x => run {
-    $ENV{REQUEST_METHOD} = $2;
+    Jifty->web->request->request_method($2);
     $ENV{REST_REWROTE_METHOD} = 1;
     dispatch $1;
 };
@@ -41,10 +41,15 @@ on GET    '/=/action/*'         => \&list_action_params;
 on GET    '/=/action'           => \&list_actions;
 on POST   '/=/action/*'         => \&run_action;
 
+on GET    '/='                  => \&show_help;
 on GET    '/=/help'             => \&show_help;
 on GET    '/=/help/*'           => \&show_help_specific;
 
 on GET    '/=/version'          => \&show_version;
+
+=head1 NAME
+
+Jifty::Plugin::REST::Dispatcher - Dispatcher for REST plugin
 
 =head2 show_help
 
@@ -56,7 +61,7 @@ sub show_help {
     my $apache = Jifty->handler->apache;
 
     $apache->header_out('Content-Type' => 'text/plain; charset=UTF-8');
-    $apache->send_http_header;
+    Jifty->handler->send_http_header;
    
     print qq{
 Accessing resources:
@@ -113,7 +118,7 @@ sub show_help_specific {
     my $apache = Jifty->handler->apache;
 
     $apache->header_out('Content-Type' => 'text/plain; charset=UTF-8');
-    $apache->send_http_header;
+    Jifty->handler->send_http_header;
 
     print __PACKAGE__->$method;
     last_rule;
@@ -183,7 +188,90 @@ sub list {
     outs($prefix, \@_)
 }
 
+=head2 output_format [prefix]
 
+Returns the user's desired output format. Returns a hashref of:
+
+    format: JSON, JS, YAML, XML, Perl, or HTML
+    extension: json, js, yml, xml, pl, or html
+    content_type: text/x-yaml; charset=UTF-8, etc.
+    freezer: \&Jifty::YAML::Dump, etc.
+
+
+=cut
+
+sub output_format {
+    my $prefix = shift;
+    my $accept = ($ENV{HTTP_ACCEPT} || '');
+
+    my (@prefix, $url);
+    if ($prefix) {
+        @prefix = map {s/::/./g; $_} @$prefix;
+        $url    = Jifty->web->url(path => join '/', '=',@prefix);
+    }
+
+    if ($accept =~ /ya?ml/i) {
+        return {
+            format       => 'YAML',
+            extension    => 'yml',
+            content_type => 'text/x-yaml; charset=UTF-8',
+            freezer      => \&Jifty::YAML::Dump,
+        };
+    }
+    elsif ($accept =~ /json/i) {
+        return {
+            format       => 'JSON',
+            extension    => 'json',
+            content_type => 'application/json; charset=UTF-8',
+            freezer      => \&Jifty::JSON::objToJson,
+        };
+    }
+    elsif ($accept =~ /j(?:ava)?s|ecmascript/i) {
+        return {
+            format       => 'JS',
+            extension    => 'js',
+            content_type => 'application/javascript; charset=UTF-8',
+            freezer      => sub { 'var $_ = ' . Jifty::JSON::objToJson( @_, { singlequote => 1 } ) },
+        };
+    }
+    elsif ($accept =~ qr{^(?:application/x-)?(?:perl|pl)$}i) {
+        return {
+            format       => 'Perl',
+            extension    => 'pl',
+            content_type => 'application/x-perl; charset=UTF-8',
+            freezer      => \&Data::Dumper::Dumper,
+        };
+    }
+    elsif ($accept =~  qr|^(text/)?xml$|i) {
+        return {
+            format       => 'XML',
+            extension    => 'xml',
+            content_type => 'text/xml; charset=UTF-8',
+            freezer      => \&render_as_xml,
+        };
+    }
+    else {
+        my $freezer;
+
+        # Special case showing particular actions to show an HTML form
+        if (    defined $prefix
+            and $prefix->[0] eq 'action'
+            and scalar @$prefix == 2 )
+        {
+            $freezer = sub { show_action_form($prefix->[1]) };
+        }
+        else {
+            $freezer = sub { render_as_html($prefix, $url, @_) };
+        }
+
+        return {
+            format       => 'HTML',
+            extension    => 'html',
+            content_type => 'text/html; charset=UTF-8',
+            freezer      => $freezer,
+        };
+    }
+}
 
 =head2 outs PREFIX DATASTRUCTURE
 
@@ -192,61 +280,15 @@ renders the content as yaml, json, javascript, perl, xml or html.
 
 =cut
 
-
 sub outs {
     my $prefix = shift;
-    my $accept = ($ENV{HTTP_ACCEPT} || '');
     my $apache = Jifty->handler->apache;
-    my @prefix;
-    my $url;
 
-    if($prefix) {
-        @prefix = map {s/::/./g; $_} @$prefix;
-         $url    = Jifty->web->url(path => join '/', '=',@prefix);
-    }
+    my $format = output_format($prefix);
 
-
-
-    if ($accept =~ /ya?ml/i) {
-        $apache->header_out('Content-Type' => 'text/x-yaml; charset=UTF-8');
-        $apache->send_http_header;
-        print Jifty::YAML::Dump(@_);
-    }
-    elsif ($accept =~ /json/i) {
-        $apache->header_out('Content-Type' => 'application/json; charset=UTF-8');
-        $apache->send_http_header;
-        print Jifty::JSON::objToJson( @_ );
-    }
-    elsif ($accept =~ /j(?:ava)?s|ecmascript/i) {
-        $apache->header_out('Content-Type' => 'application/javascript; charset=UTF-8');
-        $apache->send_http_header;
-        print 'var $_ = ', Jifty::JSON::objToJson( @_, { singlequote => 1 } );
-    }
-    elsif ($accept =~ qr{^(?:application/x-)?(?:perl|pl)$}i) {
-        $apache->header_out('Content-Type' => 'application/x-perl; charset=UTF-8');
-        $apache->send_http_header;
-        print Data::Dumper::Dumper(@_);
-    }
-    elsif ($accept =~  qr|^(text/)?xml$|i) {
-        $apache->header_out('Content-Type' => 'text/xml; charset=UTF-8');
-        $apache->send_http_header;
-        print render_as_xml(@_);
-    }
-    else {
-        $apache->header_out('Content-Type' => 'text/html; charset=UTF-8');
-        $apache->send_http_header;
-        
-        # Special case showing particular actions to show an HTML form
-        if (    defined $prefix
-            and $prefix->[0] eq 'action'
-            and scalar @$prefix == 2 )
-        {
-            show_action_form($1);
-        }
-        else {
-            print render_as_html($prefix, $url, @_);
-        }
-    }
+    $apache->header_out('Content-Type' => $format->{content_type});
+    Jifty->handler->send_http_header;
+    print $format->{freezer}->(@_);
 
     last_rule;
 }
@@ -286,7 +328,7 @@ sub render_as_html {
     my $url = shift;
     my $content = shift;
     if (ref($content) eq 'ARRAY') {
-        return start_html(-encoding => 'UTF-8', -declare_xml => 1, -title => 'models'),
+        return start_html(-encoding => 'UTF-8', -declare_xml => 1, -title => 'REST API'),
               ul(map {
                   li($prefix ?
                      a({-href => "$url/".Jifty::Web->escape_uri($_)}, Jifty::Web->escape($_))
@@ -295,7 +337,7 @@ sub render_as_html {
               end_html();
     }
     elsif (ref($content) eq 'HASH') {
-        return start_html(-encoding => 'UTF-8', -declare_xml => 1, -title => 'models'),
+        return start_html(-encoding => 'UTF-8', -declare_xml => 1, -title => 'REST API'),
               dl(map {
                   dt($prefix ?
                      a({-href => "$url/".Jifty::Web->escape_uri($_)}, Jifty::Web->escape($_))
@@ -305,7 +347,7 @@ sub render_as_html {
               end_html();
     }
     else {
-        return start_html(-encoding => 'UTF-8', -declare_xml => 1, -title => 'models'),
+        return start_html(-encoding => 'UTF-8', -declare_xml => 1, -title => 'REST API'),
               Jifty::Web->escape($content),
               end_html();
     }
@@ -374,36 +416,63 @@ sub html_dump_record {
 
 =head2 action ACTION
 
-Canonicalizes ACTION into the form preferred by the code. (Cleans up casing, canonicalizing, etc. Returns 404 if it can't work its magic
+Canonicalizes ACTION into the class-name form preferred by Jifty by cleaning up
+casing, delimiters, etc. Throws an appropriate HTTP error code if the action is
+unavailable.
 
 =cut
 
 
-sub action {  _resolve($_[0], 'Jifty::Action', Jifty->api->visible_actions) }
+sub action {
+    _resolve(
+        name          => $_[0],
+        base          => 'Jifty::Action',
+        possibilities => [Jifty->api->visible_actions],
+# We do not do this check because we want users to see actions on GET requests,
+# like when they're exploring the REST API in their browser.
+#        is_allowed    => sub { Jifty->api->is_allowed(shift) },
+    );
+}
 
 =head2 model MODEL
 
-Canonicalizes MODEL into the form preferred by the code. (Cleans up casing, canonicalizing, etc. Returns 404 if it can't work its magic
+Canonicalizes MODEL into the class-name form preferred by Jifty by cleaning up
+casing, delimiters, etc. Throws an appropriate HTTP error code if the model is
+unavailable.
 
 =cut
 
-sub model  { _resolve($_[0], 'Jifty::Record', grep {not $_->is_private} Jifty->class_loader->models) }
+sub model {
+    _resolve(
+        name          => $_[0],
+        base          => 'Jifty::Record',
+        possibilities => [Jifty->class_loader->models],
+        is_allowed    => sub { not shift->is_private },
+    );
+}
 
 sub _resolve {
-    my $name = shift;
-    my $base = shift;
+    my %args = @_;
 
     # we display actions as "AppName.Action.Foo", so we want to convert those
     # heathen names to be Perl-style
-    $name =~ s/\./::/g;
+    $args{name} =~ s/\./::/g;
 
-    my $re = qr/(?:^|::)\Q$name\E$/i;
+    my $re = qr/(?:^|::)\Q$args{name}\E$/i;
 
-    foreach my $cls (@_) {
-        return $cls if $cls =~ $re && $cls->isa($base);
+    my $hit;
+    foreach my $class (@{ $args{possibilities} }) {
+        if ($class =~ $re && $class->isa($args{base})) {
+            $hit = $class;
+            last;
+        }
     }
 
-    abort(404);
+    abort(404) if !defined($hit);
+
+    abort(403) if $args{is_allowed} && !$args{is_allowed}->($hit);
+
+    return $hit;
 }
 
 
@@ -434,6 +503,7 @@ qw( name
     distinct
     sort_order
     refers_to
+    by
     alias_for_column
     aliased_as
     label hints
@@ -511,7 +581,7 @@ sub show_item_field {
     $rec->can($field) or abort(404);
 
     # Check that the field is actually a column (and not some other method)
-    abort(404) unless valid_column($model, $column);
+    abort(404) unless valid_column($model, $field);
 
     outs( [ 'model', $model, $column, $key, $field ],
           Jifty::Util->stringify($rec->$field()) );
@@ -725,11 +795,13 @@ sub _dispatch_to_action {
         if defined $column and defined $key;
 
     if ( not $rec->id ) {
-        abort(404)         if $prefix eq 'Delete';
-        $prefix = 'Create' if $prefix eq 'Update';
+        abort(404) if $prefix eq 'Delete' || $prefix eq 'Update';
     }
 
     $class =~ s/^[\w\.]+\.//;
+
+    # 403 unless the action exists
+    my $action = action($prefix . $class);
 
     if ( defined $column and defined $key ) {
         Jifty->web->request->argument( $column => $key );
@@ -739,7 +811,7 @@ sub _dispatch_to_action {
     
     # CGI.pm doesn't handle form encoded data in PUT requests, so we have
     # to read the request body from PUTDATA and have CGI.pm parse it
-    if (    $ENV{'REQUEST_METHOD'} eq 'PUT'
+    if ( Jifty->web->request->request_method eq 'PUT'
         and (   $ENV{'CONTENT_TYPE'} =~ m|^application/x-www-form-urlencoded$|
               or $ENV{'CONTENT_TYPE'} =~ m|^multipart/form-data$| ) )
     {
@@ -761,8 +833,8 @@ sub _dispatch_to_action {
         }
     }
 
-    $ENV{REQUEST_METHOD} = 'POST';
-    dispatch '/=/action/' . action( $prefix . $class );
+    Jifty->web->request->request_method('POST');
+    dispatch "/=/action/$action";
 }
 
 =head2 list_actions
@@ -796,8 +868,7 @@ our @param_attrs = qw(
 );
 
 sub list_action_params {
-    my ($class) = action($1) or abort(404);
-    Jifty::Util->require($class) or abort(404);
+    my ($class) = action($1);
     my $action = $class->new or abort(404);
 
     my $arguments = $action->arguments;
@@ -823,7 +894,7 @@ Shows the user an HTML form of the action's parameters to run that action.
 =cut
 
 sub show_action_form {
-    my ($action) = action(shift) or abort(404);
+    my ($action) = action(shift);
     Jifty::Util->require($action) or abort(404);
     $action = $action->new or abort(404);
 
@@ -864,7 +935,7 @@ On an internal error, throws a C<500>.
 =cut
 
 sub run_action {
-    my ($action_name) = action($1) or abort(404);
+    my ($action_name) = action($1);
     Jifty::Util->require($action_name) or abort(404);
     
     my $args = Jifty->web->request->arguments;
@@ -880,15 +951,21 @@ sub run_action {
     eval { $action->run };
 
     if ($@) {
-        Jifty->log->warn($@);
+        $Dispatcher->log->warn($@);
         abort(500);
     }
 
     my $rec = $action->{record};
     if ($action->result->success && $rec and $rec->isa('Jifty::Record') and $rec->id) {
-        my $url    = Jifty->web->url(path => join '/', '=', map {
-            Jifty::Web->escape_uri($_)
-        } 'model', ref($rec), 'id', $rec->id);
+        my @fragments = ('model', ref($rec), 'id', $rec->id);
+
+        my $path = join '/', '=', map { Jifty::Web->escape_uri($_) } @fragments;
+
+        my $extension = output_format(\@fragments)->{extension};
+        $path .= '.' . $extension;
+
+        my $url = Jifty->web->url(path => $path);
+
         Jifty->handler->apache->header_out('Location' => $url);
     }
 

@@ -6,7 +6,7 @@ use base 'Jifty::Plugin';
 
 =head1 NAME
 
-Jifty::Plugin::CompressedCSSandJS
+Jifty::Plugin::IEFixes - Add javascript files for IE
 
 =head1 SYNOPSIS
 
@@ -33,6 +33,15 @@ Jifty::Plugin::CompressedCSSandJS
 __PACKAGE__->mk_accessors(qw(use_external_ie7js js cdn user_js));
 
 use constant IE7JS_VERSION => '2.0(beta3)';
+
+=head1 METHODS
+
+=head2 init
+
+Outputs IE-specific "conditional comments" in the C<< <head> >> of
+each response which include more javascript.
+
+=cut
 
 sub init {
     my $self = shift;
@@ -65,6 +74,14 @@ sub init {
     );
 
 }
+
+=head2 add_javascript FILE
+
+Can be called during application initialization (at startup time) to
+add more javascript which should only be included in IE browsers.  See
+also L<Jifty::Web/add_javascript>.
+
+=cut
 
 sub add_javascript {
     my $self = shift;

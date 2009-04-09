@@ -7,7 +7,7 @@ use HTTP::Date ();
 
 package Jifty::View::Static::Handler;
 
-use base qw/Jifty::Object/;
+use base qw/Jifty::View/;
 
 our ($MIME,$MAGIC);
 
@@ -46,14 +46,13 @@ Create a new static file handler. Likely, only the C<Jifty::Handler> needs to do
 
 sub new {
     my $class = shift;
-    
     my @roots = (Jifty->config->framework('Web')->{StaticRoot});
+    my %seen; $seen{$_} = 1 for map Jifty->config->framework('Web')->{$_}, qw/StaticRoot DefaultStaticRoot/;
     for my $plugin ( Jifty->plugins ) {
         my $root = $plugin->static_root;
-        if ( -d $root and -r $root ) {
-            push @roots, $root;
-            Jifty->log->debug( "Plugin @{[ref($plugin)]} static root added: (@{[$root ||'']})");
-        }
+        next unless ( defined $root and -d $root and -r $root and not $seen{$root}++);
+        push @roots, $root;
+        $plugin->log->debug( "Plugin @{[ref($plugin)]} static root added: (@{[$root ||'']})");
     }
     push @roots, (Jifty->config->framework('Web')->{DefaultStaticRoot});
 
@@ -148,7 +147,10 @@ An alias for L</file_path>.
 =cut
 
 sub template_exists {
-    shift->file_path(@_);
+    my $class = shift;
+    my $template = shift;
+    return $template if $class->file_path($template);
+    return undef;
 }
 
 sub file_path {
@@ -255,6 +257,13 @@ sub send_file {
     }
 }
 
+=head2 send_http_header [COMPRESSION, LENGTH, LAST_MODIFIED]
+
+Sends appropriate cache control and expiration headers such that the
+client will cache the content.
+
+=cut
+
 sub send_http_header {
     my $self = shift;
     my ($compression, $length, $modified) = @_;
@@ -274,7 +283,7 @@ sub send_http_header {
     $apache->header_out( 'Content-Encoding' => "gzip" )
       if ( $compression eq 'gzip' );
 
-    $apache->send_http_header();
+    Jifty->handler->send_http_header;
 }
 
 
@@ -288,7 +297,7 @@ sub send_not_modified {
     my $self = shift;
     my $apache = Jifty->handler->apache;
     $apache->header_out( Status => 304 );
-    $apache->send_http_header();
+    Jifty->handler->send_http_header;
     return 1;
 
 }

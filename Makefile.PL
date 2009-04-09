@@ -1,14 +1,14 @@
 use inc::Module::Install 0.46;
 name('Jifty');
 license('Perl');
-requires(perl => '5.8.3');
-requires('App::CLI' => 0.03 ); # App::CLI::Command::Help App::CLI::Command
+perl_version '5.8.3';
+requires('App::CLI' => 0.08 ); # App::CLI::Command::Help App::CLI::Command
 requires('Cache::Cache'); #Cache::FileCache
 requires('Calendar::Simple');
 requires('Class::Accessor'); # Class::Accessor::Fast
 requires('Class::Container');
 requires('Class::Data::Inheritable');
-requires('Class::Trigger' => '0.12');
+requires('Class::Trigger' => '0.13');
 requires('Clone' => '0.27');
 requires('CGI' => '3.30');
 requires('CGI::Cookie::Splitter');
@@ -30,13 +30,14 @@ requires('Email::MIME::Creator' => 1.450 );
 requires('Email::MIME::ContentType' => 1.012 );
 requires('Email::MIME::CreateHTML');
 requires('Email::MIME::Modifier' => 1.442 );
-requires('Email::Send' => '2.0'); # Email::Send::Jifty::Test
+requires('Email::Send' => '2.10');
 requires('Email::Simple' => 2.003);
 requires('Email::Simple::Creator' => 1.400 );
+requires('Exception::Class');
 requires('Exporter::Lite');
 requires('File::Find::Rule');
 requires('File::MMagic');
-requires('File::ShareDir' => '0.04');
+requires('File::ShareDir' => '1.00');
 requires('File::Spec' => '3.14');
 requires('File::Temp' => '0.15'); # we need cleanup()
 requires('HTML::Entities');
@@ -45,33 +46,34 @@ requires('HTML::Mason' => 1.3101);           # HTML::Mason::Exceptions HTML::Mas
 requires('HTML::Mason::Plugin');
 requires('HTTP::Cookies');
 requires('HTTP::Date');
-requires('HTTP::Server::Simple' => '0.28');  # HTTP::Server::Simple::CGI
+requires('HTTP::Server::Simple' => '0.35');  # HTTP::Server::Simple::CGI
 requires('HTTP::Server::Simple::Recorder');
 requires('Hash::Merge');
 requires('Hook::LexWrap');
 requires('IPC::PubSub' => '0.23' );
 requires('IPC::Run3');
-requires('Jifty::DBI' => '0.49' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
-requires('Locale::Maketext::Extract' => '0.20');
-requires('Locale::Maketext::Lexicon' => '0.60');
-requires('Log::Log4perl' => '1.04');
-requires('LWP::UserAgent'); # Net::HTTP
+requires('Jifty::DBI' => '0.53' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
+requires('List::MoreUtils');
+requires('Locale::Maketext::Extract' => '0.35');
+requires('Locale::Maketext::Lexicon' => '0.77');
+requires('Log::Log4perl' => '1.11'); # Log::Log4perl::Appender Log::Log4perl::Level
+requires('LWP::UserAgent'); # Net::HTTP LWP::Simple
 requires('MIME::Types');
-requires('Module::Pluggable' => '3.5'); # Module::Pluggable::Object
+requires('Module::Pluggable' => '3.7'); # Module::Pluggable::Object
 requires('Module::Pluggable::Object');
 requires('Module::CoreList');
 requires('Module::Refresh');
 requires('Module::ScanDeps');
 requires('Object::Declare' => '0.13');
-requires('PadWalker');
 requires('Params::Validate');
 requires('Scalar::Defer' => '0.12');
 requires('Shell::Command');
+requires('String::BufferStack' => '1.12');
 requires('String::Koremutake');
+requires('SUPER');
 requires('SQL::ReservedWords');
-requires('Template::Declare' => '0.26');                # Template::Declare::Tags
+requires('Template::Declare' => '0.36');                # Template::Declare::Tags
 requires('Test::Base');
-requires('Test::Log4perl');
 requires('Test::LongString');
 requires('Test::More' => 0.62 ),
 requires('Test::Pod::Coverage'),
@@ -99,111 +101,62 @@ else {
     requires('JSON' => 0.01) unless can_use('JSON::Syck' => 0.29);
 }
 
-features(
-    'Administrative Interface (web)' => [ 
-        -default => 1,
-       recommends( 'Pod::Simple') # Pod::Simple::Text Pod::Simple::HTML
-    ],
-    'Development of a jifty application' => [
-        -default => 1,
-        recommends('DBD::SQLite' => 1.11 ),
-        recommends('Test::Base' => 0.44 ),            # Test::Base::Filter
-        recommends('Module::Install::Admin' => '0.50'),
-        ($^O ne 'MSWin32' ? recommends('Test::HTTP::Server::Simple' => '0.02' ) : ()),
-        recommends('Test::HTML::Lint'),
-        recommends('Test::MockModule' => '0.05'),
-        recommends('Test::MockObject' => '1.07'),
-        recommends('Module::Refresh' => '0.09'),
-        recommends('Test::WWW::Declare' => '0.01'),
-    ],
-    'Development of the jifty framework' => [
-        -default => 0,
-        recommends('DBD::SQLite'),
-        recommends('Class::Accessor::Named'),
-        recommends('Devel::Cover'),
-        recommends('Module::CoreList'),
-        recommends('Module::Install::Admin' => '0.50')
-     ],
-    'Forking jifty server' => [
-        -default => 0,
-        recommends('Net::Server::Fork'),
-    ],
-    'Pre-forking jifty server' => [
-        -default => 0,
-        recommends('Net::Server::PreFork'),
-    ],
-    'Apache2/ModPerl2 handler' => [
-        -default => 0,
-        recommends('Apache2::Const'),
-    ],
-    'Experimental features' => [
-        -default => 0,
-        recommends('PAR::Dist::FromCPAN'),
-    ],
-    'OpenID Login Plugin' => [
-        -default => 0,
-        recommends('Net::OpenID::Consumer'),
-        recommends('Cache::FileCache'),
-        recommends('LWPx::ParanoidAgent'),
-    ],
-    'Facebook Login Plugin' => [
-        -default => 0,
-        recommends('WWW::Facebook::API' => '0.3.6'),
-    ],
-    'Jifty console' => [
-        -default => 0,
-        recommends('Devel::EvalContext'),
-    ],
-    'Jifty REPL' => [
-        -default => 0,
-        recommends('Devel::REPL'), # Devel::REPL::Script
-    ],
-    'Chart Plugin (none of these need to be installed for Charts to work)' => [
-        -default => 0,
-        recommends('Chart::Base'),
-        recommends('GD'),          # for a testing hack
-        recommends('GD::Graph'),
-        recommends('XML::Simple'),
-        recommends('Image::Info'), # for testing
-    ],
-    'Memory Leak Plugins' => [
-        -default => 0,
-        recommends('Devel::Events::Objects' => '0.02'), # Devel::Events::Handler::ObjectTracker Devel::Events::Generator::Objects
-        recommends('Devel::Size'),
-        recommends('Devel::Gladiator'),
-        recommends('Proc::ProcessTable'),
-    ],
-    'Ldap Plugin' => [
-        -default => 0,
-        recommends('Net::LDAP')
-    ],
-    'CAS Plugin' => [
-        -default => 0,
-        recommends('Authen::CAS::Client')
-    ],
-    'Improved halos' => [
-        -default => 0,
-        recommends('Template::Declare' => '0.28'),
-        recommends('Data::Dump::Streamer'),
-    ],
-    'Comment Plugin' => [
-        -default => 0,
-        recommends('HTML::Scrubber'),
-        recommends('MIME::Base64::URLSafe'),
-        recommends('Net::Akismet'),
-        recommends('Regexp::Common'),
-        recommends('Regexp::Common::Email::Address'),
-    ],
-);
+feature 'Administrative Interface (web)' =>
+    -default => 1,
+    recommends('Pod::Simple' => 0), # Pod::Simple::Text Pod::Simple::HTML
+    ;
+
+feature 'Development of a jifty application' =>
+    -default => 1,
+    recommends('DBD::SQLite' => 1.11),
+    recommends('Test::Base' => 0.44),            # Test::Base::Filter
+    recommends('Module::Install::Admin' => '0.50'),
+    recommends('Test::HTTP::Server::Simple' => '0.10'),
+    recommends('Test::HTML::Lint' => 0),
+    recommends('Test::MockModule' => '0.05'),
+    recommends('Test::MockObject' => '1.07'),
+    recommends('Module::Refresh' => '0.09'),
+    recommends('Test::WWW::Declare' => '0.01'),
+    recommends('Test::Email' => 0),
+    recommends('Email::Abstract' => 0),
+    ;
+
+feature 'Development of the jifty framework' =>
+    -default => 0,
+    recommends('DBD::SQLite' => 0),
+    recommends('Class::Accessor::Named' => 0),
+    recommends('Devel::Cover' => 0),
+    recommends('Module::CoreList' => 0),
+    recommends('Module::Install::Admin' => '0.50'),
+    ;
 
 
-no_index( directory => qw< debian doc examples share plugins/*/t> );
+feature 'Forking jifty server' =>
+    -default => 0,
+    recommends('Net::Server::Fork' => 0),
+    ;
+
+feature 'Pre-forking jifty server' =>
+    -default => 0,
+    recommends('Net::Server::PreFork' => 0),
+    ;
+
+feature 'Apache2/ModPerl2 handler' =>
+    -default => 0,
+    recommends('Apache2::Const' => 0),
+    ;
+
+feature 'Improved halos' =>
+    -default => 0,
+    recommends('Data::Dump::Streamer' => 0),
+    ;
+
+
+no_index( directory => qw< debian doc examples share > );
 no_index package => 'DB';
 
 version_from('lib/Jifty.pm');
-#&auto_bundle_deps();
 &auto_install();
-#&auto_include_dependent_dists();
 
 install_script('bin/jifty');
 install_share;

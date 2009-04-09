@@ -76,7 +76,7 @@ sub arguments {
             $info->{valid_values} = $valid_values = (eval { [ @$valid_values ] } || [$valid_values]);
 
             # For radio display, display an "any" label (empty looks weird)
-            if (lc $info->{render_as} eq 'radio') {
+            if (defined $info->{render_as} and lc $info->{render_as} eq 'radio') {
                 if (@$valid_values > 1) {
                     unshift @$valid_values, { display => _("(any)"), value => '' };
                     $info->{default_value} ||= '';
@@ -94,7 +94,7 @@ sub arguments {
         }
 
         # You can't search passwords, so remove the fields
-        if(lc $info->{'render_as'} eq 'password') {
+        if(defined $info->{'render_as'} and lc $info->{'render_as'} eq 'password') {
             delete $args->{$field};
             next;
         }
@@ -106,6 +106,10 @@ sub arguments {
         if(defined(my $refers_to = $column->refers_to)) {
             delete $args->{$field}
              if UNIVERSAL::isa($refers_to, 'Jifty::Collection');
+        }
+        if ($info->{container}) {
+            delete $args->{$field};
+            next;
         }
 
         # XXX TODO: What about booleans? Checkbox doesn't quite work,
@@ -310,13 +314,15 @@ sub take_action {
 
         # See if any column contains the text described
         my $any = $self->argument_value('contains');
-        for my $col ($self->record->columns) {
-            if($col->type =~ /(?:text|varchar)/) {
-                $collection->limit(column   => $col->name,
-                                   value    => "%$any%",
-                                   operator => 'LIKE',
-                                   entry_aggregator => 'OR',
-                                   subclause => 'contains');
+        if (length $any) {
+            for my $col ($self->record->columns) {
+                if($col->type =~ /(?:text|varchar)/) {
+                    $collection->limit(column   => $col->name,
+                                       value    => "%$any%",
+                                       operator => 'LIKE',
+                                       entry_aggregator => 'OR',
+                                       subclause => 'contains');
+                }
             }
         }
     }

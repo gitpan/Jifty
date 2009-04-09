@@ -2,8 +2,7 @@ use strict;
 use warnings;
 
 package Jifty::Plugin;
-use File::ShareDir 'module_dir';
-use base 'Class::Accessor::Fast';
+use base qw/Class::Accessor::Fast Jifty::Object/;
 __PACKAGE__->mk_accessors('_pre_init');
 
 =head1 NAME
@@ -37,8 +36,6 @@ Actions and models under a plugin's namespace are automatically
 discovered and made available to applications.
 
 =cut
-
-use File::ShareDir;
 
 =head2 new
 
@@ -103,33 +100,51 @@ sub init {
 
 =head2 new_request
 
-Called right before every request.  By default, this adds the plugin's
-actions to the list of allowed actions, using L<Jifty::API/allow>.
+Called right before every request.  By default, does nothing.
 
 =cut
 
 sub new_request {
-    my $self = shift;
-    my $class = ref($self) || $self;
-    Jifty->api->allow(qr/^\Q$class\E::Action/);
 }
 
 sub _calculate_share {
-    my $self = shift;
+    my $self  = shift;
     my $class = ref($self);
 
-    unless ( $self->{share} ) {
-        local $@
-            ; # We're just avoiding File::ShareDir's failure behaviour of dying
-        eval { $self->{share} = module_dir($class) };
+    unless ( $self->{share} and -d $self->{share} ) {
+
+        # If we've got a plugin distribution in @INC as well as an
+        # installed version, then File::Sharedir will find the
+        # installed version.  So, we first try to tear off everything
+        # after the lib/ and replace it with share/
+        my $class_to_path = $class;
+        $class_to_path =~ s|::|/|g;
+
+        $self->{share} = $INC{ $class_to_path . '.pm' };
+        $self->{share} =~ s{lib/+\Q$class_to_path.pm}{share};
+        $self->{share} = File::Spec->rel2abs( $self->{share} );
     }
-    unless ( $self->{share} ) {
+    unless ( $self->{share} and -d $self->{share} ) {
+        # If it's an installed non-core plugin, File::ShareDir's
+        # dist_dir will find it for us
+        my $dist = $class;
+        $dist =~ s/::/-/g;
+        local $@;
+        eval { $self->{share} = File::ShareDir::dist_dir($dist) };
+    }
+    unless ( $self->{share} and -d $self->{share} ) {
+        # We try this last, so plugins that moved out of core, but
+        # were installed at when they _were_ in core, will get the
+        # updated plugin
+
+        # Core plugins live in jifty's share/plugins/Jifty/Plugin/Whatever/
+        my $class_to_path = $class;
+        $class_to_path =~ s|::|/|g;
         $self->{share} = Jifty::Util->share_root;
-        if ( $self->{'share'} ) {
-            my $class_to_path = $class;
-            $class_to_path =~ s|::|/|g;
-            $self->{share} .= "/plugins/" . $class_to_path;
-        }
+        $self->{share} .= "/plugins/" . $class_to_path;
+    }
+    unless ( $self->{share} and -d $self->{share} ) {
+        $self->{share} = undef;
     }
     return $self->{share};
 }

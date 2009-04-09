@@ -69,7 +69,7 @@ If you do nothing, code similar to this will be called by _init.
 	}
 
 That is, it will attempt to load the columns given in the model named C<App::Model::User> (where I<App> is the name of your application class). If your notion of a user object isn't a typical Jifty model or named something else, you will definitely need to override this method. If you need to perform any additional initialization for user objects, you may want to override this as well.
-	
+
 =cut
 
 sub _init {
@@ -77,8 +77,9 @@ sub _init {
     my %args = (@_);
 
     # Duck-typing to check to for a user class
-    if (keys %args and UNIVERSAL::can(Jifty->app_class('Model', 'User'), 'new')  ) {
-        $self->user_object(Jifty->app_class('Model', 'User')->new(current_user => $self));
+    my $user_class = Jifty->app_class({require => 0}, 'Model', 'User');
+    if (keys %args and UNIVERSAL::can($user_class, 'new')  ) {
+        $self->user_object($user_class->new(current_user => $self));
         $self->user_object->load_by_cols(%args);
     }
 
@@ -137,16 +138,14 @@ user_object, return that user's id.
 sub id {
     my $self = shift;
 
-    # Make sure we have a user object before trying to ID it
-    if ($self->user_object) {
-        return ($self->user_object->id());
-    } 
-    
-    # No user object, return a null ID
-    else {
-        return '0';
-    }
+    # This can be a hotspot, so we don't use method calls, instead
+    # directly accessing the value.
 
+    # Make sure we have a user object before trying to ID it
+    return $self->{user_object}->id if $self->{user_object};
+
+    # No user object, return a null ID
+    return 0;
 }
 
 =head2 current_user

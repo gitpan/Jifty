@@ -83,6 +83,8 @@ use warnings;
 use Jifty::I18N;
 use Jifty::Param;
 use Scalar::Defer;
+use SUPER;
+
 use Object::Declare (
     mapping => {
         param => 'Jifty::Param',
@@ -127,15 +129,24 @@ sub schema (&) {
         $count += 10;
     }
 
-    if (my $super_params = $from->can('SUPER::PARAMS')) {
-        $from->PARAMS(merge_params( $super_params->(), { @params } ));
+    if ( my $super_params = $from->super('PARAMS') ) {
+        my $super = $super_params->();
+        # XXX: skip the merge_params if the parent class' PARAMS is
+        # empty to avoid the currently kludgy merge_params
+        # implementation to pollute scalar::defer with undetermined
+        # behaviour
+        $from->PARAMS(
+            ($super && keys %$super)
+            ? merge_params( $super, {@params} )
+            : {@params} );
     }
     else {
-        $from->PARAMS({ @params });
+        $from->PARAMS( {@params} );
     }
 
     no strict 'refs';
-    push @{$from . '::ISA'}, 'Jifty::Action';
+    push @{$from . '::ISA'}, 'Jifty::Action'
+        unless $from->isa('Jifty::Action');
     return;
 }
 
@@ -177,24 +188,34 @@ sub merge_params {
     # objects and hahrefs with no complaint, but 0.10 doesn't.  This
     # is a horrible, horrible hack, and will hopeflly be able to be
     # backed out if and when Hash::Merge reverts to the old behavior.
+    my $field_type = {};
     my @types;
     for my $m (@_) {
         my @t;
         for (keys %{$m}) {
             push @t, ref $m->{$_};
+            $field_type->{$_} = ref $m->{$_};
             bless $m->{$_}, "HASH";
         }
         push @types, \@t;
     }
     my $prev_behaviour = Hash::Merge::get_behavior();
+    my $prev_clone_behaviour = Hash::Merge::get_clone_behavior();
+    Hash::Merge::set_clone_behavior(0);
     Hash::Merge::specify_behavior( MERGE_PARAM_BEHAVIOUR, "merge_params" );
     my $rv = Hash::Merge::merge(@_);
     Hash::Merge::set_behavior( $prev_behaviour );
+    Hash::Merge::set_clone_behavior($prev_clone_behaviour);
     for my $m (@_) {
         my @t = @{shift @types};
         for (keys %{$m}) {
             bless $m->{$_}, shift @t;
         }
+    }
+
+    for ( keys %$rv ) {
+        bless $rv->{$_}, $field_type->{$_}
+            if $field_type->{$_};
     }
     return $rv;
 }

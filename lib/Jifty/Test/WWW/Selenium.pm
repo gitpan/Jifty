@@ -41,6 +41,11 @@ sub rc_ok {
     my $server = shift;
     my %args = @_;
 
+    $class->_skip_rest("live test doesn't work on Win32 at the moment")
+		if $^O eq 'MSWin32';
+
+    $ENV{JIFTY_OPENID_WHITELIST_HOST} = $ENV{SELENIUM_RC_TEST_AGAINST} || 'localhost';
+
     if ( $args{selenium_rc} ||= $ENV{SELENIUM_RC_SERVER} ) {
         @args{'host','port'} = split /:/, $args{selenium_rc}, 2;
     }
@@ -84,7 +89,7 @@ sub _REAPER {
 sub _get_default_browser {
     my $class = shift;
 
-    return '*firefox';
+    return '*firefox /usr/lib/mozilla-firefox/firefox';
 }
 
 my @cleanup;
@@ -101,8 +106,10 @@ sub _start_src {
 	return ('localhost', 4444);
     }
     else {
-	require POSIX;
-	POSIX::setsid();
+        unless ($^O eq 'MSWin32') {
+            require POSIX;
+            POSIX::setsid();  # Win32 doesn't have this.
+        }
 	unless ($ENV{TEST_VERBOSE}) {
 	    close *STDERR;
 	    close *STDOUT;

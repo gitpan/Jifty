@@ -2,7 +2,7 @@ use warnings;
 use strict;
 
 package Jifty::Script::Server;
-use base qw/App::CLI::Command/;
+use base qw/Jifty::Script/;
 
 # XXX: if test::builder is not used, sometimes connection is not
 # properly closed, causing the client to wait for the content for a
@@ -26,30 +26,89 @@ use constant PIDFILE => 'var/jifty-server.pid';
 
 Jifty::Script::Server - A standalone webserver for your Jifty application
 
+=head1 SYNOPSIS
+
+    jifty server
+    jifty server --port 6666
+    jifty server --stop
+
+=head1 OPTIONS
+
+=over 8
+
+=item --port
+
+The port to run the server on. Overrides the port in the config file, if it is
+set there. The default port is 8888.
+
+=item --user USER
+
+The user to become after binding to the port.  It is advised that you
+use this when binding to low ports, instead of running as C<root>.
+This option only works if the server is using a L<Net::Server>
+subclass.
+
+=item --group GROUP
+
+The group to become after binding to the port.  Like C<--user>, this
+option only works if the server is using a L<Net::Server> subclass.
+
+=item --host HOSTNAME
+
+The host to bind to.  This option only works if the server is using a
+L<Net::Server> subclass.
+
+=item --stop
+
+Stops the server, if it is running.  This is accomplished by reading
+the PID from C<var/jifty-server.pid>
+
+=item --sigready SIGNAL
+
+Sets the signal number that shouldbe sent to the server's parent
+process when the server is ready to accept connections.
+
+=item --quiet
+
+Reduces the amount of debug output sent by the server
+
+=item --dbiprof
+
+Turns on DBI profiling; see L<DBI::ProfileDumper>.
+
+=item B<--help>
+
+Print a brief help message and exits.
+
+=item B<--man>
+
+Prints the manual page and exits.
+
+=back
+
+=cut
+
+sub options {
+    my $self = shift;
+    return (
+        $self->SUPER::options,
+        'p|port=s'   => 'port',
+        'stop'       => 'stop',
+        'sigready=s' => 'sigready',
+        'quiet'      => 'quiet',
+        'dbiprof'    => 'dbiprof',
+        'host=s'     => 'host',
+        'u|user=s'   => 'user',
+        'g|group=s'  => 'group',
+    )
+}
+
 =head1 DESCRIPTION
 
 When you're getting started with Jifty, this is the server you
 want. It's lightweight and easy to work with.
 
-=head1 API
-
-=head2 options
-
-The server takes only one option, C<--port>, the port to run the
-server on.  This is overrides the port in the config file, if it is
-set there.  The default port is 8888.
-
-=cut
-
-sub options {
-    (
-     'p|port=s'   => 'port',
-     'stop'       => 'stop',
-     'sigready=s' => 'sigready',
-     'quiet'      => 'quiet',
-     'dbiprof'    => 'dbiprof',
-    )
-}
+=head1 METHODS
 
 =head2 run
 
@@ -60,6 +119,7 @@ you.
 
 sub run {
     my $self = shift;
+    $self->print_help;
     Jifty->new();
 
     if ($self->{stop}) {
@@ -72,14 +132,17 @@ sub run {
     # Purge stale mason cache data
     my $data_dir = Jifty->config->framework('Web')->{'DataDir'};
     my $server_class = Jifty->config->framework('Web')->{'ServerClass'} || 'Jifty::Server';
+    die "--user option only available with Net::Server subclasses\n"
+        if $self->{user} and $server_class eq "Jifty::Server";
+    die "--group option only available with Net::Server subclasses\n"
+        if $self->{group} and $server_class eq "Jifty::Server";
+    die "--host option only available with Net::Server subclasses\n"
+        if $self->{host} and $server_class eq "Jifty::Server";
+
     Jifty::Util->require($server_class);
 
-    if (-d $data_dir) {
-        File::Path::rmtree(["$data_dir/cache", "$data_dir/obj"]);
-    }
-    else {
-        File::Path::mkpath([$data_dir]);
-    }
+    File::Path::rmtree(["$data_dir/cache", "$data_dir/obj"])
+          if Jifty->handler->view('Jifty::View::Mason::Handler') and -d $data_dir;
 
     $SIG{TERM} = sub { exit };
     open my $fh, '>', PIDFILE or die $!;
@@ -93,7 +156,11 @@ sub run {
         if $self->{sigready};
     Log::Log4perl->get_logger($server_class)->less_logging(3)
         if $self->{quiet};
-    $server_class->new(port => $self->{port})->run;
+    $Jifty::SERVER = $server_class->new(port => $self->{port});
+    $Jifty::SERVER->{server}{no_client_stdout} = 1;
+    my @args;
+    push @args, $_ => $self->{$_} for grep {exists $self->{$_}} qw/user group host/;
+    $Jifty::SERVER->run( @args );
 }
 
 1;

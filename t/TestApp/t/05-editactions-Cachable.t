@@ -3,11 +3,8 @@
 use warnings;
 use strict;
 
-use lib 't/lib';
-use Jifty::SubTest;
 BEGIN { $ENV{'JIFTY_CONFIG'} = 't/config-Cachable' }
-
-use Jifty::Test tests => 7;
+use Jifty::Test::Dist tests => 7;
 use Jifty::Test::WWW::Mechanize;
 
 # Make sure we can load the model
@@ -37,7 +34,7 @@ $mech->post($URL.'/editform', {
     'J:A:F-name-updateuser' => 'edituser',
     'J:A:F-email-updateuser' => 'newemail@example.com',
     'J:A:F-tasty-updateuser' => '0'
-}, "Form submitted");
+});
 
 undef $o;
 $o = TestApp::Model::User->new(current_user => $system_user);

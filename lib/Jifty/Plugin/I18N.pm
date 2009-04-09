@@ -6,7 +6,7 @@ use base 'Jifty::Plugin';
 
 =head1 NAME
 
-Jifty::Plugin::I18N
+Jifty::Plugin::I18N - Additional i18n facility such as language selector
 
 =head1 SYNOPSIS
 
@@ -81,27 +81,40 @@ sub _i18n_js {
         } @$allowed_lang;
 
         unless ( $current_lang =~ /^$allowed_regex/) {
-            Jifty->log->error("user is requesting $current_lang which is not allowed");
+            $self->log->error("user is requesting $current_lang which is not allowed");
             my $headers = Jifty->handler->apache->headers_in;
             use Data::Dumper;
-            Jifty->log->error(Dumper($headers));
+            $self->log->error(Dumper($headers));
         }
     }
 
-    open my $fh, '<:encoding(utf-8)',
+    if (
+        open my $fh,
+        '<:encoding(utf-8)',
         Jifty::Util->absolute_path(
-        File::Spec->catdir(
-            Jifty->config->framework('Web')->{StaticRoot},
-            "js/dict/$current_lang.json" ))
-        or Jifty->log->error("Can't find dictionary file $current_lang.json: $!");
+            File::Spec->catdir(
+                Jifty->config->framework('Web')->{StaticRoot},
+                "js/dict/$current_lang.json"
+            )
+        )
+      )
+    {
+        local $/;
+        my $inline_dict = <$fh> || '{}';
 
-    local $/;
-    my $inline_dict = <$fh> || '{}';
-    # js l10n init
-    Jifty->web->out(qq{<script type="text/javascript">
+        # js l10n init
+        Jifty->web->out(
+            qq{<script type="text/javascript">
 Localization.dict_path = '/static/js/dict';
 Localization.dict = $inline_dict;
-</script>});
+</script>}
+        );
+
+    }
+    else {
+        $self->log->error("Can't find dictionary file $current_lang.json: $!");
+    }
+
 }
 
 1;

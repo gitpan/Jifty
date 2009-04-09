@@ -120,12 +120,19 @@ by using a variant on the C<before> and C<after> syntax:
     after plugin NAME =>
         RULE(S);
 
+    after app,
+        RULE(S)
+
 C<NAME> may either be a string, which must match the plugin name
 exactly, or a regular expression, which is matched against the plugin
 name.  The rule will be placed at the first boundary that it matches --
 that is, given a C<before plugin qr/^Jifty::Plugin::Auth::/> and both
 a C<Jifty::Plugin::Auth::Basic> and a C<Jifty::Plugin::Auth::Complex>,
 the rules will be placed before the first.
+
+C<after app> inserts the folowing C<RULES> after the application's
+dispatcher rules, and is identical to, but hopefuly clearer than,
+C<< after plugin Jifty => RULES >>.
 
 C<RULES> may either be a single C<before>, C<on>, C<under>, or
 C<after> rule to change the ordering of, or an array reference of
@@ -254,6 +261,8 @@ Take a continuation here, and tangent to another URI.
 
 =head2 plugin
 
+=head2 app
+
 See L</Plugins and rule ordering>, above.
 
 =cut
@@ -269,7 +278,7 @@ our @EXPORT = qw<
 
     HTTPS HTTP
 
-    plugin
+    plugin app
 
     get next_rule last_rule
 
@@ -279,8 +288,9 @@ our @EXPORT = qw<
 >;
 
 our $Dispatcher;
+our $Request;
 
-sub request       { Jifty->web->request }
+sub request       { $Request }
 sub _ret (@);
 sub under ($$@)   { _ret @_ }    # partial match at beginning of path component
 sub before ($$@)  { _ret @_ }    # exact match on the path component
@@ -296,7 +306,11 @@ sub abort (;$@)   { _ret @_ }    # abort request
 sub default ($$@) { _ret @_ }    # set parameter if it's not yet set
 sub set ($$@)     { _ret @_ }    # set parameter
 sub del ($@)      { _ret @_ }    # remove parameter
-sub get ($) { request->template_argument( $_[0] ) || request->argument( $_[0] ) }
+sub get ($) {
+    my $val = $Request->template_argument( $_[0] );
+    return $val if defined $val;
+    return $Request->argument( $_[0] );
+}
 
 sub _qualify ($@);
 sub GET ($)     { _qualify method => @_ }
@@ -310,6 +324,7 @@ sub HTTPS ($)   { _qualify https  => @_ }
 sub HTTP ($)    { _qualify http   => @_ }
 
 sub plugin ($) { return { plugin => @_ } }
+sub app ()     { return { plugin => 'Jifty' } }
 
 our $CURRENT_STAGE;
 
@@ -471,9 +486,10 @@ sub handle_request {
     # do it once per request. But it's really, really painful when you
     # do it often, as is the case with fragments
     local $SIG{__DIE__} = 'DEFAULT';
+    local $Request = Jifty->web->request;
 
     eval {
-        my $path = Jifty->web->request->path;
+        my $path = $Request->path;
         utf8::downgrade($path); # Mason handle non utf8 path.
         $Dispatcher->_do_dispatch( $path );
     };
@@ -740,8 +756,9 @@ sub _do_abort {
         my $status = shift;
         my $apache = Jifty->handler->apache;
         $apache->header_out(Status => $status);
-        $apache->send_http_header;
+        Jifty->handler->send_http_header;
 
+        # The body should just be the status
         require HTTP::Status;
         print STDOUT $status, ' ' , HTTP::Status::status_message($status);
     }
@@ -759,13 +776,15 @@ Otherwise, just render whatever we were going to anyway.
 
 =cut
 
+my %TEMPLATE_CACHE;
+
 sub _do_show {
     my $self = shift;
     my $path;
 
     # Fix up the path
     $path = shift if (@_);
-    $path ||= $self->{path};
+    $path = $self->{path} unless defined $path and length $path;
 
     unless ($CURRENT_STAGE eq 'RUN') {
         die "You can't call a 'show' rule in a 'before' or 'after' block in the dispatcher.  Not showing path $path";
@@ -778,42 +797,36 @@ sub _do_show {
     # a relative path, prepend the working directory
     $path = "$self->{cwd}/$path" unless $path =~ m{^/};
 
-    # When we're requesting a directory, go looking for the index.html if the 
-    # path given does not exist
-    if (  ! $self->template_exists( $path )
-         && $self->template_exists( $path . "/index.html" ) ) {
-        $path .= "/index.html";
-    }
-
+    # Check for ../../../../../etc/passwd
     my $abs_template_path = Jifty::Util->absolute_path( Jifty->config->framework('Web')->{'TemplateRoot'} . $path );
     my $abs_root_path = Jifty::Util->absolute_path( Jifty->config->framework('Web')->{'TemplateRoot'} );
+    $self->render_template('/errors/500')
+        if $abs_template_path !~ /^\Q$abs_root_path\E/;
 
-    if ( $abs_template_path !~ /^\Q$abs_root_path\E/ ) {
-        $self->render_template('/__jifty/errors/500');
-    } else {
-        $self->render_template( $path);
-    }
+    $self->render_template( $path );
 
     last_rule;
 }
 
 sub _do_set {
     my ( $self, $key, $value ) = @_;
-    $self->log->debug("Setting argument $key to ".($value||''));
-    request->template_argument($key, $value);
+    no warnings 'uninitialized';
+    $self->log->debug("Setting argument $key to $value");
+    $Request->template_argument($key, $value);
 }
 
 sub _do_del {
     my ( $self, $key ) = @_;
     $self->log->debug("Deleting argument $key");
-    request->delete($key);
+    $Request->delete($key);
 }
 
 sub _do_default {
     my ( $self, $key, $value ) = @_;
-    $self->log->debug("Setting argument default $key to ".($value||''));
-    request->template_argument($key, $value)
-        unless defined request->argument($key) or defined request->template_argument($key);
+    no warnings 'uninitialized';
+    $self->log->debug("Setting argument default $key to $value");
+    $Request->template_argument($key, $value)
+        unless defined $Request->argument($key) or defined $Request->template_argument($key);
 }
 
 =head2 _do_dispatch [PATH]
@@ -847,11 +860,18 @@ sub _do_dispatch {
     # actions and then the RUN stage.
     if ($self->_handle_stage('SETUP')) {
         # Run actions
-        Jifty->web->handle_request();
+        Jifty->web->handle_request unless Jifty->web->request->is_subrequest;
 
         # Run, and show the page
         $self->_handle_stage('RUN' => 'show');
     }
+
+    # Close the handle down, so the client can go on their merry way
+    # XXX TODO FIXME: Doing this causes tests to explode with "message
+    # type 0x32 arrived from server while idle", which is a mesage
+    # from Postgres.  It's unclear why Pg cares that we closed STDOUT,
+    # but this yak is too big to shave right now.
+    #close STDOUT unless Jifty->web->request->is_subrequest;
 
     # Cleanup
     $self->_handle_stage('CLEANUP');
@@ -903,9 +923,8 @@ sub _match {
     elsif ( ref($cond) eq 'HASH' ) {
         local $@;
         my $rv = eval {
-            for my $key ( sort keys %$cond )
+            for my $key ( sort grep {length} keys %$cond )
             {
-                next if $key eq '';
                 my $meth = "_match_$key";
                 $self->$meth( $cond->{$key} ) or return;
             }
@@ -940,8 +959,8 @@ came in with that method.
 
 sub _match_method {
     my ( $self, $method ) = @_;
-    #$self->log->debug("Matching URL $ENV{REQUEST_METHOD} against ".$method);
-    lc( $ENV{REQUEST_METHOD} ) eq lc($method);
+    #$self->log->debug("Matching method ".request->request_method." against ".$method);
+    $Request->request_method eq uc($method);
 }
 
 =head2 _match_https
@@ -1167,8 +1186,14 @@ sub _unescape {
 
 =head2 template_exists PATH
 
-Returns true if PATH is a valid template inside your template root. This checks
-for both Template::Declare and HTML::Mason Templates.
+Returns true if PATH is a valid template inside your template
+root. This checks for both Template::Declare and HTML::Mason
+Templates.  Specifically, returns a reference to the handler which can
+process the template.
+
+If PATH is a I<reference> to the path, it will update the path to
+append C</index.html> if the path in question doesn't exist, bit the
+index does.
 
 =cut
 
@@ -1176,9 +1201,12 @@ sub template_exists {
     my $self     = shift;
     my $template = shift;
 
-    foreach my $handler ( Jifty->handler->view_handlers) {
-        if ( Jifty->handler->view($handler)->template_exists($template) ) {
-            return 1;
+    my $value = ref $template ? $$template : $template;
+
+    foreach my $handler ( map {Jifty->handler->view($_)} Jifty->handler->view_handlers ) {
+        if ( my $path = $handler->template_exists($value) ) {
+            $$template = $path if ref $template;
+            return $handler;
         }
     }
     return undef;
@@ -1187,40 +1215,62 @@ sub template_exists {
 
 =head2 render_template PATH
 
-Use our templating system to render a template. If there's an error, do the
-right thing. If the same 'PATH' is found in both Template::Declare and
-HTML::Mason templates then the T::D template is used.
+Use our templating system to render a template.  Searches through
+L<Jifty::Handler/view_handlers> to find the first handler which
+provides the given template, and caches the handler for future
+requests.
 
+Catches errors, and redirects to C</errors/500>; also shows
+C</errors/404> if the template cannot be found.
 
 =cut
 
 sub render_template {
     my $self     = shift;
     my $template = shift;
-    my $showed   = 0;
+    my $handler;
+
+    # Look for a possible handler, and cache it for future requests.
+    # With DevelMode, always look it up.
+    if ( not exists $TEMPLATE_CACHE{$template} or Jifty->config->framework('DevelMode')) {
+        my $found = $template;
+        $handler = $self->template_exists( \$found );
+        # We don't cache failing URLs, so clients' can't cause us to
+        # chew up memory by requesting 404's
+        $TEMPLATE_CACHE{$template} = [ $found, $handler ] if $handler;
+    }
+
+    # Dig out the actual template (which could have a "/index.html" on
+    # it, or what have you) and its handler.
+    ($template, $handler) = @{$TEMPLATE_CACHE{$template} || [$template, undef] };
+
+    # Handle 404's
+    unless ($handler) {
+        return $self->render_template("/errors/404") unless defined $template and $template eq "/errors/404";
+        $self->log->warn("Can't find 404 page!");
+        $self->_abort;
+    }
+
+    my $start_depth = Jifty->handler->buffer->depth;
     eval {
-        foreach my $handler ( Jifty->handler->view_handlers ) {
-            my $handler_class = Jifty->handler->view($handler);
-            if ( $handler_class->template_exists($template) ) {
-                $handler_class->show($template);
-                $showed = 1;
-                last;
-            }
-        }
-        if ( not $showed and my $fallback_handler = Jifty->handler->fallback_view_handler ) {
-            $fallback_handler->show($template);
-        }
+        $handler->show($template);
     };
 
-    my $err = $@;
     # Handle parse errors
-    $self->log->fatal("view class error: $err") if $err;
-    if ( $err and not eval { $err->isa('HTML::Mason::Exception::Abort') } ) {
-        if ($template eq '/__jifty/error/mason_internal_error') {
-            $self->log->debug("can't render internal_error: $err");
+    my $err = $@;
+    if ( $err and not (eval { $err->isa('HTML::Mason::Exception::Abort') } or $err =~ /^ABORT/) ) {
+        $self->log->fatal("View error: $err") if $err;
+        if ($template eq '/errors/500') {
+            $self->log->warn("Can't render internal_error: $err");
+            # XXX Built-in static "oh noes" page?
             $self->_abort;
             return;
         }
+
+        # XXX: This may leave a half-written tag open
+        $err->template_stack;
+        Jifty->handler->buffer->pop while Jifty->handler->buffer->depth > $start_depth;
+
         # Save the request away, and redirect to an error page
         Jifty->web->response->error($err);
         my $c = Jifty::Continuation->new(
@@ -1228,11 +1278,11 @@ sub render_template {
             response => Jifty->web->response,
             parent   => Jifty->web->request->continuation,
         );
-
         # Redirect with a continuation
-        Jifty->web->_redirect( "/__jifty/error/mason_internal_error?J:C=" . $c->id );
+        Jifty->web->_redirect( "/errors/500?J:C=" . $c->id );
     } elsif ($err) {
-        die $err;
+        Jifty->handler->buffer->pop while Jifty->handler->buffer->depth > $start_depth;
+        $self->_abort;
     }
 }
 
@@ -1251,7 +1301,7 @@ sub import_plugins {
     push @deferred, $_->dispatcher->rules('DEFERRED') for Jifty->plugins;
     push @deferred, $self->rules('DEFERRED');
 
-    # XXX TODO: Examine @deferred and find rles that cannot fire
+    # XXX TODO: Examine @deferred and find rules that cannot fire
     # because they match no plugins; they should become un-deferred in
     # the appropriate group.  This is so 'before plugin qr/Auth/' runs
     # even if we have no auth plugin

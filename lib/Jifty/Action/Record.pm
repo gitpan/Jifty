@@ -15,8 +15,9 @@ method of L<Jifty::Action> so that you don't need to bother.
 
 To actually use this class, you probably want to inherit from one of
 L<Jifty::Action::Record::Create>, L<Jifty::Action::Record::Update>, or
-L<Jifty::Action::Record::Delete> and override the C<record_class>
-method.
+L<Jifty::Action::Record::Delete>.  You may need to override the
+L</record_class> method, if Jifty cannot determine the record class of
+this action.
 
 =cut
 
@@ -27,8 +28,9 @@ use Clone qw/clone/;
 
 __PACKAGE__->mk_accessors(qw(record _cached_arguments));
 
-our $ARGUMENT_PROTOTYPE_CACHE = {};
+use constant report_detailed_messages => 1;
 
+our $ARGUMENT_PROTOTYPE_CACHE = {};
 
 =head1 METHODS
 
@@ -43,13 +45,32 @@ This method can either be overridden to return a string specifying the
 name of the record class, or the name of the class can be passed to
 the constructor.
 
+=head2 report_detailed_messages
+
+If the action returns true for C<report_detailed_message>, report the
+message returned by the model classes as the resulting message.  For
+Update actions, Put the per-field message in C<detailed_messages>
+field of action result content.  The default is false.
+
 =cut
 
 sub record_class {
     my $self = shift;
-    my $class = ref $self;
-    my $hint = $class eq __PACKAGE__ ? "" : " (did you forget to override record_class in $class?)";
-    $self->log->fatal("Jifty::Action::Record must be subclassed to be used" .  $hint);
+    return $self->{record_class} ||= do {
+        my $class = ref($self);
+        my $model;
+        if ($class =~ /::(Create|Search|Execute|Update|Delete)([^:]+)$/) {
+            $model = Jifty->app_class( Model => $2 );
+            undef $model unless grep {$_ eq $model} Jifty->class_loader->models;
+        }
+
+        if ($class eq "Jifty::Action::Record") {
+            $self->log->fatal("Jifty::Action::Record must be subclassed to be used");
+        } elsif (not $model) {
+            $self->log->fatal("Cannot determine model for Jifty::Action::Record subclass $class");
+        }
+        $model
+    };
 }
 
 =head2 new PARAMHASH
@@ -72,9 +93,8 @@ sub new {
 
     my $self = $class->SUPER::new(%args);
 
-    # Load the associated record class just in case it hasn't been already
+    # Look up the record class
     my $record_class = $self->record_class;
-    Jifty::Util->require($record_class);
 
     # Die if we were given a record that wasn't a record
     if (ref $args{'record'} && !$args{'record'}->isa($record_class)) {
@@ -103,9 +123,9 @@ sub new {
         my %given_pks = ();
         for my $pk ( @{ $self->record->_primary_keys } ) {
             $given_pks{$pk} = $self->argument_value($pk)
-                if defined $self->argument_value($pk);
+                if defined $self->argument_value($pk) && ($self->argument_value($pk) ne '');
         }
-        $self->record->load_by_primary_keys(%given_pks) if %given_pks;
+        $self->record->load_by_primary_keys(%given_pks) if keys %given_pks;
     }
 
     return $self;
@@ -141,12 +161,12 @@ sub arguments {
 
     # Don't do this twice, it's too expensive
     unless ( $self->_cached_arguments ) {
-        $ARGUMENT_PROTOTYPE_CACHE->{ ref($self) } ||= $self->_build_class_arguments();
-        $self->_cached_arguments( $self->_fill_in_argument_record_data());
+        $ARGUMENT_PROTOTYPE_CACHE->{ ref($self) }
+            ||= $self->_build_class_arguments();
+        $self->_cached_arguments( $self->_fill_in_argument_record_data() );
     }
     return $self->_cached_arguments();
 }
-
 
 sub _fill_in_argument_record_data {
     my $self = shift;
@@ -160,38 +180,31 @@ sub _fill_in_argument_record_data {
             Scalar::Util::weaken $weakself;
             $arguments->{$field}->{default_value} = defer {
                 my $val = $function->( $weakself->record );
+
                 # If the current value is actually a pointer to
                 # another object, turn it into an ID
-                return $val->id if (blessed($val) and $val->isa('Jifty::Record'));
+                return $val->id
+                    if ( blessed($val) and $val->isa('Jifty::Record') );
                 return $val;
             }
         }
+
         # The record's current value becomes the widget's default value
     }
     return $arguments;
 }
-
 
 sub _build_class_arguments {
     my $self = shift;
 
     # Get ready to rumble
     my $field_info = {};
-    my @fields     = $self->possible_fields;
+    my @columns    = $self->possible_columns;
 
     # we use a while here because we may be modifying the fields on the fly.
-    while ( my $field = shift @fields ) {
-        my $info = {};
-        my $column;
-
-        # The field is a column object, adjust to that
-        if ( ref $field ) {
-            $column = $field;
-        } else {
-            $column = $self->record->column($field);
-        }
-
-        $field = $column->name;
+    while ( my $column = shift @columns ) {
+        my $info  = {};
+        my $field = $column->name;
 
         # Canonicalize the render_as setting for the column
         my $render_as = lc( $column->render_as || '' );
@@ -240,12 +253,16 @@ sub _build_class_arguments {
             if ( UNIVERSAL::isa( $refers_to, 'Jifty::Record' ) ) {
                 $info->{render_as} = $render_as || 'Select';
 
-                $info->{render_as} = 'Text' unless $column->refers_to->enumerable;
+                $info->{render_as} = 'Text'
+                    unless $column->refers_to->enumerable;
             }
 
             # If it's a select box, setup the available values
-            if ( UNIVERSAL::isa( $refers_to, 'Jifty::Record' ) && $info->{render_as} eq 'Select' ) {
-                $info->{'valid_values'} = $self->_default_valid_values( $column, $refers_to );
+            if ( UNIVERSAL::isa( $refers_to, 'Jifty::Record' )
+                && $info->{render_as} eq 'Select' )
+            {
+                $info->{'valid_values'}
+                    = $self->_default_valid_values( $column, $refers_to );
             }
 
             # If the reference is X-to-many instead, skip it
@@ -260,28 +277,32 @@ sub _build_class_arguments {
                 # developer know what he/she is doing.
                 # So we just render it as whatever specified.
 
-                # XXX TODO -  the next line seems to be a "next" which meeant to just fall through the else
-            # next unless $render_as;
+# XXX TODO -  the next line seems to be a "next" which meeant to just fall through the else
+# next unless $render_as;
             }
         }
 
         #########
 
         $info->{'autocompleter'} ||= $self->_argument_autocompleter($column);
-        my ( $validator, $ajax_validates ) = $self->_argument_validator($column);
+        my ( $validator, $ajax_validates )
+            = $self->_argument_validator($column);
         $info->{validator}      ||= $validator;
         $info->{ajax_validates} ||= $ajax_validates;
-        my ( $canonicalizer, $ajax_canonicalizes ) = $self->_argument_canonicalizer($column);
+        my ( $canonicalizer, $ajax_canonicalizes )
+            = $self->_argument_canonicalizer($column);
         $info->{'canonicalizer'}      ||= $canonicalizer;
         $info->{'ajax_canonicalizes'} ||= $ajax_canonicalizes;
 
         # If we're hand-coding a render_as, hints or label, let's use it.
-        for ( qw(render_as label hints max_length mandatory sort_order container documentation)) {
+        for (
+            qw(render_as label hints max_length mandatory sort_order container documentation)
+            )
+        {
             if ( defined( my $val = $column->$_ ) ) {
                 $info->{$_} = $val;
             }
         }
-
 
         $field_info->{$field} = $info;
     }
@@ -315,13 +336,11 @@ sub _build_class_arguments {
     }
 }
 
-
-
 sub _argument_validator {
     my $self    = shift;
     my $column  = shift;
     my $field   = $column->name;
-    my $do_ajax = 0;
+    my $do_ajax = $column->attributes->{ajax_validates};
     my $method;
 
     # Figure out what the action's validation method would for this field
@@ -337,7 +356,7 @@ sub _argument_validator {
 
             # Check the column's validator
             my ( $is_valid, $message )
-                = &{ $column->validator }( $self->record, $value );
+                = &{ $column->validator }( $self->record, $value, @_ );
 
             # The validator reported valid, return OK
             return $self->validation_ok($field) if ($is_valid);
@@ -348,24 +367,30 @@ sub _argument_validator {
                     qq{Schema validator for $field didn't explain why the value '$value' is invalid}
                 );
             }
-            return ( $self->validation_error( $field => ( $message || _( "That doesn't look right, but I don't know why"))));
+            return (
+                $self->validation_error(
+                    $field => (
+                        $message || _(
+                            "That doesn't look right, but I don't know why")
+                    )
+                )
+            );
             }
     }
 
     return ( $method, $do_ajax );
 }
 
-
 sub _argument_canonicalizer {
-    my $self   = shift;
-    my $column = shift;
-    my $field  = $column->name;
+    my $self    = shift;
+    my $column  = shift;
+    my $field   = $column->name;
+    my $do_ajax = $column->attributes->{ajax_canonicalizes};
     my $method;
-    my $do_ajax = 0;
 
     # Add a canonicalizer for the column if the record provides one
     if ( $self->record->has_canonicalizer_for_column($field) ) {
-        $do_ajax = 1 unless lc($column->render_as) eq 'checkbox';
+        $do_ajax = 1 unless defined $column->render_as and lc( $column->render_as ) eq 'checkbox';
         $method ||= sub {
             my ( $self, $value ) = @_;
             return $self->record->run_canonicalization_for_column(
@@ -376,43 +401,44 @@ sub _argument_canonicalizer {
     }
 
     # Otherwise, if it's a date, we have a built-in canonicalizer for that
-    elsif ( lc( $column->render_as ) eq 'date' ) {
+    elsif ( defined $column->render_as and lc( $column->render_as ) eq 'date' ) {
         $do_ajax = 1;
     }
     return ( $method, $do_ajax );
 }
 
 sub _argument_autocompleter {
-    my $self = shift;
+    my $self   = shift;
     my $column = shift;
     my $field  = $column->name;
 
     my $autocomplete;
 
-        # What would the autocomplete method be for this column in the record
-        my $autocomplete_method = "autocomplete_" . $field;
+    # What would the autocomplete method be for this column in the record
+    my $autocomplete_method = "autocomplete_" . $field;
 
-        # Set the autocompleter if the record has one
-        if ( $self->record->can($autocomplete_method) ) {
-            $autocomplete ||= sub {
-                my ( $self, $value ) = @_;
-                my %columns;
-                $columns{$_} = $self->argument_value($_) for grep { $_ ne $field } $self->possible_fields;
-                return $self->record->$autocomplete_method( $value, %columns );
-            };
-        }
-
-        # The column requests an automagically generated autocompleter, which
-        # is baed upon the values available in the field
-        elsif ($column->autocompleted) {
-            # Auto-generated autocompleter
-            $autocomplete ||=  sub {  $self->_default_autocompleter(shift , $field)};
-            
-        }
-        return $autocomplete;
-
+    # Set the autocompleter if the record has one
+    if ( $self->record->can($autocomplete_method) ) {
+        $autocomplete ||= sub {
+            my ( $self, $value ) = @_;
+            my %columns;
+            $columns{$_} = $self->argument_value($_)
+                for grep { $_ ne $field } $self->possible_fields;
+            return $self->record->$autocomplete_method( $value, %columns );
+        };
     }
 
+    # The column requests an automagically generated autocompleter, which
+    # is baed upon the values available in the field
+    elsif ( $column->autocompleted ) {
+
+        # Auto-generated autocompleter
+        $autocomplete
+            ||= sub { $self->_default_autocompleter( shift, $field ) };
+
+    }
+    return $autocomplete;
+}
 
 sub _default_valid_values {
     my $self      = shift;
@@ -440,9 +466,12 @@ sub _default_valid_values {
             collection   => $collection
         }
     );
-    unshift @valid, {
+    unshift @valid,
+        {
         display => _('no value'),
-        value   => '' } unless $column->mandatory;
+        value   => ''
+        }
+        unless $column->mandatory;
     return \@valid;
 
 }
@@ -497,17 +526,35 @@ sub _default_autocompleter {
     return @choices;
 }
 
+=head2 possible_columns
+
+Returns the list of columns objects on the object that the action
+can update. This defaults to all of the C<containers> or the non-C<private>,
+non-C<virtual> and non-C<serial> columns of the object.
+
+=cut
+
+sub possible_columns {
+    my $self = shift;
+    return grep {
+        $_->container
+            or ( !$_->private and !$_->virtual and $_->type ne "serial" )
+    } $self->record->columns;
+}
 
 =head2 possible_fields
 
-Returns the list of fields on the object that the action can update.
-This defaults to all of the non-C<private> fields of the object.
+Returns the list of the L</possible_columns>' names.
+
+Usually at the end names are required, however for subclassing column objects
+are better, or this method in a subclass turns out to be "map to column" -
+"filter" - "map to name" chain.
 
 =cut
 
 sub possible_fields {
     my $self = shift;
-    return map { $_->name } grep { $_->container or ($_->type ne "serial" and !$_->private and !$_->virtual) } $self->record->columns;
+    return map { $_->name } $self->possible_columns;
 }
 
 =head2 take_action
@@ -530,27 +577,28 @@ sub _setup_event_before_action {
     # Setup the information regarding the event for later publishing
     my $event_info = {};
     $event_info->{as_hash_before} = $self->record->as_hash;
-    $event_info->{record_id} = $self->record->id;
-    $event_info->{record_class} = ref($self->record);
-    $event_info->{action_class} = ref($self);
-    $event_info->{action_arguments} = $self->argument_values; # XXX does this work?
+    $event_info->{record_id}      = $self->record->id;
+    $event_info->{record_class}   = ref( $self->record );
+    $event_info->{action_class}   = ref($self);
+    $event_info->{action_arguments}
+        = $self->argument_values;    # XXX does this work?
     $event_info->{current_user_id} = $self->current_user->id || 0;
     return ($event_info);
 }
 
 sub _setup_event_after_action {
-    my $self = shift;
+    my $self       = shift;
     my $event_info = shift;
 
-    unless (defined $event_info->{record_id}) {
-        $event_info->{record_id} = $self->record->id;
-        $event_info->{record_class} = ref($self->record);
+    unless ( defined $event_info->{record_id} ) {
+        $event_info->{record_id}    = $self->record->id;
+        $event_info->{record_class} = ref( $self->record );
         $event_info->{action_class} = ref($self);
     }
 
     # Add a few more bits about the result
-    $event_info->{result} = $self->result;    
-    $event_info->{timestamp} = time(); 
+    $event_info->{result}        = $self->result;
+    $event_info->{timestamp}     = time();
     $event_info->{as_hash_after} = $self->record->as_hash;
 
     # Publish the event

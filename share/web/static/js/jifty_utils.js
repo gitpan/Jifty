@@ -42,7 +42,7 @@ Jifty.Utils = {
         while ( parent ) {
             if ( !parent.style ) break;
             
-            var pos = Element.getStyle( parent, "position" );
+            var pos = jQuery(parent).css("position");
             if ( pos == "relative" || pos == "absolute" ) {
                 parentx = Jifty.Utils.findPosX( parent );
                 break;
@@ -60,7 +60,7 @@ Jifty.Utils = {
         while ( parent ) {
             if ( !parent.style ) break;
             
-            var pos = Element.getStyle( parent, "position" );
+            var pos = jQuery(parent).css("position");
             if ( pos == "relative" || pos == "absolute" ) {
                 parenty = Jifty.Utils.findPosY( parent );
                 break;
@@ -129,7 +129,7 @@ Jifty.Utils = {
     },
 
     scrollToShow: function(id) {
-        var ul        = $(id);
+        var ul        = Jifty.$(id);
         var y         = Jifty.Utils.findPosY( ul ) + ul.offsetHeight + 10;
         var scrollTop = Jifty.Utils.getScrollTop();
         var screen    = Jifty.Utils.findScreenHeight() + scrollTop;
@@ -137,6 +137,10 @@ Jifty.Utils = {
         
         if ( diff > 0 )
              Jifty.SmoothScroll.scrollTo( scrollTop + diff );
+    },
+
+    stripScripts: function(str) {
+        return str.replace(/<script(.|\s)*?\/script>/g, "");
     }
 };
 

@@ -36,7 +36,7 @@ sub arguments {
     my $arguments = $self->SUPER::arguments(@_);
 
     # Mark read-only columns for read-only display
-    for my $column ( map {$self->record->column($_)} $self->possible_fields ) {
+    for my $column ( $self->possible_columns ) {
         if ( not $column->writable and $column->readable ) {
             $arguments->{$column->name}{'render_mode'} = 'read';
         }
@@ -50,7 +50,16 @@ sub arguments {
         $arguments->{$pk}{'render_as'} = 'Unrendered'; 
         # primary key fields should always be hidden fields
     }
-    return $arguments;
+    
+    if ( $self->can('PARAMS') ) {
+        use Jifty::Param::Schema;
+        return Jifty::Param::Schema::merge_params(
+            $arguments, ($self->PARAMS || {})
+        );
+    }
+    else {
+        return $arguments;
+    }
 }
 
 =head2 validate_arguments
@@ -92,6 +101,8 @@ sub take_action {
     # Prepare the event for later publishing
     my $event_info = $self->_setup_event_before_action();
 
+    my $detailed_messages = {};
+
     # Iterate through all the possible arguments
     for my $field ( $self->argument_names ) {
 
@@ -114,7 +125,8 @@ sub take_action {
             and defined $value and $value eq '' );
 
         # Skip file uploads if blank
-        next if lc $self->arguments->{$field}{render_as} eq "upload"
+        next if defined $self->arguments->{$field}{render_as}
+          and lc $self->arguments->{$field}{render_as} eq "upload"
           and (not defined $value or not ref $value);
 
         # Handle file uploads
@@ -175,16 +187,22 @@ sub take_action {
         # Calculate the name of the setter and set; asplode on failure
         my $setter = "set_$field";
         my ( $val, $msg ) = $self->record->$setter( $value );
-        $self->result->field_error($field, $msg || _('Permission denied'))
-          if not $val;
-
-        # Remember that we changed something (if we did)
-        $changed = 1 if $val;
+        if ($val) {
+            # Remember that we changed something (if we did)
+            $changed = 1;
+            $detailed_messages->{$field} = $msg;
+        }
+        else {
+            $self->result->field_error($field, $msg || _('Permission denied'));
+        }
     }
 
     # Report success if there's a change and no error, otherwise say nah-thing
     $self->report_success
       if $changed and not $self->result->failure;
+
+    $self->result->content( detailed_messages => $detailed_messages )
+        if $self->report_detailed_messages;
 
     # Publish the update event
     $self->_setup_event_after_action($event_info);
@@ -206,17 +224,16 @@ sub report_success {
 }
 
 
-=head2 possible_fields
+=head2 possible_columns
 
 Update actions do not provide fields for columns marked as C<private>
 or C<protected>.
 
 =cut
 
-sub possible_fields {
+sub possible_columns {
     my $self = shift;
-    my @names = $self->SUPER::possible_fields;
-    return map {$_->name} grep {not $_->protected} map {$self->record->column($_)} @names;
+    return grep { not $_->protected } $self->SUPER::possible_columns;
 }
 
 =head1 SEE ALSO

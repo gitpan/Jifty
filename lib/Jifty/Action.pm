@@ -479,46 +479,47 @@ sub _form_widget {
     # This particular field hasn't been added to the form yet
     if ( not exists $self->{_private_form_fields_hash}{$arg_name} ) {
         my $field_info = $self->arguments->{$field};
-        my $sticky = 0;
+        # The field name is not known by this action
+        unless ($field_info) {
+            local $Log::Log4perl::caller_depth += 2;
+            $self->log->warn("$field isn't a valid field for $self");
+            return;
+        }
+        # It is in fact a form field for this action
 
-        # Check stickiness iff the values came from the request
-        if (Jifty->web->response->result($self->moniker)) {
+        my $sticky = 0;
+        # $sticky can be overriden per-parameter
+        if ( defined $field_info->{sticky} ) {
+            $sticky = $field_info->{sticky};
+        }
+        # Check stickiness if the values came from the request
+        elsif (Jifty->web->response->result($self->moniker)) {
             $sticky = 1 if $self->sticky_on_failure and $self->result->failure;
             $sticky = 1 if $self->sticky_on_success and $self->result->success;
         }
 
-        # $sticky can be overrided per-parameter
-        $sticky = $field_info->{sticky} if defined $field_info->{sticky};
 
-        # It is in fact a form field for this action
-        if ($field_info) {
-            
-            # form_fields overrides stickiness of what the user last entered.
-            my $default_value;
-            $default_value = $field_info->{'default_value'}
-              if exists $field_info->{'default_value'};
-            $default_value = $self->argument_value($field)
-              if $self->has_argument($field) && !$self->values_from_request->{$field};
+        # form_fields overrides stickiness of what the user last entered.
+        my $default_value;
+        $default_value = $field_info->{'default_value'}
+          if exists $field_info->{'default_value'};
+        $default_value = $self->argument_value($field)
+          if $self->has_argument($field) && !$self->values_from_request->{$field};
 
-            # Add the form field to the cache
-            $self->{_private_form_fields_hash}{$arg_name}
-                = Jifty::Web::Form::Field->new(
-                %$field_info,
-                action        => $self,
-                name          => $field,
-                sticky        => $sticky,
-                sticky_value  => $self->argument_value($field),
-                default_value => $default_value,
-                render_mode   => $args{'render_mode'},
-                %args
-                );
+        # Add the form field to the cache
+        $self->{_private_form_fields_hash}{$arg_name}
+            = Jifty::Web::Form::Field->new(
+            %$field_info,
+            action        => $self,
+            name          => $field,
+            sticky        => $sticky,
+            sticky_value  => $self->argument_value($field),
+            default_value => $default_value,
+            render_mode   => $args{'render_mode'},
+            %args
+            );
 
-        }    
 
-        # The field name is not known by this action
-        else {
-            Jifty->log->warn("$arg_name isn't a valid field for $self");
-        }
     } 
     # It has been cached, but render_as is explicitly set
     elsif ( my $widget = $args{render_as} ) {
@@ -950,18 +951,10 @@ sub _validate_argument {
     }
 
     # If we have a set of allowed values, let's check that out.
-    # XXX TODO this should be a validate_valid_values sub
     if ( $value && $field_info->{valid_values} ) {
-
-        # If you're not on the list, you can't come to the party
-        unless ( grep {defined $_->{'value'} and $_->{'value'} eq $value}
-            @{ $self->valid_values($field) } ) {
-
-            return $self->validation_error(
-                $field => _("That doesn't look like a correct value") );
-        }
-
-   # ... but still check through a validator function even if it's in the list
+        $self->_validate_valid_values($field => $value);
+        # ... but still check through a validator function even if it's in the list
+        return if $self->result->field_error($field);
     }
 
     # the validator method name is validate_$field
@@ -971,12 +964,17 @@ sub _validate_argument {
     if ( $field_info->{validator}
         and defined &{ $field_info->{validator} } )
     {
-        return $field_info->{validator}->( $self, $value );
+        return $field_info->{validator}->( $self, $value, $self->argument_values );
     }
 
     # Check to see if it's the validate_$field method instead and use that
     elsif ( $self->can($default_validator) ) {
-        return $self->$default_validator( $value );
+        return $self->$default_validator( $value, $self->argument_values );
+    }
+
+    # Check if we already have a failure for it, from some other field
+    elsif ( $self->result->field_error($field) or $self->result->field_warning($field) ) {
+        return 0;
     }
 
     # If none of the checks have failed so far, then it's ok
@@ -1052,6 +1050,22 @@ sub valid_values {
     $self->_values_for_field( $field => 'valid' );
 }
 
+sub _validate_valid_values {
+    my $self  = shift;
+    my $field = shift;
+    my $value = shift;
+
+    # If you're not on the list, you can't come to the party
+    unless ( grep {defined $_->{'value'} and $_->{'value'} eq $value}
+        @{ $self->valid_values($field) } ) {
+
+        return $self->validation_error(
+            $field => _("That doesn't look like a correct value") );
+    }
+
+    return 1;
+}
+
 =head2 available_values ARGUMENT
 
 Just like L<valid_values>, but if our action has a set of available
@@ -1098,6 +1112,15 @@ sub _values_for_field {
                 my $disp = $v->{'display_from'};
                 my $val  = $v->{'value_from'};
 
+                if ($v->{'collection'}->count) {
+                    unless ($v->{'collection'}->first->can($disp)) {
+                        $self->log->error("Invalid 'display_from' of $disp on $field");
+                    }
+                    unless ($v->{'collection'}->first->can($val)) {
+                        $self->log->error("Invalid 'value_from' of $val on $field");
+                    }
+                }
+
                 # XXX TODO: wrap this in an eval?
 
                 # Fetch all the record from the given collection and keep'em
@@ -1129,63 +1152,73 @@ sub _values_for_field {
     return $vv;
 }
 
-=head2 validation_error ARGUMENT => ERROR TEXT
+=head2 validation_error ARGUMENT => ERROR TEXT, [OPTIONS]
 
 Used to report an error during validation.  Inside a validator you
 should write:
 
   return $self->validation_error( $field => "error");
 
-..where C<$field> is the name of the argument which is at fault.
+..where C<$field> is the name of the argument which is at fault.  Any
+extra C<OPTIONS> are passed through to L<Jifty::Result/field_error>.
 
 =cut
 
 sub validation_error {
     my $self = shift;
-    my $field = shift;
-    my $error = shift;
-  
-    $self->result->field_error($field => $error); 
-  
+    my ($field, $error, %args) = @_;
+    $self->log->warn("No such field '$field' -- did you forget to specify a field?")
+        unless $self->arguments->{$field};
+
+    $self->result->field_error($field => $error, %args);
+
     return 0;
 }
 
-=head2 validation_warning ARGUMENT => WARNING TEXT
+=head2 validation_warning ARGUMENT => WARNING TEXT, [OPTIONS]
 
 Used to report a warning during validation.  Inside a validator you
 should write:
 
   return $self->validation_warning( $field => _("warning"));
 
-..where C<$field> is the name of the argument which is at fault.
+..where C<$field> is the name of the argument which is at fault.  Any
+extra C<OPTIONS> are passed through to L<Jifty::Result/field_warning>.
 
 =cut
 
 sub validation_warning {
     my $self = shift;
-    my $field = shift;
-    my $warning = shift;
-  
-    $self->result->field_warning($field => $warning); 
-  
+    my ($field, $warning, %args) = @_;
+    $self->log->warn("No such field '$field' -- did you forget to specify a field?")
+        unless $self->arguments->{$field};
+
+    $self->result->field_warning($field => $warning, %args); 
+
     return 0;
 }
 
-=head2 validation_ok ARGUMENT
+=head2 validation_ok ARGUMENT, [OPTIONS]
 
 Used to report that a field B<does> validate.  Inside a validator you
 should write:
 
   return $self->validation_ok($field);
 
+Any extra C<OPTIONS> are passed through to
+L<Jifty::Result/field_warning> and L<Jifty::Result/field_error> when
+unsetting them.
+
 =cut
 
 sub validation_ok {
     my $self = shift;
-    my $field = shift;
+    my ($field, %args) = @_;
+    $self->log->warn("No such field '$field' -- did you forget to specify a field?")
+        unless $self->arguments->{$field};
 
-    $self->result->field_error($field => undef);
-    $self->result->field_warning($field => undef);
+    $self->result->field_error($field => undef, %args);
+    $self->result->field_warning($field => undef, %args);
 
     return 1;
 }

@@ -9,11 +9,7 @@ This is a template for your own tests. Copy it and modify it.
 
 =cut
 
-
-use lib 't/lib';
-use Jifty::SubTest;
-
-use Jifty::Test tests => 79;
+use Jifty::Test::Dist tests => 78;
 use Jifty::Test::WWW::Mechanize;
 
 my $server  = Jifty::Test->make_server;
@@ -34,7 +30,7 @@ ok( $u1->id );
 
 $mech->get_ok("$URL/=/model.yml", "Got model list");
 my $list = Jifty::YAML::Load($mech->content);
-is(scalar @$list, 2, "Got one model");
+is(scalar @$list, 2, "Got two models");
 is($list->[0],'TestApp.Plugin.REST.Model.Group');
 is($list->[1],'TestApp.Plugin.REST.Model.User');
 
@@ -81,6 +77,13 @@ is(get_content(), 'test@example.com');
 # on PUT    '/=/model/*/*/*' => \&replace_item;
 # on DELETE '/=/model/*/*/*' => \&delete_item;
 
+# on POST   '/=/model/*'     => \&create_item;
+$mech->post( $URL . '/=/model/User', { name => "moose", email => 'moose@example.com' } );
+is($mech->status, 200, "create via POST to model worked");
+
+my $response = $mech->post( $URL . '/=/model/Group', { } );
+ok(!$response->is_success, "create via POST to model with disallowed create action failed");
+
 # on GET    '/=/search/*/**' => \&search_items;
 $mech->get_ok('/=/search/user/id/1.yml');
 my $content = get_content();
@@ -105,19 +108,16 @@ is_deeply($content, []);
 # on GET    '/=/action'      => \&list_actions;
 
 my @actions = qw(
-                 TestApp.Plugin.REST.Action.CreateGroup
                  TestApp.Plugin.REST.Action.UpdateGroup
                  TestApp.Plugin.REST.Action.DeleteGroup
                  TestApp.Plugin.REST.Action.SearchGroup
+                 TestApp.Plugin.REST.Action.ExecuteGroup
                  TestApp.Plugin.REST.Action.CreateUser
                  TestApp.Plugin.REST.Action.UpdateUser
                  TestApp.Plugin.REST.Action.DeleteUser
                  TestApp.Plugin.REST.Action.SearchUser
+                 TestApp.Plugin.REST.Action.ExecuteUser
                  TestApp.Plugin.REST.Action.DoSomething
-                 TestApp.Plugin.REST.Action.Record.Create
-                 TestApp.Plugin.REST.Action.Record.Delete
-                 TestApp.Plugin.REST.Action.Record.Search
-                 TestApp.Plugin.REST.Action.Record.Update
                  Jifty.Action.Autocomplete
                  Jifty.Action.Redirect);
 

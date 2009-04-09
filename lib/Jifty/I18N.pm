@@ -6,7 +6,6 @@ use base 'Locale::Maketext';
 use Locale::Maketext::Lexicon ();
 use Email::MIME::ContentType;
 use Encode::Guess qw(iso-8859-1);
-use File::ShareDir 'module_dir';
 use Jifty::Util;
 
 =head1 NAME
@@ -95,6 +94,16 @@ sub new {
     $DynamicLH = \$lh unless @$lang; 
     $self->init;
 
+    __PACKAGE__->install_global_loc($DynamicLH);
+    return $self;
+}
+
+=head2 install_global_loc
+
+=cut
+
+sub install_global_loc {
+    my ($class, $dlh) = @_;
     my $loc_method = sub {
         # Retain compatibility with people using "-e _" etc.
         return \*_ unless @_; # Needed for perl 5.8
@@ -107,7 +116,7 @@ sub new {
         # Force stringification to stop Locale::Maketext from choking on
         # things like DateTime objects.
         my @stringified_args = map {"$_"} @_;
-        my $result = eval { $lh->maketext(@stringified_args) };
+        my $result = eval { ${$dlh}->maketext(@stringified_args) };
         if ($@) {
             warn $@;
             # Sometimes Locale::Maketext fails to localize a string and throws
@@ -122,7 +131,6 @@ sub new {
         no warnings 'redefine';
         *_ = $loc_method;
     }
-    return $self;
 }
 
 =head2 available_languages
@@ -157,6 +165,10 @@ sub _get_file_patterns {
         push @ret, $dir ;
     }
 
+    # Unique-ify paths
+    my %seen;
+    @ret = grep {not $seen{$_}++} @ret;
+
     return ( map { $_ . '/*.po' } @ret );
 }
 
@@ -169,7 +181,9 @@ Get the language handle for this request.
 sub get_language_handle {
     # XXX: subrequest should not need to get_handle again.
     my $self = shift;
-    my $lang = Jifty->web->session->get('jifty_lang');
+    # optional argument makes it easy to disable I18N
+    # while comparing test strings (without loading session)
+    my $lang = shift || Jifty->web->session->get('jifty_lang');
     $$DynamicLH = $self->get_handle($lang ? $lang : ()) if $DynamicLH;
 }
 
@@ -196,6 +210,18 @@ are modified on disk.
 
 my $LAST_MODIFED = '';
 sub refresh {
+    if ( Jifty->config->framework('L10N')->{'Disable'} && !$loaded) {
+        # skip loading po, but still do the translation for maketext
+        require Locale::Maketext::Lexicon;
+        my $lh = __PACKAGE__->get_handle;
+        my $orig = Jifty::I18N::en->can('maketext');
+        no warnings 'redefine';
+        *Jifty::I18N::en::maketext = Locale::Maketext::Lexicon->_style_gettext($orig);
+        __PACKAGE__->install_global_loc(\$lh);
+        ++$loaded;
+        return;
+    }
+
     my $modified = join(
         ',',
         #   sort map { $_ => -M $_ } map { glob("$_/*.po") } ( Jifty->config->framework('L10N')->{'PoDir'}, Jifty->config->framework('L10N')->{'DefaultPoDir'}

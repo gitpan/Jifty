@@ -1,15 +1,10 @@
-JSAN.use("DOM.Events");
-
 if ( typeof Jifty == "undefined" ) Jifty = { };
 
 Jifty.Calendar = {
     registerDateWidget: function(id) {
-        var input = $(id);
-        
-        if ( !input ) return false;
+        jQuery(id).bind("focus", Jifty.Calendar.toggleCalendar)
+                  .bind("blur", Jifty.Calendar.doBlur);
 
-        DOM.Events.addListener( input, "focus", Jifty.Calendar.toggleCalendar );
-        DOM.Events.addListener( input, "blur", Jifty.Calendar.doBlur );
         return true;
     },
 
@@ -19,52 +14,61 @@ Jifty.Calendar = {
         OUT_OF_MONTH_SELECT: true
     },
 
-    toggleCalendar: function(ev) {
-        var calId  = "cal_" + ev.target.id;
+    toggleCalendar: function() {
+        var calId  = "cal_" + this.id;
         var wrapId = calId + "_wrap";
-        var wrap   = $(wrapId);
-        var input  = ev.target;
+        var wrap   = document.getElementById(wrapId);
 
         if ( Jifty.Calendar.openCalendar == wrapId ) {
             Jifty.Calendar.hideOpenCalendar();
             return;
         }
-        
+
         Jifty.Calendar.hideOpenCalendar();
         
         /* We need to delay Jifty's canonicalization until after we've
            selected a value via the calendar */
-        Form.Element.disableValidation(input);
+        Jifty.Form.Element.disableValidation(this);
         
         wrap = document.createElement("div");
         wrap.setAttribute( "id", wrapId );
         wrap.setAttribute( "class", "select-free" );
         
         wrap.style.position = "absolute";
-        wrap.style.left     = Jifty.Utils.findRelativePosX( input ) + "px";
-        wrap.style.top      = Jifty.Utils.findRelativePosY( input ) + input.offsetHeight + "px";
+        wrap.style.left     = Jifty.Utils.findRelativePosX( this ) + "px";
+        wrap.style.top      = Jifty.Utils.findRelativePosY( this ) + this.offsetHeight + "px";
         wrap.style.zIndex   = 40;
         
-        input.parentNode.insertBefore( wrap, input.nextSibling );
+        this.parentNode.insertBefore( wrap, this.nextSibling );
 
         var cal;
-        
-        if (Jifty.Calendar.dateRegex.test(input.value) ) {
-            var bits = input.value.match(Jifty.Calendar.dateRegex);
-            cal = new YAHOO.widget.Calendar( calId,
-                                             wrapId,
-                                             { pagedate: bits[2]+"/"+bits[1],
-                                               selected: bits[2]+"/"+bits[3]+"/"+bits[1] }
-                                            );
+
+        var start_weekday = jQuery(this).hasClass('calendar-starts-monday') ? 1 : 0;
+
+        if (Jifty.Calendar.dateRegex.test(this.value) ) {
+            var bits = this.value.match(Jifty.Calendar.dateRegex);
+            cal = new YAHOO.widget.Calendar(
+                calId,
+                wrapId,
+                {
+                    pagedate: bits[2]+"/"+bits[1],
+                    selected: bits[2]+"/"+bits[3]+"/"+bits[1],
+                    start_weekday: start_weekday
+                }
+            );
         }
         else {
-            cal = new YAHOO.widget.Calendar( calId, wrapId );
+            cal = new YAHOO.widget.Calendar(
+                calId,
+                wrapId,
+                { start_weekday: start_weekday }
+            );
         }
-        
+
         cal.cfg.applyConfig( Jifty.Calendar.Options );
         cal.cfg.fireQueue();
         
-        cal.selectEvent.subscribe( Jifty.Calendar.handleSelect, { event: ev, calendar: cal }, true );
+        cal.selectEvent.subscribe( Jifty.Calendar.handleSelect, { input: this, calendar: cal }, true );
         cal.changePageEvent.subscribe( function() { setTimeout( function() { Jifty.Calendar._blurredCalendar = null; }, 75 ) }, null, false );
         
         cal.render();
@@ -86,9 +90,9 @@ Jifty.Calendar = {
         if (day < 10)
             day = "0" + day;
 
-        var input = obj.event.target;
-        
-        input.value = year + "-" + month + "-" + day;
+        jQuery(obj.input).val(year + "-" + month + "-" + day);
+        // Trigger an onchange event for any listeners
+        jQuery(obj.input).change();
 
         Jifty.Calendar.hideOpenCalendar();
     },
@@ -96,20 +100,22 @@ Jifty.Calendar = {
     openCalendar: "",
 
     hideOpenCalendar: function() {
-        if ( Jifty.Calendar.openCalendar && $( Jifty.Calendar.openCalendar ) ) {
+        if ( Jifty.Calendar.openCalendar && document.getElementById( Jifty.Calendar.openCalendar ) ) {
 
             /* Get the input's ID */
             var inputId = Jifty.Calendar.openCalendar;
                 inputId = inputId.replace(/^cal_/, '');
                 inputId = inputId.replace(/_wrap$/, '');
 
-            Element.remove(Jifty.Calendar.openCalendar);
+            // XXX: jQuery(Jifty.Calendar.openCalendar).remove() doesn't work for some reason
+            var cal = document.getElementById(Jifty.Calendar.openCalendar);
+            cal.parentNode.removeChild(cal);
 
-            var input = $( inputId );
+            var input = document.getElementById( inputId );
 
             /* Reenable canonicalization, and do it */
-            Form.Element.enableValidation(input);
-            Form.Element.validate(input);
+            Jifty.Form.Element.enableValidation(input);
+            Jifty.Form.Element.validate(input);
 
             Jifty.Calendar.openCalendar = "";
         }
@@ -133,6 +139,4 @@ Jifty.Calendar = {
         Jifty.Calendar._blurredCalendar = null;
     }
 };
-
-/*DOM.Events.addListener( window, "click", Jifty.Calendar.hideOpenCalendar );*/
 

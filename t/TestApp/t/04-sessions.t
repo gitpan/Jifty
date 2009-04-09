@@ -3,13 +3,7 @@
 use warnings;
 use strict;
 
-use lib 't/lib';
-use Jifty::SubTest;
-
-use Jifty::Test tests => 11;
-
-use_ok('Jifty');
-Jifty->new();
+use Jifty::Test::Dist tests => 10;
 
 use_ok('Jifty::Web::Session');
 
