@@ -437,7 +437,14 @@ ActionField.prototype = {
                             fields.push('id', tthis.element_id());
                             if (tthis.current_value) fields.push('value', tthis.current_value);
                             fields.push('class', tthis._widget_class().join(' '));
-                            if (tthis.max_length) fields.push('size', tthis.max_length, 'maxlength', tthis.max_length);
+                            if (tthis.display_length) {
+                                fields.push('size', tthis.display_length)
+                            }
+                            else if (tthis.max_length) {
+                                fields.push('size', tthis.max_length)
+                            }
+
+                            if (tthis.max_length) fields.push('maxlength', tthis.max_length);
                             if (tthis.disable_autocomplete) fields.push('autocomplete', "off");
                             //" " .$self->other_widget_properties;
                             return fields;
@@ -706,7 +713,7 @@ Behaviour.register({
             var button = document.createElement('input');
             button.setAttribute('type',  'button');
             jQuery(button).insertAfter(e);
-            jQuery(button).timepickr({});
+            jQuery(button).timepickr({val: 'Pick time'});
             jQuery(button).blur( function() { 
                 var old_value = jQuery(this).prev().val();
                 if ( Jifty.Calendar.dateRegex.test(old_value) ) {

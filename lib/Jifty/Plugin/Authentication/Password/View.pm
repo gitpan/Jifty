@@ -1,4 +1,3 @@
-use utf8;
 use warnings;
 use strict;
 
@@ -8,28 +7,13 @@ Jifty::Plugin::Authentication::Password::View - views for password plugin
 
 =head1 DESCRIPTION
 
-This code is only useful on the new Jifty "Declarative templates" branch. It shouldn't get in the way if you're running a traditional (0.610 or before) Jifty.
-
-=begin comment
-
-Is the above really true or need to said anymore? -- Sterling
-
-=end comment
-
-This provides the templates for the pages and forms used by the password authentication plugin.
+This provides the templates for the pages and forms used by the
+password authentication plugin.
 
 =cut
 
 package Jifty::Plugin::Authentication::Password::View;
 use Jifty::View::Declare -base;
-
-{ no warnings 'redefine';
-sub page (&;$) {
-    no strict 'refs'; 
-    BEGIN {Jifty::Util->require(Jifty->app_class('View'))};
-    Jifty->app_class('View')->can('page')->(@_);
-}
-}
 
 =head1 TEMPLATES
 

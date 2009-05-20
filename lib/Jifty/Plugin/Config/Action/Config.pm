@@ -6,87 +6,83 @@ use base qw/Jifty::Action/;
 use UNIVERSAL::require;
 use Jifty::YAML;
 use File::Spec;
+use Scalar::Defer;
 
-use Jifty::Param::Schema;
-use Jifty::Action schema {
-    param
-      database_type => label is 'Database type',    # loc
-      render as 'Select', available are defer {
-        my %map = (
-            mysql  => 'MySQL',                      
-            Pg     => 'PostgreSQL',                 
-            SQLite => 'SQLite',                     
-            Oracle => 'Oracle',                     
-        );
+=head1 NAME
 
-        for ( keys %map ) {
-            my $m = 'DBD::' . $_;
-            delete $map{$_} unless $m->require;
-        }
+Jifty::Plugin::Config::Action::Config - Register config
 
-        [ map { { display => $map{$_}, value => $_ } } keys %map ];
-      },
-      default is defer { 
-          Jifty->config->framework('Database')->{'Driver'}
-      };
-    param
-      database_host => label is 'Database host',    # loc
-      hints is
-      "The domain name of your database server (like 'db.example.com')",    
-      default is defer {
-          Jifty->config->framework('Database')->{'Host'}
-      };
+=head1 METHODS
 
-    param
-      database_name => label is 'Database name',                            
-      default is defer {
-          Jifty->config->framework('Database')->{'Database'}
-      };
-    param
-      database_user => label is 'Database username',                 
-      default is defer { 
-          Jifty->config->framework('Database')->{'User'}
-      };
+=head2 arguments
 
-    param
-      database_password => label is 'Database password',             
-      render as 'Password';
-};
-
-=head2 take_action
+Provides a single argument, C<config>, which is a textarea with
+Jifty's L<YAML> configuration in it.
 
 =cut
 
-my %database_map = (
-    name => 'Database',
-    type => 'Driver',
-);
+sub arguments {
+    my $self = shift;
+    return $self->{__cached_arguments} if ( $self->{__cached_arguments} );
+    my $args = {
+        'config' => {
+            label         => '',           # don't show label
+            render_as     => 'Textarea',
+            rows          => 60,
+            default_value => defer {
+                local $/;
+                open my $fh, '<', Jifty::Util->app_root . '/etc/config.yml';
+                return <$fh>;
+            }
+        },
+    };
+
+    return $self->{__cached_arguments} = $args;
+}
+
+=head2 take_action
+
+Attempts to update the application's F<etc/config.yml> file with the
+new configuration.
+
+=cut
 
 sub take_action {
     my $self = shift;
 
-    my $stash = Jifty->config->stash;
-    for my $arg ( $self->argument_names ) {
-        if ( $self->has_argument($arg) ) {
-            if ( $arg =~ /database_(\w+)/ ) {
-                my $key = $database_map{$1} || ucfirst $1;
-                my $database = $stash->{'framework'}{'Database'};
-                if ( $database->{$key} ne $self->argument_value($arg) ) {
-                    $database->{$key} = $self->argument_value($arg);
-                }
+    if ( $self->has_argument('config') ) {
+        my $new_config = $self->argument_value( 'config' );
+        $new_config =~ s/\r\n/\n/g; #textarea gives us dos format
+        eval { Jifty::YAML::Load( $new_config ) };
+        if ( $@ ) {
+# invalid yaml
+            $self->result->message( _( "invalid yaml" ) );
+            $self->result->failure(1);
+            return;
+        }
+        else {
+            if ( open my $fh, '>', Jifty::Util->app_root . '/etc/config.yml' ) {
+                print $fh $new_config;
+                close $fh;
+            }
+            else {
+                $self->result->message(
+                    _("can't write to etc/config.yml: $1") );
+                $self->result->failure(1);
+                return;
             }
         }
     }
+    $self->report_success;
 
-    Jifty::YAML::DumpFile( $ENV{'JIFTY_SITE_CONFIG'}
-          || Jifty::Util->app_root . '/etc/site_config.yml', $stash );
     Jifty->config->load;
-    $self->report_success unless $self->result->failure;
 
     return 1;
 }
 
 =head2 report_success
+
+Reports that the action succeeded.
 
 =cut
 

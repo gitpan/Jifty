@@ -1,3 +1,136 @@
+------------------------------
+Jifty 0.90519 - May 19th, 2009
+------------------------------
+
+POSSIBLE INCOMPATIBILITIES
+==========================
+ * Jifty::Mason::Halo has been demoted into into
+   Jifty::View::Mason::Halo; if your wrapper scripts invoked methods
+   in Jifty::Mason::Halo, they may need to be changed.
+
+CORE FEATURES
+=============
+ * Add a Jifty->web->qualified_parent_region for munging your sibling
+   regions
+ * Basic background process support via Jifty->background
+ * Add and use the display_length attribute on columns
+ * Make Jifty::DateTime->from_epoch(100) dwim
+ * Server script immediately forks, so it can be restarted
+ * Flush and close the client connection before running after {}
+   blocks
+
+CRUD
+====
+ * When we delete an item in CRUD, don't refresh the parent, because
+   that closes open editing forms. Just replace the current region
+   with empty
+ * Make no_items_found a region
+ * When you use CRUD to create a new element, clear any existing "No
+   items found" notice
+ * Hooks for overriding the display of a particular form field
+ * Factor out page_title for CRUD
+
+I18N
+====
+ * Apply maketext perl plugin to pl,pm files, to grep more kinds of
+   i18n string formats.
+ * Fix localization js typo
+
+BUGFIX
+======
+ * Call to _page_class needs parens to not get parsed as a package
+ * Avoid use of "packge HTML::Mason::Exception", which causes PAUSE to
+   hate us
+ * Fixes for plugin share paths when running Jifty out of @INC
+ * Comment the warning when ApplicationClass::Config is not a
+   sub-class of Jifty::Config
+ * Move pubsub activation to being on document ready, just in case
+ * Fix a function call name
+ * Give an actual error message when there's no current user
+ * Set the InactiveDestroy on the dbh when backgrounding
+ * In forking servers, disconnect the database before stalling on accept
+ * Fix another shared database handle between tests and test servers
+ * There is no utf8 in this file, thus no need for "use utf8"
+ * Always specify _which_ file had errors opening when you die
+
+DOC
+===
+ * Begin making POD coverage a little happier with TD templates
+ * RequestInspector API doc
+ * Pod coverage for script classes
+ * POD coverage for SQLQueries
+ * Fix POD warnings find by lintian tool from debian packaging
+ * Better POD coverage
+ * New entry in Manual::Cookbook: Render model refers_to field as a
+   select widget with meaningful display name
+ * Fix cookbook "brief_description" section
+ * Update Manual index
+ * Updated japanese tutorial
+ * Updated zhtw tutorial
+ * add Deploying_zhtw, AccessControl_zhtw
+
+INSTALL
+=======
+ * Update to Module::Install 0.85
+ * Depend on JDBI 0.57 because of display_length and
+   rename_table/rename_column
+ * Bump WWW::Mechanize dep for working ->back method
+
+PLUGINS
+=======
+ * allow plugins to return more than one static_root.
+ * Add a RequestInspector plugin, which any per-request debugging aids
+   use
+ * Reimplement SQLQueries as a RequestInspector consumer; LeakTracker,
+   Gladiator, and NYTProf now also use RequestInspector
+ * Include sum of query time in the SQLQueries summary
+ * Try harder to avoid loading a prereq_plugin multiple times
+ * Refactor SQLQueries to use a real view
+ * SQLQueries further display: bind parameters and stack traces
+ * Don't display bind parameters if there are none
+ * Add a Config plugin, for adjusting Jifty configuration from the
+   application; can restart the standalone server to take changes,
+   additionally.
+ * Remove custom page {} sub from Password's View class.  The page {}
+   in Password's View class simply delegated to the application's View
+   class' page {} -- no other part of the TD page code uses this
+   codepath.  This _may_ break backwards compatibility in some
+   applications, however.
+
+PUBSUB
+======
+ * Every 10 seconds, have PubSub send a whitespace character as a
+   keep-alive.  Without this, Pubsub children under a Forking server
+   stick around forever after the client has left the page.  This does
+   not address the problem of FastCGI clients, which have a similar
+   problem.
+
+REFACTOR
+========
+ * Split Jifty::CAS::Blob out, and document
+ * Migrate to new rename_table/rename_column in JDBI
+ * Factor out the actual record creation in JARC into a create_record
+   method
+ * Refactor away duplication in Jifty->web->link
+ * Change all calls from Template::Declare->(new|end)_buffer_frame to
+   new API
+
+TEST
+====
+ * Improve clarity and correctness of moniker_for
+ * Add a test for restarting the server
+ * Fix a non-deterministic test which failed when load was too high
+ * Silence TODO warnings
+ * Avoid undef warning
+ * Squelch debug message unless running verbosely
+
+VIEW
+====
+ * Pass $self to page's meta so method dispatch still works
+ * Apps can now include app-late.css for restyling YUI and jQuery and
+   whatnot
+ * Give timepicker buttons a label of "Pick time"
+
 -------------------------------
 Jifty 0.90409 - April 9th, 2009
 -------------------------------

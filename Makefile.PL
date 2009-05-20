@@ -52,7 +52,7 @@ requires('Hash::Merge');
 requires('Hook::LexWrap');
 requires('IPC::PubSub' => '0.23' );
 requires('IPC::Run3');
-requires('Jifty::DBI' => '0.53' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
+requires('Jifty::DBI' => '0.57' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
 requires('List::MoreUtils');
 requires('Locale::Maketext::Extract' => '0.35');
 requires('Locale::Maketext::Lexicon' => '0.77');
@@ -79,7 +79,7 @@ requires('Test::More' => 0.62 ),
 requires('Test::Pod::Coverage'),
 requires('Test::WWW::Mechanize' => 1.04 ),
 requires('Test::WWW::Selenium'),
-requires('WWW::Mechanize' => 1.30 ),
+requires('WWW::Mechanize' => 1.51 ),
 requires('UNIVERSAL::require');
 requires('URI' => 1.31);
 requires('URI::Escape');

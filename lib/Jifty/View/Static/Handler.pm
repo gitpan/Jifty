@@ -49,10 +49,11 @@ sub new {
     my @roots = (Jifty->config->framework('Web')->{StaticRoot});
     my %seen; $seen{$_} = 1 for map Jifty->config->framework('Web')->{$_}, qw/StaticRoot DefaultStaticRoot/;
     for my $plugin ( Jifty->plugins ) {
-        my $root = $plugin->static_root;
-        next unless ( defined $root and -d $root and -r $root and not $seen{$root}++);
-        push @roots, $root;
-        $plugin->log->debug( "Plugin @{[ref($plugin)]} static root added: (@{[$root ||'']})");
+        for my $root ($plugin->static_root) {
+            next unless ( defined $root and -d $root and -r $root and not $seen{$root}++);
+            push @roots, $root;
+            $plugin->log->debug( "Plugin @{[ref($plugin)]} static root added: (@{[$root ||'']})");
+        }
     }
     push @roots, (Jifty->config->framework('Web')->{DefaultStaticRoot});
 
@@ -74,11 +75,7 @@ sub roots {
 
 Handle a request for C<$path>. If we can't find a static file of that name, return undef.
 
-
-=cut
-
 =head2 handle_request $path
-
 
 An alias for L</show>
 

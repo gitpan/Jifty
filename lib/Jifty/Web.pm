@@ -876,11 +876,12 @@ I<PARAMHASH>.
 
 sub link {
     my $self = shift;
-    if (not defined wantarray) {
-        Jifty::Web::Form::Clickable->new(@_)->generate->render;
-    } else {
-        return Jifty::Web::Form::Clickable->new(@_)->generate;
-    }
+
+    my $link = Jifty::Web::Form::Clickable->new(@_)->generate;
+
+    return $link if defined wantarray;
+
+    $link->render;
 }
 
 =head3 return PARAMHASH
@@ -1362,6 +1363,25 @@ sub qualified_region {
     join "-",
         map { ref($_) ? $_->name : $_ }
             @{ $self->{'region_stack'} || [] }, @_;
+}
+
+=head3 qualified_parent_region [REGION]
+
+Returns the fully qualified name of the current
+L<Jifty::Web::PageRegion>'s parent, or the empty string if there is none.  If
+C<REGION> is supplied, gives the qualified name of C<REGION> were it
+placed in the parent region. You may also use a literal region name.
+
+=cut
+
+sub qualified_parent_region {
+    my $self = shift;
+    my @region_stack = @{ $self->{'region_stack'} || [] };
+    pop @region_stack;
+
+    join "-",
+        map { ref($_) ? $_->name : $_ }
+            @region_stack, @_;
 }
 
 =head2 is_ssl

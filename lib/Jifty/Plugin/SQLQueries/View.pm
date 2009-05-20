@@ -1,149 +1,67 @@
+package Jifty::Plugin::SQLQueries::View;
 use strict;
 use warnings;
-
-package Jifty::Plugin::SQLQueries::View;
 use Jifty::View::Declare -base;
-use Scalar::Util 'blessed';
+
+template '/__jifty/admin/requests/queries' => sub {
+    my $request_inspector = Jifty->find_plugin('Jifty::Plugin::RequestInspector');
+    my $id = get('id');
+    my $log = $request_inspector->get_plugin_data($id, 'Jifty::Plugin::SQLQueries');
+
+    ol {
+        for (my $query_id = 0; $query_id < @$log; ++$query_id) {
+            my $query = $log->[$query_id][1];
+            li {
+                hyperlink(
+                    label => $query,
+                    onclick => {
+                        region    => Jifty->web->qualified_region("query_$query_id"),
+                        replace_with => '/__jifty/admin/requests/query',
+                        toggle    => 1,
+                        effect    => 'slideDown',
+                        arguments => {
+                            id       => $id,
+                            query_id => $query_id,
+                        },
+                    },
+                );
+
+                render_region("query_$query_id");
+            };
+        }
+    }
+};
+
+template '/__jifty/admin/requests/query' => sub {
+    my $request_inspector = Jifty->find_plugin('Jifty::Plugin::RequestInspector');
+    my $id       = get('id');
+    my $query_id = get('query_id');
+
+    my $log = $request_inspector->get_plugin_data($id, 'Jifty::Plugin::SQLQueries');
+
+    my $query_log = $log->[$query_id];
+
+    my ($timestamp, $query, $binds, $duration, $plugins) = @$query_log;
+    my $stack_trace = $plugins->{SQLQueryPlugin};
+
+    if (@{ $binds || [] }) {
+        h3 { "Bind Parameters" }
+        ol {
+            li { $_ } for @$binds;
+        }
+    }
+
+    h3 { "Stack Trace" }
+    pre { $stack_trace }
+};
+
+1;
+
+__END__
 
 =head1 NAME
 
-Jifty::Plugin::SQLQueries::View - Views for database queries
-
-=head1 TEMPLATES
+Jifty::Plugin::SQLQueries::View
 
 =cut
-
-template '/__jifty/admin/queries/all' => page {
-    my $skip_zero = get 'skip_zero';
-
-    h1 { "Queries" }
-    p {
-        if ($skip_zero) {
-            a { attr { href => "/__jifty/admin/queries/all" }
-                "Show zero-query requests" }
-        }
-        else {
-            a { attr { href => "/__jifty/admin/queries" }
-                "Hide zero-query requests" }
-        }
-        a { attr { href => "/__jifty/admin/queries/clear" }
-            "Clear query log" }
-    }
-    hr {}
-
-    h3 { "Slowest queries" };
-    table {
-        row {
-            th { "Time taken" };
-            th { "Query" };
-        };
-
-        for (reverse @Jifty::Plugin::SQLQueries::slow_queries)
-        {
-            my ($time, $statement, $bindings, $duration, $misc) = @$_;
-            row {
-                cell { $duration };
-                cell { $statement };
-            };
-        }
-    };
-
-    hr {};
-
-    h3 { "All queries" };
-    table {
-        row {
-            th { "ID" }
-            th { "Queries" }
-            th { "Time taken" }
-            th { "URL" }
-        };
-
-        for (@Jifty::Plugin::SQLQueries::requests)
-        {
-            next if $skip_zero && @{ $_->{queries} } == 0;
-
-            row {
-                cell { a {
-                    attr { href => "/__jifty/admin/queries/$_->{id}" }
-                    $_->{id} } }
-
-                cell { scalar @{ $_->{queries} } }
-                cell { $_->{duration} }
-                cell { $_->{url} }
-            };
-        }
-    }
-};
-
-template '/__jifty/admin/queries/one' => page {
-    my $query = get 'query';
-
-    h1 { "Queries from Request $query->{id}" }
-    ul {
-        li { "URL: $query->{url}" }
-        li { "At: " . $query->{time} }
-        li { "Time taken: $query->{duration}" }
-        li { "Queries made: " . @{ $query->{queries} } }
-    }
-    p { a { attr { href => "/__jifty/admin/queries" }
-            "Table of Contents" } };
-
-    for ( @{ $query->{queries} } ) {
-        hr {};
-        set query => $_;
-        show '/__jifty/admin/queries/query';
-    }
-};
-
-template '/__jifty/admin/queries/query' => sub {
-    my ($time, $statement, $bindings, $duration, $misc) = @{ get 'query' };
-
-    h4 { pre { $statement } };
-    ul {
-        li { "At: " . gmtime($time) };
-        li { "Time taken: $duration" };
-    }
-    h5 { "Bindings:" }
-    ol {
-        li { $_ } for @$bindings;
-    }
-
-    my $more = Jifty->web->serial;
-    div {
-        attr {
-            class => "extra",
-            style => "display: none;",
-            id    => $more,
-        };
-        h5 { "Stack trace:" }
-        pre {
-            $misc->{SQLQueryPlugin};
-        }
-    }
-
-    div {
-        a {
-            attr {
-                href => "#",
-                onclick => "jQuery('#$more').toggle(500); this.innerHTML = this.innerHTML == 'more...' ? 'less...' : 'more...'; return false;",
-            };
-            "more..."
-        }
-    }
-};
-
-=head1 SEE ALSO
-
-L<Jifty::Plugin::SQLQueries>, L<Jifty::Plugin::SQLQueries::Dispatcher>
-
-=head1 COPYRIGHT AND LICENSE
-
-Copyright 2007 Best Practical Solutions
-
-This is free software and may be modified and distributed under the same terms as Perl itself.
-
-=cut
-
-1;
 

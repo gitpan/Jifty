@@ -62,13 +62,13 @@ sub new {
     # plugins are loaded, initialized, and prereq-examined in the order they're
     # listed in the config files. Instead, each phase should be separate.
     Jifty::Util->require("Jifty::Plugin::Halo");
-    Jifty::Util->require("Jifty::Mason::Halo");
+    Jifty::Util->require("Jifty::View::Mason::Halo");
 
     if ($self->can('halo_pre_template')) {
         Jifty::Plugin::Halo->add_trigger(
             halo_pre_template => sub { $self->halo_pre_template(@_) },
         );
-        Jifty::Mason::Halo->add_trigger(
+        Jifty::View::Mason::Halo->add_trigger(
             halo_pre_template => sub { $self->halo_pre_template(@_) },
         );
     }
@@ -77,7 +77,7 @@ sub new {
         Jifty::Plugin::Halo->add_trigger(
             halo_post_template => sub { $self->halo_post_template(@_) },
         );
-        Jifty::Mason::Halo->add_trigger(
+        Jifty::View::Mason::Halo->add_trigger(
             halo_post_template => sub { $self->halo_post_template(@_) },
         );
     }
@@ -112,11 +112,21 @@ sub _calculate_share {
     my $class = ref($self);
 
     unless ( $self->{share} and -d $self->{share} ) {
+        # If we've got a Jifty in @INC, and the plugin is core, the
+        # right thing to do is to strip off lib/ and replace it with
+        # share/plugins/Jifty/Plugin/Whatever/
+        my $class_to_path = $class;
+        $class_to_path =~ s|::|/|g;
 
-        # If we've got a plugin distribution in @INC as well as an
-        # installed version, then File::Sharedir will find the
-        # installed version.  So, we first try to tear off everything
-        # after the lib/ and replace it with share/
+        $self->{share} = $INC{ $class_to_path . '.pm' };
+        $self->{share} =~ s{lib/+\Q$class_to_path.pm}{share/plugins/$class_to_path};
+        $self->{share} = File::Spec->rel2abs( $self->{share} );
+    }
+    unless ( $self->{share} and -d $self->{share} ) {
+        # As above, but only tack on share/, for when we have a
+        # non-core plugin in @INC.  We do this before the
+        # File::ShareDir, because File::ShareDir only looks at install
+        # locations, and the plugin could be hand-set in @INC.
         my $class_to_path = $class;
         $class_to_path =~ s|::|/|g;
 

@@ -1,53 +1,10 @@
-#!/usr/bin/env perl
 package Jifty::Plugin::SQLQueries;
-use base qw/Jifty::Plugin/;
 use strict;
 use warnings;
+use base 'Jifty::Plugin';
+use List::Util 'sum';
 
-our @requests;
-our @slow_queries;
-our @halo_queries;
-
-=head1 NAME
-
-Jifty::Plugin::SQLQueries - SQL query logging and reporting for your Jifty app
-
-=head1 DESCRIPTION
-
-SQL query logging and reporting for your Jifty app.  Use this plugin
-if you wish to profile or analyze the database queries Jifty is
-running for individual page loads.
-
-=head1 USAGE
-
-Add the following to your site_config.yml
-
- framework:
-   Plugins:
-     - SQLQueries: {}
-
-This makes the following URLs available:
-
-View the top-level query report (how many queries each request had)
-
-    http://your.app/__jifty/admin/queries
-
-View the top-level query report, including zero-query requests
-
-    http://your.app/__jifty/admin/queries/all
-
-View an individual request's detailed query report (which queries were made,
-where, how long they took, etc)
-
-    http://your.app/__jifty/admin/queries/3
-
-=head2 METHODS
-
-=head2 init
-
-This makes sure that each request is wrapped with query logging.
-
-=cut
+sub prereq_plugins { 'RequestInspector' }
 
 sub init {
     my $self = shift;
@@ -56,22 +13,7 @@ sub init {
     Jifty->add_trigger(
         post_init => \&post_init
     );
-
-    Jifty::Handler->add_trigger(
-        before_request => \&before_request
-    );
-
-    Jifty::Handler->add_trigger(
-        after_request  => \&after_request
-    );
 }
-
-=head2 post_init
-
-This sets up L<Jifty::DBI>'s query logging, and is called at the end of
-C<< Jifty->new >>
-
-=cut
 
 sub post_init {
     Jifty->handle or return;
@@ -87,148 +29,99 @@ sub post_init {
                             join ', ',
                                 map { defined $_ ? $_ : 'undef' } @$bindings,
         );
-        return Carp::longmess;
+        return Carp::longmess("Query");
     });
 }
 
-=head2 before_request
-
-Clears the SQL log so you only get the request's queries
-
-=cut
-
-sub before_request {
-    Jifty->handle or return;
-}
-
-=head2 after_request
-
-Logs the queries made (at level DEBUG)
-
-=cut
-
-sub after_request {
-    Jifty->handle or return;
-
-    my $handler = shift;
-    my $cgi = shift;
-
-    my $total_time = 0;
-    my @log = ((splice @halo_queries), Jifty->handle->sql_statement_log());
-    Jifty->handle->clear_sql_statement_log();
-
-    for (@log) {
-        my ($time, $statement, $bindings, $duration, $results) = @$_;
-
-        $total_time += $duration;
-
-        # keep track of the ten slowest queries so far
-        if (@slow_queries < 10 || $duration > $slow_queries[0][3]) {
-            push @slow_queries, $_;
-            @slow_queries = sort { $a->[3] <=> $b->[3] } @slow_queries;
-            shift @slow_queries if @slow_queries > 9;
-        }
-    }
-
-    push @requests, {
-        id => 1 + @requests,
-        duration => $total_time,
-        url => $cgi->url(-absolute=>1,-path_info=>1),
-        time => scalar gmtime,
-        queries => \@log,
-    };
-}
-
-=head2 halo_pre_template
-
-Log any queries made to the previous template. Also, keep track of whatever
-queries made so the rest of the plugin can see them (since we clear the log)
-
-=cut
-
-sub halo_pre_template {
-    my $self = shift;
-    my $halo = shift;
-    my %args = @_;
-
-    push @{ $args{previous}{sql_statements} }, Jifty->handle->sql_statement_log;
-    push @halo_queries, Jifty->handle->sql_statement_log;
-
+sub inspect_before_request {
     Jifty->handle->clear_sql_statement_log;
+}
 
-    $args{frame}{displays}{Q} = {
-        name => "queries",
-        callback => sub {
-            my $frame = shift;
-            my @queries;
+sub inspect_after_request {
+    return [ Jifty->handle->sql_statement_log ];
+}
 
-            for (@{ $frame->{sql_statements} || [] }) {
-                my $bindings;
+sub inspect_render_summary {
+    my $self = shift;
+    my $log = shift;
 
-                if (@{$_->[2]}) {
-                    my @bindings = map {
-                        defined $_
-                            ? $_ =~ /[^[:space:][:graph:]]/
-                                ? "*BLOB*"
-                                : Jifty->web->escape($_)
-                            : "undef"
-                    } @{$_->[2]};
+    my $count = @$log;
+    my $seconds = sprintf '%.2g', sum map { $_->[3] } @$log;
 
-                    $bindings = join '',
-                        "<b>",
-                        _('Bindings'),
-                        ":</b> <tt>",
-                        join(', ', @bindings),
-                        "</tt><br />",
-                }
+    return _("%quant(%1,query,queries) taking %2s", $count, $seconds);
+}
 
-                push @queries, join "\n",
-                    qq{<span class="fixed">},
-                    Jifty->web->escape($_->[1]),
-                    qq{</span><br />},
-                    defined($bindings) ? $bindings : '',
-                    "<i>". _('%1 seconds', $_->[3]) ."</i>",
-            }
+sub inspect_render_analysis {
+    my $self = shift;
+    my $log = shift;
+    my $id = shift;
 
-            return undef if @queries == 0;
-
-            return "<ol>"
-                 . join("\n",
-                        map { "<li>$_</li>" }
-                        @queries)
-                 . "</ol>";
+    Jifty::View::Declare::Helpers::render_region(
+        name => 'sqlqueries',
+        path => '/__jifty/admin/requests/queries',
+        args => {
+            id => $id,
         },
-    };
+    );
 }
 
-=head2 halo_post_template
+1;
 
-Log any queries made to the current template. Also, keep track of whatever
-queries made so the rest of the plugin can see them (since we clear the log)
+__END__
 
-XXX: can this somehow be refactored into one function? If the same pattern
-occurs elsewhere I'll look into it.
+=head1 NAME
 
-=cut
+Jifty::Plugin::SQLQueries - Inspect your app's SQL queries
 
-sub halo_post_template {
-    my $self = shift;
-    my $halo = shift;
-    my %args = @_;
+=head1 DESCRIPTION
 
-    push @{ $args{frame}{sql_statements} }, Jifty->handle->sql_statement_log;
-    push @halo_queries, Jifty->handle->sql_statement_log;
+This plugin will log each SQL query, its duration, its bind parameters, and its stack trace. Such reports are available at:
 
-    Jifty->handle->clear_sql_statement_log;
-}
+    http://your.app/__jifty/admin/requests
+
+=head1 USAGE
+
+Add the following to your site_config.yml
+
+ framework:
+   Plugins:
+     - SQLQueries: {}
+
+=head1 METHODS
+
+=head2 init
+
+Sets up a L</post_init> hook.
+
+=head2 inspect_before_request
+
+Clears the query log so we don't log any unrelated previous queries.
+
+=head2 inspect_after_request
+
+Stash the query log.
+
+=head2 inspect_render_summary
+
+Display how many queries and their total time.
+
+=head2 inspect_render_analysis
+
+Render a template with all the detailed information.
+
+=head2 post_init
+
+Tells L<Jifty::DBI> to log queries in a way that records stack traces.
+
+=head2 prereq_plugins
+
+This plugin depends on L<Jifty::Plugin::RequestInspector>.
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2007 Best Practical Solutions
+Copyright 2007-2009 Best Practical Solutions
 
 This is free software and may be modified and distributed under the same terms as Perl itself.
 
 =cut
-
-1;
 

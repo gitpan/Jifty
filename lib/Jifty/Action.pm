@@ -467,17 +467,19 @@ sub form_value {
 
 # Generalized helper for the two above
 sub _form_widget {
-    my $self       = shift;
-    my %args = ( argument => undef,
-                 render_mode => 'update',
-                 @_);
+    my $self = shift;
+    my %args = (
+        argument => undef,
+        render_mode => 'update',
+        @_,
+    );
+    my $cache_key = join '!!', %args;
 
     # Setup the field name
     my $field = $args{'argument'};
-    my $arg_name = $field. '!!' .$args{'render_mode'};
 
     # This particular field hasn't been added to the form yet
-    if ( not exists $self->{_private_form_fields_hash}{$arg_name} ) {
+    if ( not exists $self->{_private_form_fields_hash}{$cache_key} ) {
         my $field_info = $self->arguments->{$field};
         # The field name is not known by this action
         unless ($field_info) {
@@ -506,9 +508,7 @@ sub _form_widget {
         $default_value = $self->argument_value($field)
           if $self->has_argument($field) && !$self->values_from_request->{$field};
 
-        # Add the form field to the cache
-        $self->{_private_form_fields_hash}{$arg_name}
-            = Jifty::Web::Form::Field->new(
+        my %field_args = (
             %$field_info,
             action        => $self,
             name          => $field,
@@ -516,18 +516,15 @@ sub _form_widget {
             sticky_value  => $self->argument_value($field),
             default_value => $default_value,
             render_mode   => $args{'render_mode'},
-            %args
-            );
+            %args,
+        );
 
-
-    } 
-    # It has been cached, but render_as is explicitly set
-    elsif ( my $widget = $args{render_as} ) {
-        $self->{_private_form_fields_hash}{$arg_name}->rebless( $widget );
-
+        # Add the form field to the cache
+        $self->{_private_form_fields_hash}{$cache_key}
+            = Jifty::Web::Form::Field->new(%field_args);
     }
 
-    return $self->{_private_form_fields_hash}{$arg_name};
+    return $self->{_private_form_fields_hash}{$cache_key};
 }
 
 =head2 hidden ARGUMENT VALUE

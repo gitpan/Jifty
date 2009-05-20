@@ -137,6 +137,51 @@ sub after_setup_listener {
     kill $sig => getppid();
 }
 
+=head2 restart
+
+Sets up the arguments needed for restarting the server using C<jifty server>.
+
+=cut
+
+sub restart {
+    my $self = shift;
+    local @ARGV = ( 'server', '--restart' );
+    $self->SUPER::restart;
+}
+
+=head2 close_client_sockets
+
+Closes all active client connections.
+
+=cut
+
+sub close_client_sockets {
+    my $self = shift;
+    close STDOUT;
+    close STDIN;
+    if ($self->{net_server}) {
+        close $self->{net_server}{server}{client};
+    } else {
+        close $self->{_stdio_handle};
+    }
+}
+
+=head2 started_ok
+
+After starting, ensure we have a different database socket from the
+server.
+
+=cut
+
+sub started_ok {
+    my $self = shift;
+    my $ret = $self->SUPER::started_ok(@_);
+    if ($ret) {
+        Jifty->handle->dbh->{InactiveDestroy} = 1;
+        Jifty->setup_database_connection;
+    }
+    return $ret;
+}
 
 1;
 

@@ -7,13 +7,13 @@ use Data::UUID;
 use encoding 'utf8';
 use Class::Trigger;
 
-BEGIN { 
+BEGIN {
     # Work around the fact that Time::Local caches TZ on first require
     local $ENV{'TZ'} = "GMT";
     require Time::Local;
 
     # Declare early to make sure Jifty::Record::schema_version works
-    $Jifty::VERSION = '0.90409';
+    $Jifty::VERSION = '0.90519';
 }
 
 =head1 NAME
@@ -175,6 +175,8 @@ sub new {
     my $app_plugin = Jifty->app_class('Plugin');
     # we are pushing prereq to plugin, hence the 3-part for.
     for (my $i = 0; my $plugin = $plugins_to_load[$i]; $i++) {
+        my $is_prereq = delete $plugin->{_prereq};
+
         # Prepare to learn the plugin class name
         my ($plugin_name) = keys %{$plugin};
         my $class;
@@ -190,6 +192,17 @@ sub new {
             $class = "Jifty::Plugin::".$plugin_name;
         }
 
+        # avoid duplicating prereq plugins. we can't do this in the loop below
+        # because a plugin might prereq a plugin later in config.yml
+        if ($is_prereq) {
+            my $this_class = qr/^(?:Jifty::Plugin::|\Q$app_plugin\E)?\Q$plugin_name\E$/;
+
+            next if grep { $_ =~ $this_class } @plugins_to_load;
+
+            # already loaded plugin objects
+            next if grep { ref($_) =~ $this_class } @plugins;
+        }
+
         # Load the plugin options
         my %options = (%{ $plugin->{ $plugin_name } },
                         _pre_init => $args{'pre_init'} );
@@ -202,8 +215,7 @@ sub new {
         my $plugin_obj = $class->new(%options);
         push @plugins, $plugin_obj;
         foreach my $name ($plugin_obj->prereq_plugins) {
-            next if grep { $_ eq $name } @plugins_to_load;
-            push @plugins_to_load, {$name => {}};
+            push @plugins_to_load, {$name => {}, _prereq => 1};
         }
     }
 
@@ -509,6 +521,29 @@ sub app_instance_id {
         Jifty::Model::Metadata->store(application_instance_uuid => $app_instance_id );
     }
     return $app_instance_id;
+}
+
+=head2 background SUB
+
+Forks a background process, and ensures that database connections and
+sockets are not shared with the parent process.
+
+=cut
+
+sub background {
+    my $class = shift;
+    my $sub = shift;
+    if (my $pid = fork) {
+        return $pid;
+    } else {
+        close STDOUT;
+        close STDIN;
+        $Jifty::SERVER->close_client_sockets if $Jifty::SERVER;
+        Jifty->handle->dbh->{InactiveDestroy} = 1;
+        Jifty->setup_database_connection();
+        $sub->();
+        exit;
+    }
 }
 
 

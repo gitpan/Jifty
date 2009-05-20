@@ -2,24 +2,51 @@ use strict;
 use warnings;
 
 package Jifty::Plugin::Config;
-use base qw/Jifty::Plugin/;
+use base qw/Jifty::Plugin Class::Data::Inheritable/;
+__PACKAGE__->mk_classdata( after_restart_url => '/' );
+__PACKAGE__->mk_classdata( wait_seconds => 5 );
+__PACKAGE__->mk_classdata( config_url => '/__jifty/config' );
+__PACKAGE__->mk_classdata( restart_url => '/__jifty/config/restart.html' );
 
 =head2 NAME
 
 Jifty::Plugin::Config - Add configuration editor
 
+=head1 SYNOPSIS
+
+# In your jifty config.yml under the framework section:
+
+  Plugins:
+    - Config:
+        after_restart_url: '/'
+        wait_seconds: 5
+        config_url: '/__jifty/config'
+        restart_url: '/__jifty/config/restart.html'
+
 =head2  DESCRIPTION
 
-This plugin provides a basic configuration editor for your application.
-Basically, it tries to help you update the most important items in Jifty's config
-file, so you don't need to edit the config file directly.
+This plugin lets you update etc/config.yml in web page.
 
-the updated config file will be saved in file $EVN{JIFTY_SITE_CONFIG} or
-etc/site_config.yml
+=head1 METHODS
 
-This plugin is designed mostly for beginners ;)
+=head2 init
+
+set after_restart_url, wait_seconds and config_url, 
+default is '/', 5 and '/__jifty/config', respectively
+after_restart_url is the url where we will redirect to after restart
+wait_seconds are the seconds that we wait for before redirecting
+config_url is the url where we will update the config
+restart_url is the url where we acturally do the restart, with a wait page
 
 =cut
+
+sub init {
+    my $self = shift;
+    my %opt = @_;
+    for ( qw/after_restart_url restart_url config_url wait_seconds/ ) {
+        __PACKAGE__->$_( $opt{$_} ) if defined $opt{$_};
+    }
+}
 
 1;
 
