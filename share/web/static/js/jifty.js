@@ -181,6 +181,12 @@ Action.prototype = {
         a['moniker'] = this.moniker;
         a['class']   = this.actionClass;
 
+        if (this.register && this.register.id) {
+            var tmp = this.register.id.match(/^J:A-(\d+)-/);
+            if (tmp.length == 2)
+                a['order'] = tmp[1];
+        }
+
         a['fields']  = {};
         var fields = this.fields();
         for (var i = 0; i < fields.length; i++) {
@@ -768,18 +774,20 @@ Behaviour.register({
         }
     },
     /* Use jQuery for full-page-refresh notifications, as well */
-    '#messages.jifty.results.messages, #errors.jifty.results.messages': function(e) {
+    '#messages.jifty.results.messages, #errors.jifty.results.messages, .popup_message, .popup_error': function(e) {
         jQuery(e).hide();
     },
-    '#messages.jifty.results.messages .message': function(e) {
+    '#messages.jifty.results.messages .message, .popup_message': function(e) {
+        var sticky = jQuery(e).hasClass('popup_sticky');
         jQuery.jGrowl( e.innerHTML, {
-            sticky: true,
+            sticky: sticky,
             theme: 'result-message'
         });
     },
-    '#errors.jifty.results.messages .error': function(e) {
+    '#errors.jifty.results.messages .error, .popup_error': function(e) {
+        var sticky = jQuery(e).hasClass('popup_sticky');
         jQuery.jGrowl( e.innerHTML, {
-            sticky: true,
+            sticky: sticky,
             theme: 'result-error'
         });
     }
@@ -1297,6 +1305,25 @@ Jifty.update = function () {
 
         // Grab the XML response
         var response = responseXML.documentElement;
+
+        /* var response is an xml , which's content is like:
+        <response>
+            <fragment id="__page-region-name">
+                <argument name="argument1">value1</argument>
+                <argument name="argument2">value2</argument>
+                <content> 
+                        ...
+                </content>
+            </fragment>
+            <result class="MyApp::Action::DoPost" moniker="do-post">
+                <success>1</success>
+                <content>
+                    <title>Title</title>
+                    <id>123</id>
+                </content>
+            </result>
+        </response>
+        */
 
         // Look through the action results looking for field validation errors
         walk_node(response, { 

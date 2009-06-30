@@ -45,9 +45,10 @@ my $field = <<"EOF";
 EOF
 
 
-    for my $opt (@{ $self->action->available_values($self->name) }) {
-        my $display = $opt->{'display'};
-        my $value   = $opt->{'value'} ||'' ;
+    for my $opt ($self->available_values) {
+        my $display = ref($opt) ? $opt->{'display'} : $opt;
+        my $value   = (ref($opt) ? $opt->{'value'} : $opt) || '';
+
         # TODO XXX FIXME worry about escape value, display?
         $field .= qq!<option value="$value"!;
         $field .= qq! selected="selected"!

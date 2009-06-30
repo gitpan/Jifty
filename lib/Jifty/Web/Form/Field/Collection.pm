@@ -18,7 +18,7 @@ Renders the whole collection of available values.
 sub render_widget {
     my $self  = shift;
 
-    for my $opt (@{ $self->action->available_values($self->name) }) {
+    for my $opt ($self->available_values) {
         $self->render_option($opt);
     }
 }
@@ -48,8 +48,9 @@ Renders a normal input field.
 sub render_option {
     my $self = shift;
     my $opt = shift;
-    my $display = $opt->{'display'};
-    my $value   = defined $opt->{'value'} ? $opt->{'value'} : "0";
+    my $display = ref($opt) ? $opt->{'display'} : $opt;
+    my $value   = ref($opt) ? $opt->{'value'} : $value;
+    $value = "0" if !defined($value);
 
     my $id = $self->element_id . "-" . $value;
     $id =~ s/\s+/_/;

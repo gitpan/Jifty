@@ -13,7 +13,7 @@ BEGIN {
     require Time::Local;
 
     # Declare early to make sure Jifty::Record::schema_version works
-    $Jifty::VERSION = '0.90519';
+    $Jifty::VERSION = '0.90630';
 }
 
 =head1 NAME
@@ -546,6 +546,17 @@ sub background {
     }
 }
 
+=head2 admin_mode
+
+Returns true if the application is in admin mode. This should be used instead
+of C<< Jifty->config->framework('AdminMode') >>.
+
+=cut
+
+sub admin_mode {
+    return Jifty->config->framework('AdminMode')
+        || Jifty->config->framework('SetupMode');
+}
 
 =head1 SEE ALSO
 

@@ -14,7 +14,7 @@ use Jifty::JSON ();
 use Data::Dumper ();
 use XML::Simple;
 
-before qr{^ (/=/ .*) \. (js|json|yml|yaml|perl|pl|xml) $}x => run {
+before qr{^ (/=/ .*) \. (js|json|yml|yaml|perl|pl|xml|html) $}x => run {
     $ENV{HTTP_ACCEPT} = $2;
     dispatch $1;
 };
@@ -250,6 +250,8 @@ sub output_format {
             freezer      => \&render_as_xml,
         };
     }
+    # if we ever have a non-html fallback case, we should be checking for an
+    # $accept of HTML here
     else {
         my $freezer;
 
@@ -327,17 +329,24 @@ sub render_as_html {
     my $prefix = shift;
     my $url = shift;
     my $content = shift;
+
+    my $title = _("%1 - REST API", Jifty->config->framework('ApplicationName'));
+
     if (ref($content) eq 'ARRAY') {
-        return start_html(-encoding => 'UTF-8', -declare_xml => 1, -title => 'REST API'),
+        return start_html(-encoding => 'UTF-8', -declare_xml => 1, -title => $title),
               ul(map {
-                  li($prefix ?
+                ref($_) eq 'HASH' ? render_as_html($url, $prefix,$_) :
+                    li(
+                    ref($_) eq 'ARRAY' ? render_as_html($url, $prefix,$_) :
+                      
+                      ($prefix ?
                      a({-href => "$url/".Jifty::Web->escape_uri($_)}, Jifty::Web->escape($_))
-                     : Jifty::Web->escape($_) )
+                     : Jifty::Web->escape($_) ))
               } @{$content}),
               end_html();
     }
     elsif (ref($content) eq 'HASH') {
-        return start_html(-encoding => 'UTF-8', -declare_xml => 1, -title => 'REST API'),
+        return start_html(-encoding => 'UTF-8', -declare_xml => 1, -title => $title),
               dl(map {
                   dt($prefix ?
                      a({-href => "$url/".Jifty::Web->escape_uri($_)}, Jifty::Web->escape($_))
@@ -347,7 +356,7 @@ sub render_as_html {
               end_html();
     }
     else {
-        return start_html(-encoding => 'UTF-8', -declare_xml => 1, -title => 'REST API'),
+        return start_html(-encoding => 'UTF-8', -declare_xml => 1, -title => $title),
               Jifty::Web->escape($content),
               end_html();
     }
@@ -605,6 +614,8 @@ sub show_item {
 
     $rec->load_by_cols( $column => $key );
     $rec->id or abort(404);
+    $rec->current_user_can('read') or abort(403);
+
     outs( ['model', $model, $column, $key], $rec->jifty_serialize_format );
 }
 
@@ -866,6 +877,7 @@ our @param_attrs = qw(
     mandatory
     ajax_validates
     length
+    valid_values
 );
 
 sub list_action_params {
@@ -878,7 +890,7 @@ sub list_action_params {
         $args{ $arg } = { };
         for ( @param_attrs ) {
             my $val = $arguments->{ $arg }{ $_ };
-            $args{ $arg }->{ $_ } = $val
+            $args{ $arg }->{ $_ } = Scalar::Defer::force($val)
                 if defined $val and length $val;
         }
     }
@@ -952,7 +964,7 @@ sub run_action {
     eval { $action->run };
 
     if ($@) {
-        $Dispatcher->log->warn($@);
+        warn $@;
         abort(500);
     }
 

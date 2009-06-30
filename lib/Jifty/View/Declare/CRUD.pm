@@ -244,17 +244,22 @@ sub _get_record {
     return $record;
 }
 
-=head2 display_columns ACTION
+=head2 display_columns [ACTION]
 
 Returns a list of all the column names that this REST view should
 display.  Defaults to all argument names for the provided C<ACTION>.
+If there is no action provided, returns the C<record_class>'s
+C<readable_attributes>.
 
 =cut
 
 sub display_columns {
     my $self = shift;
     my $action = shift;
-    return $action->argument_names;
+
+    return $action->argument_names if $action;
+
+    return $self->record_class->readable_attributes;
 }
 
 =head2 edit_columns ACTION
@@ -619,12 +624,10 @@ template 'sort_header' => sub {
     my $sort_by = shift;
     my $order = shift;
     my $record_class = $self->record_class;
-    my $create = $record_class->as_create_action;
 
     div { 
         { class is "jifty_admin_header" };
-        for my $argument ($self->display_columns($create)) {
-            next if $create->arguments->{$argument}{unreadable};
+        for my $argument ($self->display_columns) {
             my $css_class = ($sort_by && !$order && $sort_by eq $argument)?'up_select':'up';
             span {
                 { class is $css_class };
@@ -645,7 +648,7 @@ template 'sort_header' => sub {
             };
             span{
                 {class is "field"};
-                outs $create->arguments->{$argument}{label} || $argument;
+                outs $argument;
             };
         };
         hr {};
@@ -742,6 +745,8 @@ private template 'new_item_region' => sub {
     my $self        = shift;
     my $fragment_for_new_item = get('fragment_for_new_item') || $self->fragment_for('new_item');
     my $object_type = $self->object_type;
+
+    return unless $self->record_class->new->current_user_can('create');
 
     if ($fragment_for_new_item) {
         render_region(

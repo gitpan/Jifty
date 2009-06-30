@@ -55,18 +55,51 @@ template $restart_url => sub {
       . Jifty->config->framework('Web')->{Port}
       . $url
       unless $url =~ /^https?:/;
-    outs_raw(<<"EOF");
-<html>
-<head>
-<title>restarting</title>
-<meta http-equiv="refresh" content="$seconds;url=$url" />
-</head>
-<body>
-<h1>please wait for $seconds seconds so the server can restart,
-    then we'll redirect to <a href="$url">here</a></h1>
-</body>
-</html>
+
+    html {
+        head {
+            title {
+                outs "Restarting ";
+                outs( Jifty->config->framework('ApplicationName') );
+            };
+            meta {
+                attr {
+                    'http-equiv' => 'refresh',
+                    content      => "$seconds;url=$url",
+                };
+            };
+            Jifty->web->include_javascript;
+            
+            outs_raw( <<EOF );
+<script type="text/javascript">
+
+var interval_id;
+function reduceTime () {
+    var left = parseInt(jQuery('#seconds').html());
+    if ( left > 0 ) {
+        jQuery('#seconds').html(left-1 + '');
+    }
+    else {
+        clearInterval(interval_id);
+    }
+};
+
+jQuery( function(){ interval_id = setInterval('reduceTime()', 1000 ) } );
+</script>
+
 EOF
+        };
+        body {
+            outs "Please wait ";
+            div { attr { style => 'display: inline', id => 'seconds' } $seconds };
+            outs " seconds so the server can restart, then we'll redirect you "; 
+            hyperlink(
+                label => "here",
+                url   => $url,
+            );
+            outs ".";
+        }
+    };
 
     Jifty->handler->buffer->flush_output();
     $Jifty::SERVER->restart;
