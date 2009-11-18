@@ -6,6 +6,7 @@
 @import "combobox.css";
 @import "keybindings.css";
 @import "forms.css";
+@import "crud.css";
 @import "halos.css";
 @import "app.css";
 @import "autocomplete.css";
@@ -16,5 +17,6 @@
 @import "notices.css";
 @import "jquery.jgrowl.css";
 @import "jquery.timepickr.css";
+@import "facebox.css";
 @import "datetime.css";
 @import "app-late.css";

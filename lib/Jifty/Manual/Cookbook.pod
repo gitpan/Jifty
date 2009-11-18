@@ -11,6 +11,63 @@ of Jifty use, and ones that work pretty well.
 
 =head1 HOW DO I ...
 
+=head2 Catching Action Result in Dispatcher
+
+To get action result in your dispatcher:
+
+    on '/=/your_action_name/'  => run {
+
+        my $result = Jifty->web->response->result( 'action-moniker' );
+
+
+    };
+
+=head2 Catching POST data in Dispatcher
+
+In your L<MyApp::Dispatcher>:
+
+    on POST '/=/catch' => run {
+        my $data = get('data');
+
+    };
+
+=head2 Upload file via Action parameter
+
+In your action schema:
+
+    use Jifty::Action schema {
+
+        param image =>
+            type is 'upload'
+            label is _('Upload a file');
+
+    };
+
+to catch the file , in your C<take_action> method:
+
+    sub take_action {
+        my $self = shift;
+
+        my $fh = $self->argument_value('image');
+        local $/;
+        my $file_content = <$fh>
+        close $fh;
+
+    }
+
+=head2 Use PostgreSQL insteads of default SQLite database.
+
+You need to modify your F<etc/config.yml> file.
+
+  Database:
+    AutoUpgrade: 1
+    CheckSchema: 1
+    Database: twetter
+    Driver: SQLite
+
+Please change Driver "SQLite" to "Pg", and 
+make sure that you've installed L<DBD::Pg>.
+
 =head2 Create an LDAP autocomplete field
 
 You need an action in your application. Then run

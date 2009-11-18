@@ -14,6 +14,10 @@ use Hash::Merge;
 use Digest::MD5 qw/md5_hex/;
 use Cwd qw/abs_path cwd/;
 
+# this is required here because we want Test::HTTP::Server::Simple's
+# END to be at the very last, later than Jifty::Test's
+use Test::HTTP::Server::Simple;
+
 =head1 NAME
 
 Jifty::Test - Jifty's test module
@@ -117,9 +121,13 @@ symbols to the namespace that C<use>'d this one.
 
 =cut
 
+our $imported = 0;
+
 sub import_extra {
     my $class = shift;
     my $args  = shift;
+
+    $imported = 1;
 
     $class->setup($args);
     Test::More->export_to_level(2);
@@ -129,6 +137,15 @@ sub import_extra {
     if ($class->builder->has_plan) {
         no warnings 'redefine';
         *Test::Builder::plan = sub {};
+    }
+
+    # the modified $args is then passed to Test::Builder's plan.  we should 
+    # strip our custom items.
+    # XXX: this should probably be done in _strip_imports
+    # we check for multiple args because of 'no_plan'
+    if (@$args > 1) {
+        my %args = @$args;
+        @$args = map { $args{$_} ? ($_ => $args{$_ }) : () } qw(tests skip_all);
     }
 }
 
@@ -168,24 +185,29 @@ And later in your tests, you may do the following:
 
 =cut
 
+my $WARNINGS_ARE_FATAL;
+
 sub setup {
     my $class = shift;
     my $args = shift;
 
+    $args ||= [];
+    my %args = @{$args} % 2 ? (@{$args}, 1) : @{$args};
+
     # Spit out a plan (if we got one) *before* we load modules, in
     # case of compilation errors
-    $class->builder->plan(@{$args})
-      unless $class->builder->has_plan;
+    unless ($class->builder->has_plan) {
+        $class->builder->plan(map { $_ => $args{$_ } } qw(tests skip_all))
+            if $args{tests} || $args{skip_all};
+    }
 
     # Require the things we need
     require Jifty::YAML;
     require Jifty::Server;
     require Jifty::Script::Schema;
 
-    $args ||= [];
-    my %args = @{$args} % 2 ? (@{$args}, 1) : @{$args};
     $class->builder->{no_handle} = $args{no_handle};
-
+    $WARNINGS_ARE_FATAL = 1 if $args{strict};
     my $test_config = File::Temp->new( UNLINK => 0 );
     Jifty::YAML::DumpFile("$test_config", $class->test_config(Jifty::Config->new, \%args));
     # Invoking bin/jifty and friends will now have the test config ready.
@@ -403,6 +425,12 @@ sub test_config {
         }
     };
 
+    if ($INC{'Devel/Cover.pm'}) {
+        $defaults->{framework}{DevelMode} = 0;
+        $defaults->{framework}{Web}{MasonConfig}{named_component_subs} = 1;
+        $defaults->{framework}{Web}{DataDir} = Jifty::Util->absolute_path( 'var/mason-cover' );
+    }
+
     Hash::Merge::set_behavior('RIGHT_PRECEDENT');
     return Hash::Merge::merge($defaults, $class->load_test_configs);
 }
@@ -443,7 +471,6 @@ sub make_server {
         unshift @Jifty::Server::ISA, 'Jifty::TestServer::Apache';
     }
     else {
-        require Test::HTTP::Server::Simple;
         unshift @Jifty::Server::ISA, 'Test::HTTP::Server::Simple';
     }
 
@@ -612,16 +639,14 @@ sub test_in_isolation {
     return $result;
 }
 
-
 # Stick the END block in a method so we can test it.
 END { Jifty::Test->_ending }
 
 sub _ending {
-    my $Test = Jifty::Test->builder;
+    # only run the teardown code if we were responsible for setup
+    return unless $imported;
 
-    if (my $plugin = Jifty->find_plugin("Jifty::Plugin::TestServerWarnings")) {
-        warn "Uncaught warning: $_" for $plugin->stashed_warnings;
-    }
+    my $Test = Jifty::Test->builder;
 
     # Such a hack -- try to detect if this is a forked child process and don't
     # do cleanup in that case.
@@ -630,6 +655,17 @@ sub _ending {
     # in the same process
     # XXX TODO - This makes assumptions about Test::Builder internals
     return if $Test->{Original_Pid} != $$;
+
+    my $should_die = 0;
+    if ($Jifty::SERVER && (my $plugin = Jifty->find_plugin("Jifty::Plugin::TestServerWarnings"))) {
+        my @warnings = $plugin->decoded_warnings( 'http://localhost:'.$Jifty::SERVER->port );
+
+        $Test->diag("Uncaught warning: $_") for @warnings;
+        if ($WARNINGS_ARE_FATAL && @warnings) {
+            $Test->diag('Warnings not accepted in strict mode.');
+            $should_die = 1;
+        }
+    }
 
     # If all tests passed..
     if (Jifty::Test->is_passing && Jifty::Test->is_done) {
@@ -667,6 +703,7 @@ sub _ending {
 
     # Unlink test file
     unlink $Test->{test_config} if $Test->{test_config};
+    exit -1 if $should_die;
 }
 
 =head1 SEE ALSO

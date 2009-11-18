@@ -17,6 +17,7 @@ requires('Crypt::CBC');
 requires('Crypt::Rijndael');
 requires('Compress::Zlib');
 requires('CSS::Squish' => 0.07 );
+requires('DBI');
 requires('DBD::SQLite' => 1.11 );
 requires('Data::Page');
 requires('Data::UUID');
@@ -52,7 +53,7 @@ requires('Hash::Merge');
 requires('Hook::LexWrap');
 requires('IPC::PubSub' => '0.23' );
 requires('IPC::Run3');
-requires('Jifty::DBI' => '0.57' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
+requires('Jifty::DBI' => '0.58' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
 requires('List::MoreUtils');
 requires('Locale::Maketext::Extract' => '0.35');
 requires('Locale::Maketext::Lexicon' => '0.77');
@@ -75,11 +76,12 @@ requires('SQL::ReservedWords');
 requires('Template::Declare' => '0.36');                # Template::Declare::Tags
 requires('Test::Base');
 requires('Test::LongString');
-requires('Test::More' => 0.62 ),
-requires('Test::Pod::Coverage'),
-requires('Test::WWW::Mechanize' => 1.04 ),
-requires('Test::WWW::Selenium'),
-requires('WWW::Mechanize' => 1.51 ),
+requires('Test::More' => 0.62 );
+requires('Test::Pod::Coverage');
+requires('Test::Script::Run' => 0.03);
+requires('Test::WWW::Mechanize' => 1.04 );
+requires('Test::WWW::Selenium' => 1.18 );
+requires('WWW::Mechanize' => 1.51 );
 requires('UNIVERSAL::require');
 requires('URI' => 1.31);
 requires('URI::Escape');

@@ -1,0 +1,106 @@
+.crud-ui {
+}
+
+.crud-search {
+}
+
+.crud-pages {
+}
+
+.crud-paging {
+}
+
+.crud-table {
+    display: table;
+}
+
+.crud-column-headers {
+    display: table-header-group;
+}
+
+.crud-column-header, .crud-field {
+    display: table-cell;
+    padding-left: .2em;
+    padding-right: .2em;
+}
+
+.crud-list {
+    background: #FFFFFF;
+}
+
+/* this is the fallback for when you do not have css 3 */
+.crud-list div.odd {
+    background: #DDFFFF;
+}
+
+/* this is more robust as it permits adding/removing rows */
+/* XXX: it's not ready yet because there are intermittent script tags only
+ * in the original CRUD, not in region updates. argh */
+/*.crud-list > div:nth-child(odd) {
+    background: #DDFFFF;
+}*/
+
+.crud-list {
+    display: table-row-group;
+}
+
+.crud-create {
+}
+
+.crud-item {
+    display: table-row;
+}
+
+.field {
+    float: left;
+    margin: 0.15em 0.5em 0.15em 0.15em;
+    font-weight: bold;
+}
+
+.up, .down, .up_select, .down_select {
+    height : 1.5em;
+    float: left;
+    margin-right: 0.2em;
+}
+
+.up, .up_select {
+    background: url(/static/images/css/bullet_arrow_up.png) no-repeat bottom center;
+}
+
+.down, .down_select {
+    background: url(/static/images/css/bullet_arrow_down.png) no-repeat bottom center;
+}
+
+.up_select a, .down_select a {
+    font-weight: bold;
+    color: #900;
+}
+
+
+.crud-column-headers a {
+    color: black;
+    display: block;
+    font-size: 0.6em;
+    height: 100%;
+    text-decoration: none;
+    font-family : sans-serif;
+}
+
+.paging-nav {
+    font-size: 0.8em;
+}
+
+.paging-nav a,
+.paging-nav a:active,
+.paging-nav a:hover,
+.paging-nav a:visited {
+    color: #0000FF;
+}
+
+.paging-nav .current {
+    font-weight: bold;
+}
+
+.paging-prev, .paging-next, .paging-all {
+    font-size: 0.8em;
+}

@@ -773,6 +773,11 @@ Behaviour.register({
             jQuery(e).addClass("focused").focus();
         }
     },
+    // Hide with javascript (since the user may have even partially-working CSS
+    // but no JS)
+    ".jshide": function(e) {
+        jQuery(e).hide();
+    },
     /* Use jQuery for full-page-refresh notifications, as well */
     '#messages.jifty.results.messages, #errors.jifty.results.messages, .popup_message, .popup_error': function(e) {
         jQuery(e).hide();
@@ -1031,7 +1036,9 @@ var apply_fragment_updates = function(fragment, f) {
                 textContent = textContentWithoutScript + scripts;
 
                 // Once we find it, do the insertion
-                if (f['mode'] && (f['mode'] != 'Replace')) {
+                if (f['mode'] == 'Popout') {
+                    jQuery.facebox(textContent);
+                } else if (f['mode'] && (f['mode'] != 'Replace')) {
                     var method = ({
                         After: 'after',
                         Before: 'before',
@@ -1083,6 +1090,10 @@ var apply_fragment_updates = function(fragment, f) {
 //  - 'action_arguments' is a hash of action monikers to hashes of arguments which should override any arguments coming from form fields
 //        the hash keys for 'action_arguments' are the values of the 'actions' array
 //  - 'continuation' is ??? Please document me
+//  - 'hide_wait_message' for when you don't want to see it
+//  - 'preload' this request is preloading regions
+//  - 'preload_key' the cache key for using preloaded regions
+//  - 'headers' is a hash of headers to send in this request
 //  - 'fragments' is an array of hashes, which may have:
 //     - 'region' is the name of the region to update
 //     - 'args' is a hash of arguments to override
@@ -1153,6 +1164,7 @@ Jifty.update = function () {
 
     // Build actions request structure
     var has_request = 0;
+    var action_count = 0;
     request['actions'] = {};
 
     // Go through the monikers and actions we know about
@@ -1231,6 +1243,7 @@ Jifty.update = function () {
 
             // Add the parameters to the request we're building
             request['actions'][moniker] = param;
+            ++action_count;
 
             // Remember that we have a request if we're submitting an action
             ++has_request;
@@ -1293,15 +1306,26 @@ Jifty.update = function () {
         return false;
     }
 
-    // Show the "Loading..." message (or equivalent)
-    show_wait_message();
-
     // And when we get the result back, we'll want to deal with it
     //
     // NOTE: Success here doesn't mean the server liked the request, but that
     // the HTTP communication succeeded. There still might be errors validating
     // fields, with the app connecting to the database, etc.
-    var onSuccess = function(responseXML, object) {
+    var onSuccess = function(responseXML) {
+        if (named_args['preload']) {
+            // Did we click on a region we were waiting for? If so, pretend
+            // we're not preloading at all and treat this as a regular region
+            // load.
+            if (Jifty.want_preloaded_regions[ named_args['preload_key'] ]) {
+                delete Jifty.want_preloaded_regions[ named_args['preload_key'] ];
+            }
+            // Otherwise, stash this preloaded region away where we can find it
+            // for later (possible) reuse.
+            else {
+                Jifty.preloaded_regions[ named_args['preload_key'] ] = responseXML;
+                return;
+            }
+        }
 
         // Grab the XML response
         var response = responseXML.documentElement;
@@ -1427,10 +1451,16 @@ Jifty.update = function () {
     var onFailure = function(transport, object) {
 
         // We failed, but we at least know we're done waiting
-        hide_wait_message_now();
+        if (!hide_wait) {
+            hide_wait_message_now();
+        }
 
         // Cry like a baby
-        alert("Unable to connect to server.\n\nTry again in a few minutes.");
+        // Don't irritate the user about preload failures, maybe it'll work
+        // if they actually do click through to the region
+        if (!named_args['preload']) {
+            alert("Unable to connect to server.\n\nTry again in a few minutes.");
+        }
 
         // Record the failed request (XXX for debugging?)
         Jifty.failedRequest = transport;
@@ -1468,6 +1498,58 @@ Jifty.update = function () {
         })
     }
 
+    var submitActions = function () {
+        // If we have to submit actions, then it gets more complicated
+        // We submit a request with the action and block preloading until
+        // the action has returned
+        if (action_count > 0) {
+
+            // We do not want any region updates. That is for the preloading
+            // request.
+            delete request.fragments;
+
+            Jifty.preload_action_request();
+            jQuery.ajax({
+                url:         document.URL,
+                type:        'post',
+                dataType:    'xml',
+                data:        JSON.stringify(request),
+                contentType: 'text/x-json',
+                error:       onFailure,
+                success:     onSuccess,
+                complete:    Jifty.preload_action_respond,
+            });
+        }
+    };
+
+    // Are we requesting a region we have preloaded? If so, use the response
+    // from the cache instead of making a new request. Snappy!
+    if (Jifty.preloaded_regions[ named_args['preload_key'] ]) {
+        var faux_response = Jifty.preloaded_regions[ named_args['preload_key'] ];
+        delete Jifty.preloaded_regions[ named_args['preload_key'] ];
+
+        submitActions();
+
+        onSuccess(faux_response);
+        return false;
+    }
+
+    // If we're loading a region, then we should just wait for it instead
+    // of making a second request and throwing away the preload. If the
+    // onSuccess callback sees the want_preloaded_region it will immediately
+    // process it.
+    if (Jifty.preloading_regions[ named_args['preload_key'] ]) {
+        Jifty.want_preloaded_regions[ named_args['preload_key'] ] = 1;
+        submitActions();
+        return false;
+    }
+
+    // Show the "Loading..." message (or equivalent)
+    var hide_wait = named_args['hide_wait_message'];
+    if (!hide_wait) {
+        show_wait_message();
+    }
+
     // Submit ajax request as JSON; expect XML in return
     jQuery.ajax({
         url:         document.URL,
@@ -1476,15 +1558,102 @@ Jifty.update = function () {
         data:        JSON.stringify(request),
         contentType: 'text/x-json',
         error:       onFailure,
+        success:     onSuccess,
 
         // Hide the wait message when we're done
-        complete:    function(){hide_wait_message()},
-        success:     onSuccess
+        complete: function() {
+            // If we want this same region again, don't reuse it from the cache
+            delete Jifty.preloading_regions[ named_args['preload_key'] ];
+
+            if (!hide_wait) {
+                hide_wait_message();
+            }
+        },
+
+        beforeSend: function (request) {
+            var headers = named_args['headers'];
+            for (header in headers) {
+                if (headers.hasOwnProperty(header)) {
+                    request.setRequestHeader(header, headers[header]);
+                }
+            }
+        }
     });
 
     // Disable regular browser form submission (we're Ajaxing instead)
     return false;
 }
+
+// A cache of preload_key to XMLresponse objects
+Jifty.preloaded_regions = {};
+
+// Are we currently preloading a given preload_key?
+Jifty.preloading_regions = {};
+
+// Are we submitting an action? If so, delay preloading.
+Jifty.preloading_is_queued = 0;
+
+// A cache of preloads to execute once we have a response to the action
+// we submitted
+Jifty.queued_preloads = [];
+
+// For when we want a preloading region to be processed immediately (e.g. when
+// we click a preloaded button)
+Jifty.want_preloaded_regions = {};
+
+Jifty.preload = function (args, trigger) {
+    // XXX: prevent default behavior in IE
+    if(window.event) {
+        window.event.returnValue = false;
+    }
+
+    // Don't request the same region multiple times
+    if (Jifty.preloading_regions[ args['preload_key'] ]) {
+        return false;
+    }
+
+    // We're waiting for an action. We don't want to preload any more regions
+    // until we know that action has been executed.
+    if (Jifty.preloading_is_queued) {
+        Jifty.preloading_regions[ args['preload_key'] ] = 1;
+        Jifty.queued_preloads.push(function () {
+            delete Jifty.preloading_regions[ args['preload_key'] ];
+            Jifty.preload(args, trigger);
+        });
+        return false;
+    }
+
+    // Preloading is supposed to be silent
+    args.hide_wait_message = 1;
+
+    // Tell Jifty.update to delay processing of the response
+    args.preload = 1;
+
+    // Preloading should never submit actions, preloaded regions should be
+    // relatively pure
+    args.actions = [];
+
+    Jifty.update(args, trigger);
+
+    Jifty.preloading_regions[ args['preload_key'] ] = 1;
+
+    return false;
+}
+
+Jifty.preload_action_request = function () {
+    ++Jifty.preloading_is_queued;
+};
+
+Jifty.preload_action_respond = function () {
+    if (--Jifty.preloading_is_queued == 0) {
+        var preloads = Jifty.queued_preloads;
+        Jifty.queued_preloads = [];
+
+        for (var i = 0; i < preloads.length; ++i) {
+            preloads[i]();
+        }
+    }
+};
 
 function update ( named_args, trigger ) {
     alert( 'please use Jifty.update instead of update.' );

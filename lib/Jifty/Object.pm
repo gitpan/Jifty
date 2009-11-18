@@ -73,10 +73,11 @@ sub _get_current_user {
     eval {
         package DB;
 
-        my $depth = 1;
+        my $depth = 2;
         while ( not $cu and $depth < 10 ) {
             # get the caller in array context to populate @DB::args
-            my $x = (CORE::caller( $depth++ ))[0];
+            my ($package) = CORE::caller( $depth++ );
+            last if defined $package and $package eq "HTML::Mason::Commands";
             my $caller_self = $DB::args[0];
             next unless ref($caller_self);    #skip class methods;
             next unless my $s = $caller_self->can('current_user');
@@ -86,13 +87,14 @@ sub _get_current_user {
         }
     };
 
+    # Just return it if we're a cless method
+    return $cu || Jifty->web->current_user unless ref $self;
+
     # If we found something, return it
     return $self->current_user( $cu ) if $cu;
 
     # Fallback to web ui framework
-    if ( Jifty->web ) {
-        return $self->current_user( Jifty->web->current_user );
-    }
+    return $self->current_user( Jifty->web->current_user ) if Jifty->web;
 
     return undef;
 }

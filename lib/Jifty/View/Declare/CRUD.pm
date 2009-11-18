@@ -140,7 +140,12 @@ This method returns the type of object this CRUD view has been generated for. Th
 
 sub object_type {
     my $self = shift;
-    return $self->package_variable('object_type') || get('object_type');
+    my $object_type = $self->package_variable('object_type') || get('object_type');
+
+    warn "No object type found for $self"
+        if !$object_type;
+
+    return $object_type;
 }
 
 =head2 record_class
@@ -229,7 +234,7 @@ sub fragment_base_path {
 
 =head2 _get_record $id
 
-Given an $id, returns a record object for the CRUD view's model class.
+Given an C<$id>, returns a record object for the CRUD view's model class.
 
 =cut
 
@@ -320,7 +325,10 @@ sub view_field {
     my $self = shift;
     my %args = @_;
 
-    render_param($args{action} => $args{field}, render_mode => 'read');
+    my $action = delete $args{action};
+    my $field  = delete $args{field};
+
+    render_param($action => $field, render_mode => 'read', %args);
 }
 
 =head2 create_field action => $action_object, field => $field_name
@@ -333,7 +341,10 @@ sub create_field {
     my $self = shift;
     my %args = @_;
 
-    render_param($args{action}, $args{field});
+    my $action = delete $args{action};
+    my $field  = delete $args{field};
+
+    render_param($action => $field, %args);
 }
 
 =head2 edit_field action => $action_object, field => $field_name
@@ -346,7 +357,10 @@ sub edit_field {
     my $self = shift;
     my %args = @_;
 
-    render_param($args{action}, $args{field});
+    my $action = delete $args{action};
+    my $field  = delete $args{field};
+
+    render_param($action => $field, %args);
 }
 
 =head2 page_title
@@ -402,13 +416,15 @@ template 'search' => sub {
 
         $search->button(
             label   => _('Search'),
-            onclick => {
-                submit  => $search,
-                refresh => Jifty->web->current_region->parent,
-                args    => { page => 1 }
-            }
+            onclick => [
+                { submit => $search },
+                "jQuery(document).trigger('close.facebox');",
+                {
+                    refresh => Jifty->web->current_region->parent,
+                    args    => { page => 1 },
+                },
+            ],
         );
-
     }
 };
 
@@ -427,22 +443,18 @@ template 'view' => sub :CRUDView {
         moniker => "update-" . Jifty->web->serial,
     );
 
-    div {
-        { class is 'crud read item inline' };
-        my @fields = $self->display_columns($update);
-        for my $field (@fields) {
-            div { { class is 'view-argument-'.$field};
-                $self->render_field(
-                    mode   => 'view',
-                    action => $update,
-                    field  => $field,
-                );
-            };
-        }
-        show ('./view_item_controls', $record, $update); 
-    };
-    hr {};
-
+    my @fields = $self->display_columns;
+    for my $field (@fields) {
+        div { { class is 'crud-field view-argument-'.$field};
+            $self->render_field(
+                mode   => 'view',
+                action => $update,
+                field  => $field,
+                label  => '',
+            );
+        };
+    }
+    show ('./view_item_controls', $record, $update);
 };
 
 =head2 private template view_item_controls
@@ -460,8 +472,8 @@ private template view_item_controls  => sub {
             label   => _("Edit"),
             class   => "editlink",
             onclick => {
-                replace_with => $self->fragment_for('update'),
-                args         => { id => $record->id }
+                popout => $self->fragment_for('update'),
+                args   => { id => $record->id },
             },
         );
     }
@@ -487,12 +499,10 @@ template 'update' => sub {
     );
 
     div {
-        { class is "crud update item inline " . $object_type }
+        { class is "crud update item " . $object_type }
 
         show('./edit_item', $update);
         show('./edit_item_controls', $record, $update);
-
-        hr {};
     }
 };
 
@@ -513,35 +523,33 @@ private template edit_item_controls => sub {
     my $delete = $record->as_delete_action(
         moniker => 'delete-' . Jifty->web->serial,
     );
+    my $view_region = Jifty->web->qualified_parent_region;
+
     div {
         { class is 'crud editlink' };
         hyperlink(
             label   => _("Save"),
             onclick => [
                 { submit => $update },
-                {   replace_with => $self->fragment_for('view'),
-                    args => { object_type => $object_type, id => $id }
-                }
-            ]
-        );
-        hyperlink(
-            label   => _("Cancel"),
-            onclick => {
-                replace_with => $self->fragment_for('view'),
-                args         => { object_type => $object_type, id => $id }
-            },
-            as_button => 1,
-            class     => 'cancel'
+                "jQuery(document).trigger('close.facebox');",
+                { refresh => $view_region },
+            ],
         );
         if ( $record->current_user_can('delete') ) {
             $delete->button(
                 label   => _('Delete'),
-                onclick => {
-                    submit  => $delete,
-                    confirm => _('Really delete?'),
-                    replace_with => '/__jifty/empty',
-                },
-                class => 'delete'
+                onclick => [
+                    {
+                        submit  => $delete,
+                        confirm => _('Really delete?'),
+                    },
+                    "jQuery(document).trigger('close.facebox');",
+                    {
+                        region => $view_region,
+                        replace_with => '/__jifty/empty',
+                    },
+                ],
+                class => 'delete',
             );
         }
     };
@@ -561,12 +569,18 @@ template 'list' => sub {
     my $sort_by = get ('sort_by') || '';
     my $order = get ('order') || '';
     my $collection =  $self->_current_collection();
+
     div {
-        {class is 'crud-'.$self->object_type }; 
-        show('./search_region');
+        {class is 'crud-ui crud-'.$self->object_type };
+        show( './search_region');
         show( './paging_top',    $collection, $page );
-        show( './sort_header', $item_path, $sort_by, $order );
-        show( './list_items',    $collection, $item_path );
+
+        div {
+            { class is 'crud-table' };
+            show( './sort_header',   $item_path, $sort_by, $order );
+            show( './list_items',    $collection, $item_path );
+        };
+
         show( './paging_bottom', $collection, $page );
         show( './new_item_region');
     };
@@ -625,33 +639,35 @@ template 'sort_header' => sub {
     my $order = shift;
     my $record_class = $self->record_class;
 
-    div { 
-        { class is "jifty_admin_header" };
+    div {
+        { class is "crud-column-headers" };
         for my $argument ($self->display_columns) {
-            my $css_class = ($sort_by && !$order && $sort_by eq $argument)?'up_select':'up';
-            span {
-                { class is $css_class };
-                hyperlink(
-                    label => _("asc"),
-                    onclick =>
-                        { args => { sort_by => $argument, order => undef } },
-                );
-            };
-            $css_class = ($sort_by && $order && $sort_by eq $argument)?'down_select':'down' ;
-            span {
-                { class is $css_class };
-                hyperlink(
-                    label => _("desc"),
-                    onclick =>
-                        { args => { sort_by => $argument, order => 'D' } },
-                );
-            };
-            span{
-                {class is "field"};
-                outs $argument;
-            };
-        };
-        hr {};
+            div {
+                { class is 'crud-column-header' };
+                my $css_class = ($sort_by && !$order && $sort_by eq $argument)?'up_select':'up';
+                span {
+                    { class is $css_class };
+                    hyperlink(
+                        label => _("asc"),
+                        onclick =>
+                            { args => { sort_by => $argument, order => undef } },
+                    );
+                };
+                $css_class = ($sort_by && $order && $sort_by eq $argument)?'down_select':'down' ;
+                span {
+                    { class is $css_class };
+                    hyperlink(
+                        label => _("desc"),
+                        onclick =>
+                            { args => { sort_by => $argument, order => 'D' } },
+                    );
+                };
+                span{
+                    {class is "field"};
+                    outs $record_class->column($argument)->label || $argument;
+                };
+            }
+        }
     };
 };
 
@@ -714,25 +730,26 @@ private template 'search_region' => sub {
     my $self        = shift;
     my $object_type = $self->object_type;
 
-    show('predefined_search');
+    div {
+        attr { class is 'crud-search' };
 
-    my $search_region = Jifty::Web::PageRegion->new(
-        name => 'search',
-        path => '/__jifty/empty'
-    );
+        show('predefined_search');
 
-    hyperlink(
-        onclick => [
-            {   region       => $search_region->qualified_name,
-                replace_with => $self->fragment_for('search'),
-                toggle       => 1,
-                args         => { object_type => $object_type }
+        my $search_region = Jifty::Web::PageRegion->new(
+            name => 'search',
+            path => '/__jifty/empty'
+        );
+
+        hyperlink(
+            onclick => {
+                popout => $self->fragment_for('search'),
+                args   => { object_type => $object_type }
             },
-        ],
-        label => _('Toggle search'),
-    );
+            label => _('Search'),
+        );
 
-    outs( $search_region->render );
+        outs( $search_region->render );
+    }
 };
 
 =head2 new_item_region
@@ -786,26 +803,31 @@ private template 'list_items' => sub {
     $collection->_do_search(); # we're going to need the results. 
     # XXX TODO, should use a real API to force the search
 
-    if ( $collection->count == 0 ) {
-        render_region(
-            name => 'no_items_found',
-            path => $self->fragment_for('no_items_found'),
-        );
-    }
-
-    my $i = 0;
     div {
-        { class is 'list' };
+        { class is 'crud-list' };
+        if ( $collection->count == 0 ) {
+            render_region(
+                name => 'no_items_found',
+                path => $self->fragment_for('no_items_found'),
+            );
+        }
+
+        my $i = 0;
         while ( my $item = $collection->next ) {
+
             render_region(
                 name     => 'item-' . $item->id,
                 path     => $item_path,
-                defaults => { id => $item->id, object_type => $object_type }
+                class    => 'crud-item ' . ($i++ % 2 ? 'odd' : 'even'),
+                defaults => {
+                    id => $item->id,
+                    object_type => $object_type,
+                }
             );
-            $callback->(++$i) if $callback;
+
+            $callback->($i) if $callback;
         }
     };
-
 };
 
 =head2 paging_top $collection $page_number
@@ -817,16 +839,13 @@ Paging for your list, rendered at the top of the list
 private template 'paging_top' => sub {
     my $self       = shift;
     my $collection = shift;
-    my $page       = shift || 1;
+    my $page       = shift;
 
-    if ( $collection->pager->last_page > 1 ) {
-        span {
-            { class is 'page-count' };
-            outs(
-                _( "Page %1 of %2", $page, $collection->pager->last_page ) );
-            }
-    }
-
+    render_mason '/_elements/paging' => {
+        collection => $collection,
+        page       => $page,
+        allow_all  => 1,
+    };
 };
 
 =head2 paging_bottom $collection $page_number
@@ -839,29 +858,11 @@ private template paging_bottom => sub {
     my $self       = shift;
     my $collection = shift;
     my $page       = shift;
-    div {
-        { class is 'paging' };
-        if ( $collection->pager->previous_page ) {
-            span {
-                { class is 'prev-page' };
-                hyperlink(
-                    label   => _("Previous Page"),
-                    onclick => {
-                        args => { page => $collection->pager->previous_page }
-                    }
-                );
-                }
-        }
-        if ( $collection->pager->next_page ) {
-            span {
-                { class is 'next-page' };
-                hyperlink(
-                    label   => _("Next Page"),
-                    onclick =>
-                        { args => { page => $collection->pager->next_page } }
-                );
-                }
-        }
+
+    render_mason '/_elements/paging' => {
+        collection => $collection,
+        page       => $page,
+        allow_all  => 1,
     };
 };
 
@@ -875,6 +876,7 @@ Renders the action $Action, handing it the array ref returned by L</display_colu
 private template 'create_item' => sub {
     my $self = shift;
     my $action = shift;
+
     for my $field ($self->create_columns($action)) {
         div { 
             { class is 'create-argument-'.$field};
@@ -922,7 +924,7 @@ template 'new_item' => sub {
     my $create = $record_class->as_create_action;
 
     div {
-        { class is 'crud create item inline' };
+        { class is 'crud-create crud create item inline' };
         show('./create_item', $create);
         show('./new_item_controls', $create);
     }
@@ -940,7 +942,7 @@ private template 'new_item_controls' => sub {
                 { submit       => $create },
                 { refresh_self => 1 },
                 { delete => Jifty->web->qualified_parent_region('no_items_found') },
-                {   element => Jifty->web->current_region->parent->get_element( 'div.list'),
+                {   element => Jifty->web->current_region->parent->get_element( 'div.crud-list'),
                     append => $self->fragment_for('view'),
                     args   => {
                         object_type => $object_type,

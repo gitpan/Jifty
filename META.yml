@@ -58,6 +58,7 @@ requires:
   Crypt::CBC: 0
   Crypt::Rijndael: 0
   DBD::SQLite: 1.11
+  DBI: 0
   Data::Page: 0
   Data::UUID: 0
   Date::Manip: 0
@@ -93,7 +94,7 @@ requires:
   IPC::PubSub: 0.23
   IPC::Run3: 0
   JSON::Syck: 0.29
-  Jifty::DBI: 0.57
+  Jifty::DBI: 0.58
   LWP::UserAgent: 0
   List::MoreUtils: 0
   Locale::Maketext::Extract: 0.35
@@ -118,8 +119,9 @@ requires:
   Test::LongString: 0
   Test::More: 0.62
   Test::Pod::Coverage: 0
+  Test::Script::Run: 0.03
   Test::WWW::Mechanize: 1.04
-  Test::WWW::Selenium: 0
+  Test::WWW::Selenium: 1.18
   UNIVERSAL::require: 0
   URI: 1.31
   URI::Escape: 0
@@ -131,4 +133,4 @@ requires:
   YAML::Syck: 0.71
   perl: 5.8.3
   version: 0
-version: 0.90519
+version: 0.90701

@@ -175,14 +175,20 @@ sub _page_class {
 
 =head3 form CODE
 
-Takes a subroutine reference or block of perl as its only argument and renders it as a Jifty C<form>,
-for example:
+Takes a subroutine reference or block of perl as its only argument and renders
+it as a Jifty C<form>, for example:
 
     my $action = new_action class => 'CreateTask';
     form {
         form_next_page url => '/';
         render_action $action;
         form_submit( label => _('Create') );
+    };
+
+You can specify the form name using L<Template::Declare::Tags/with>, like so:
+
+    with (name => 'create_task'), form {
+        ...
     };
 
 =cut
@@ -247,9 +253,10 @@ sub render_action(@) {
     }
 }
 
-=head2 render_param $action @args
+=head2 render_param $action, $param, %args
 
-Takes an action and one or more arguments to pass to L<< Jifty::Action->form_field >>.
+Takes an action and one or more arguments to pass to
+L<< Jifty::Action->form_field >>.
 
 =cut
 

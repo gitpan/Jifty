@@ -48,7 +48,7 @@ sub new {
 Finds the moniker of the first action of type I<ACTION> whose
 "constructor" field I<FIELD1> is I<VALUE1>, and so on.
 
-   my $mon =$mech->moniker_for('MyApp::Action::UpdateInfok');
+   my $mon = $mech->moniker_for('MyApp::Action::UpdateInfo');
 
 If there is only one action of type ACTION, be sure not to pass
 any more arguments to this method, or the method will return undef.
@@ -200,24 +200,37 @@ sub action_form {
     return;
 } 
 
-=head2 action_field_value MONIKER, FIELD
+=head2 action_field_input MONIKER, FIELD
 
-Finds the fields on the current page with the names FIELD in the
-action MONIKER, and returns its value, or undef if it can't be found.
+Finds the field on the current page with the names FIELD in the
+action MONIKER, and returns its L<HTML::Form::Input>, or undef if it can't be
+found.
 
 =cut
 
-sub action_field_value {
+sub action_field_input {
     my $self = shift;
     my $moniker = shift;
     my $field = shift;
 
     my $action_form = $self->action_form($moniker, $field);
     return unless $action_form;
-    
+
     my $input = $action_form->find_input("J:A:F-$field-$moniker");
-    return unless $input;
-    return $input->value;
+    return $input;
+}
+
+=head2 action_field_value MONIKER, FIELD
+
+Finds the field on the current page with the names FIELD in the
+action MONIKER, and returns its value, or undef if it can't be found.
+
+=cut
+
+sub action_field_value {
+    my $self = shift;
+    my $input = $self->action_field_input(@_);
+    return $input ? $input->value : undef;
 }
 
 =head2 send_action CLASS ARGUMENT => VALUE, [ ... ]

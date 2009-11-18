@@ -10,6 +10,7 @@ use Scalar::Util qw(weaken);
 
 __PACKAGE__->mk_accessors(qw(
     label sort_order link target escape_label class render_children_inline
+    raw_html
 ));
 
 =head1 NAME
@@ -21,8 +22,8 @@ Jifty::Web::Menu - Handle the API for menu navigation
 =head2 new PARAMHASH
 
 Creates a new L<Jifty::Web::Menu> object.  Possible keys in the
-I<PARAMHASH> are C<label>, C<parent>, C<sort_order>, C<url>, and
-C<active>.  See the subroutines with the respective name below for
+I<PARAMHASH> are L</label>, L</parent>, L</sort_order>, L</url>, and
+L</active>.  See the subroutines with the respective name below for
 each option's use.
 
 =cut
@@ -55,8 +56,13 @@ Sets or returns the string that the menu item will be displayed as.
 Gets or sets the parent L<Jifty::Web::Menu> of this item; this defaults
 to null. This ensures that the reference is weakened.
 
-=cut
+=head2 raw_html [STRING]
 
+Sets the content of this menu item to a raw blob of HTML. When 
+asked or output, rather than constructing a link, Jifty will return 
+this raw content. No escaping is done.
+
+=cut
 
 sub parent {
     my $self = shift;
@@ -76,9 +82,9 @@ the parent.  This defaults to adding onto the end.
 
 =head2 link
 
-Gets or set a Jifty::Web::Link object that represents this menu item. If
-you're looking to do complex ajaxy things with menus, this is likely
-the option you want.
+Gets or set a L<Jifty::Web::Form::Link> object that represents this
+menu item. If you're looking to do complex ajaxy things with menus,
+this is likely the option you want.
 
 =head2 target [STRING]
 
@@ -89,7 +95,7 @@ Get or set the frame or pseudo-target for this link. something like L<_blank>
 =head2 class [STRING]
 
 Gets or sets the CSS class the link should have in addition to the default
-classes.  This is only used if C<link> isn't specified.
+classes.  This is only used if L</link> isn't specified.
 
 =head2 render_children_inline [BOOLEAN]
 
@@ -142,7 +148,7 @@ If only a I<KEY> is provided, returns the child with that I<KEY>.
 
 Otherwise, creates or overwrites the child with that key, passing the
 I<PARAMHASH> to L<Jifty::Web::Menu/new>.  Additionally, the paramhash's
-C<label> defaults to the I<KEY>, and the C<sort_order> defaults to the
+L</label> defaults to the I<KEY>, and the L</sort_order> defaults to the
 pre-existing child's sort order (if a C<KEY> is being over-written) or
 the end of the list, if it is a new C<KEY>.
 
@@ -471,10 +477,10 @@ sub _render_as_yui_menu_item {
 
 =head2 as_link
 
-Return this menu item as a C<Jifty::Web::Link>, either the one we were
-initialized with or a new one made from the C</label> and C</url>
+Return this menu item as a L<Jifty::Web::Form::Link>, either the one
+we were initialized with or a new one made from the L</label> and L</url>
 
-If there's no C</url> and no C</link>, renders just the label.
+If there's no L</url> and no L</link>, renders just the label.
 
 =cut
 
@@ -483,7 +489,10 @@ sub as_link {
     # Stringifying $self->link may return '' and output something, so
     # we need to be careful to not stringify it more than once, and to
     # check it for defined-ness, not truth.
-    if ( defined (my $str = $self->link) ) {
+    if  ( my $raw = $self->raw_html) {
+        return $raw;
+    }
+    elsif ( defined (my $str = $self->link) ) {
         return $str;
     } elsif ( $self->url ) {
         return Jifty->web->link( label => _( $self->label ),

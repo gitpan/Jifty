@@ -39,6 +39,10 @@ Add the given C<PATH> as a new fragment, just after the start of the
 CSS selector given by L</element>, which defaults to the start of the
 current region.
 
+=item popout => PATH
+
+Displays the given C<PATH> as a new fragment in a lightbox-style popout.
+
 =item replace_with => PATH
 
 Replaces the region specified by the C<region> parameter (which
@@ -386,22 +390,18 @@ string of HTML attributes.
 sub javascript {
     my $self = shift;
     my %response = $self->javascript_attrs;
-    return join "", map {qq| $_="| . Jifty->web->escape($response{$_}).qq|"|} sort keys %response;
+
+    return join "",
+           map { qq| $_="| . Jifty->web->escape($response{$_}) . qq|"| }
+           sort keys %response;
 }
 
-=head2 javascript_attrs
-
-Returns the javascript necessary to make the events happen, as a
-hash of attribute-name and value.
-
-=cut
-
-sub javascript_attrs {
+sub _javascript_attrs_structure {
     my $self = shift;
+    my %structure;
 
-    my %response;
+    my $current_region = Jifty->web->current_region;
 
-  HANDLER:
     for my $trigger ( $self->handlers_used ) {
         # Walk around the Class::Accessor, for speed
         my $value = $self->{"_$trigger"};
@@ -424,6 +424,8 @@ sub javascript_attrs {
         my $confirm;
         my $beforeclick;
         my $action_arguments = {};
+        my $preload_key;
+
         for my $hook (grep {ref $_ eq "HASH"} (@{$value})) {
             my %args;
 
@@ -459,6 +461,9 @@ sub javascript_attrs {
             } elsif (exists $hook->{prepend}) {
                 @args{qw/mode path/} = ('Top', $hook->{prepend});
                 $hook->{element} ||= "#region-".$hook->{region};
+            } elsif (exists $hook->{popout}) {
+                @args{qw/mode path/} = ('Popout', $hook->{popout});
+                $hook->{element} ||= "#region-".$hook->{region};
             } elsif (exists $hook->{replace_with}) {
                 if (defined $hook->{replace_with}) {
                     @args{qw/mode path region/} = ('Replace', $hook->{replace_with}, $hook->{region});
@@ -473,9 +478,9 @@ sub javascript_attrs {
                     $self->log->warn("Can't find region ".$hook->{refresh});
                     @args{qw/mode path region/} = ('Replace', undef, $hook->{refresh});
                 }
-            } elsif ((exists $hook->{refresh_self} and Jifty->web->current_region) or (Jifty->web->current_region and $hook->{args} and %{$hook->{args}})) {
+            } elsif ((exists $hook->{refresh_self} and $current_region) or ($current_region and $hook->{args} and %{$hook->{args}})) {
                 # If we just pass arguments, treat as a refresh_self
-                @args{qw/mode path region/} = ('Replace', Jifty->web->current_region->path, Jifty->web->current_region);
+                @args{qw/mode path region/} = ('Replace', $current_region->path, $current_region);
             } elsif (exists $hook->{delete}) {
                 @args{qw/mode region/} = ('Delete', $hook->{delete});
             } else {
@@ -498,41 +503,92 @@ sub javascript_attrs {
             # Toggle functionality
             $args{toggle} = 1 if $hook->{toggle};
 
+            # Preloading functionality
+            if ($hook->{preload}) {
+                $preload_key = $hook->{preload} eq 1
+                             ? Jifty->web->serial
+                             : $hook->{preload};
+            }
+
             # Effects
             $args{$_} = $hook->{$_} for grep {exists $hook->{$_}} qw/effect effect_args remove_effect remove_effect_args/;
 
             push @fragments, \%args;
         }
 
-        my $string = join ";", grep {not ref $_} @{$value};
-        if ( @fragments or ( !$actions || %$actions ) ) {
+        $structure{$trigger} = {
+            value            => $value,
+            fragments        => \@fragments,
+            actions          => $actions,
+            action_arguments => $action_arguments,
+            confirm          => $confirm,
+            beforeclick      => $beforeclick,
+            preload_key      => $preload_key,
+        };
+    }
 
-            my $update =
-                "Jifty.update( "
-                    . Jifty::JSON::objToJson(
-                    {   actions      => $actions,
-                        action_arguments => $action_arguments,
-                        fragments    => \@fragments,
-                        continuation => $self->continuation
-                    },
-                    { singlequote => 1 }
-                    ) . ", this );";
-            $string
-                .= 'if(event.ctrlKey||event.metaKey||event.altKey||event.shiftKey) return true; '
+    return \%structure;
+}
+
+=head2 javascript_attrs
+
+Returns the javascript necessary to make the events happen, as a
+hash of attribute-name and value.
+
+=cut
+
+sub javascript_attrs {
+    my $self = shift;
+
+    my $structure = $self->_javascript_attrs_structure(@_);
+    my %response;
+
+    for my $trigger (keys %$structure) {
+        my $trigger_structure = $structure->{$trigger};
+        my $fragments = $trigger_structure->{fragments};
+        my $actions   = $trigger_structure->{actions};
+
+        my $string = join ";",
+                     grep { not ref $_ }
+                     @{ $trigger_structure->{value} };
+
+        if ( @$fragments or ( !$actions || %$actions ) ) {
+            my $update_json = Jifty::JSON::objToJson({
+                    actions      => $actions,
+                    action_arguments => $trigger_structure->{action_arguments},
+                    fragments    => $fragments,
+                    continuation => $self->continuation,
+                    preload_key  => $trigger_structure->{preload_key},
+                },
+                { singlequote => 1 },
+            );
+
+            my $update = "Jifty.update($update_json, this);";
+
+            $string .=
+                'if(event.ctrlKey||event.metaKey||event.altKey||event.shiftKey) return true; '
                 if ( $trigger eq 'onclick' );
+
             $string .= $self->javascript_preempt
                 ? "return $update"
                 : "$update; return true;";
         }
-        if ($confirm) {
-            my $text = Jifty::JSON::objToJson($confirm, {singlequote => 1});
+
+        if ($trigger_structure->{confirm}) {
+            my $text = Jifty::JSON::objToJson(
+                $trigger_structure->{confirm},
+                {singlequote => 1},
+            );
             $string = "if(!confirm($text)){ Jifty.stopEvent(event); return false; }" . $string;
         }
-        if ($beforeclick) {
-           $string = $beforeclick . $string;
+
+        if ($trigger_structure->{beforeclick}) {
+           $string = $trigger_structure->{beforeclick} . $string;
         }
+
         $response{$trigger} = $string;
     }
+
     return %response;
 }
 

@@ -44,6 +44,7 @@ __PACKAGE__->javascript_libs([qw(
     jifty_interface.js
     jquery_noconflict.js
     jquery.jgrowl.js
+    facebox.js
     behaviour.js
     formatDate.js
     jifty.js
@@ -164,6 +165,9 @@ sub url {
       $uri = URI->new($url);
       $uri->port($port);
     }
+
+    # https is sticky
+    $uri->scheme('https') if $uri->scheme eq 'http' && Jifty->web->is_ssl;
 
     if ( defined $args{'scheme'} ) {
         $uri->scheme( $args{'scheme'} );
