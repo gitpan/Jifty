@@ -74,17 +74,17 @@ sub _sp_link {
             $self->_push_onclick($args, {
                 region       => $self->region_name,
                 replace_with => $url,
-                beforeclick  => qq{SPA.historyChange('$complete_url', { 'continuation':{}, 'actions':{}, 'fragments':[{'mode':'Replace','args':@{[ Jifty::JSON::objToJson($args->{parameters})]},'region':'__page','path':'$url'}],'action_arguments':{}}, true);},
+                beforeclick  => qq{SPA.historyChange('$complete_url', { 'continuation':{}, 'actions':{}, 'fragments':[{'mode':'Replace','args':@{[ Jifty::JSON::encode_json($args->{parameters})]},'region':'__page','path':'$url'}],'action_arguments':{}}, true);},
                 args         => { %{$args->{parameters}}} });
         }
         elsif (exists $args->{submit} && !$args->{onclick}) {
-	    if ($args->{_form} && $args->{_form}{submit_to}) {
-		my $to = $args->{_form}{submit_to};
-		$self->_push_onclick($args, { beforeclick => qq{return SPA._sp_submit_form(this, event, "$to");} });
-	    }
-	    else {
-		$self->_push_onclick($args, { refresh_self => 1, submit => $args->{submit} });
-	    }
+            if ($args->{_form} && $args->{_form}{submit_to}) {
+                my $to = $args->{_form}{submit_to};
+                $self->_push_onclick($args, { beforeclick => qq{return SPA._sp_submit_form(this, event, "$to");} });
+            }
+            else {
+                $self->_push_onclick($args, { refresh_self => 1, submit => $args->{submit} });
+            }
             $args->{as_button} = 1;
         }
         if (my $form = delete $args->{_form}) {

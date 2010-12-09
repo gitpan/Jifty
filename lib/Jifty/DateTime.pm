@@ -278,7 +278,7 @@ sub new_from_string {
 
     # Hack to use Date::Manip to flexibly scan dates from strings
     {
-        # Date::Manip interprets days of the week (eg, ''monday'') as
+        # Date::Manip interprets days of the week (eg, ''Monday'') as
         # days within the *current* week. Detect these and prepend
         # ``next''
         # XXX TODO: Find a real solution (better date-parsing library?)
@@ -291,7 +291,7 @@ sub new_from_string {
         );
 
         my $dt_now = $class->now;
-        my $now = $dt_now->ymd . ' ' . $dt_now->hms;
+        my $now = $dt_now->ymd . '-' . $dt_now->hms;
 
         require Date::Manip;
 
@@ -324,7 +324,11 @@ sub new_from_string {
 
 Returns the date given by this C<Jifty::DateTime> object. It will display "today"
 for today, "tomorrow" for tomorrow, or "yesterday" for yesterday. Any other date
-will be displayed in ymd format.
+will be displayed in C<ymd> format.
+
+We currently shift by "24 hours" to detect yesterday and tomorrow, rather than
+"1 day" because of daylight saving issues. "1 day" can result in invalid local
+time errors.
 
 =cut
 
@@ -342,13 +346,13 @@ sub friendly_date {
     }
 
     # Is it yesterday?
-    my $yesterday = $rel->clone->subtract(days => 1);
+    my $yesterday = $rel->clone->subtract(hours => 24);
     if ($ymd eq $yesterday->ymd) {
         return "yesterday";
     }
 
     # Is it tomorrow?
-    my $tomorrow = $rel->clone->add(days => 1);
+    my $tomorrow = $rel->clone->add(hours => 24);
     if ($ymd eq $tomorrow->ymd) {
         return "tomorrow";
     }
@@ -436,7 +440,7 @@ L<DateTime>, L<DateTime::TimeZone>, L<Jifty::CurrentUser>
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2007 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 =cut

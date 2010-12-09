@@ -6,6 +6,10 @@ use base 'Jifty::Plugin';
 
 use IPC::Run3 'run3';
 use IO::Handle ();
+use Plack::Util;
+use HTTP::Message::PSGI;
+use HTTP::Request;
+use Plack::Response;
 
 =head1 NAME
 
@@ -21,9 +25,9 @@ Jifty::Plugin::CompressedCSSandJS - Compression of CSS and javascript files
         css: 1
         jsmin: /path/to/jsmin
         cdn: 'http://yourcdn.for.static.prefix/'
-        gzip: 1
         skipped_js:
             - complex.js
+        generate_early: 1
 
 
 =head1 DESCRIPTION
@@ -39,15 +43,16 @@ L<http://www.crockford.com/javascript/jsmin.html>.
 Note that you will need to use C<ConfigFileVersion> 2 to be able to
 configure jsmin feature.
 
-The gzip configuration directive, which defaults to enabled, instructs
-Jifty to transparently gzip css and js files as they're served if the client
-indicates it supports that feature.
-
 skipped_js is a list of js that you don't want to compress for some reason.
+
+generate_early tells the plugin to compress the CSS and JS at process start
+rather than on the first request.  This can save time, especially if your
+JS minifier is slow, for the poor sucker who makes the first request.  Enabled
+by default.
 
 =cut
 
-__PACKAGE__->mk_accessors(qw(css js jsmin cdn gzip_enabled skipped_js));
+__PACKAGE__->mk_accessors(qw(css js jsmin cdn skipped_js generate_early));
 
 =head2 init
 
@@ -63,22 +68,30 @@ sub init {
 
     my %opt  = @_;
     $self->css( $opt{css} );
-    $self->gzip_enabled( exists $opt{gzip} ? $opt{gzip} : 1);
     $self->js( $opt{js} );
     $self->jsmin( $opt{jsmin} );
     $self->cdn( $opt{cdn} || '');
+    $self->generate_early( exists $opt{generate_early} ? $opt{generate_early} : 1 );
 
-    Jifty::Web->add_trigger(
-        name      => 'include_javascript',
-        callback  => sub { $self->_include_javascript(@_) },
-        abortable => 1,
-    ) if $self->js_enabled;
+    if ( $self->js_enabled ) {
+        Jifty::Web->add_trigger(
+            name      => 'include_javascript',
+            callback  => sub { $self->_include_javascript(@_) },
+            abortable => 1,
+        );
+        Jifty->add_trigger( post_init => sub { $self->generate_javascript })
+            if $self->generate_early;
+    }
 
-    Jifty::Web->add_trigger(
-        name => 'include_css',
-        callback => sub { $self->_include_css(@_) },
-        abortable => 1,
-    ) if $self->css_enabled;
+    if ( $self->css_enabled ) {
+        Jifty::Web->add_trigger(
+            name => 'include_css',
+            callback => sub { $self->_include_css(@_) },
+            abortable => 1,
+        );
+        Jifty->add_trigger( post_init => sub { $self->generate_css })
+            if $self->generate_early;
+    }
 }
 
 =head2 js_enabled
@@ -103,16 +116,10 @@ sub css_enabled {
     defined $self->css ? $self->css : 1;
 }
 
-=head2 gzip_enabled
-
-Returns whether gzipping is enabled (which it is by default)
-
-=cut
-
 sub _include_javascript {
     my $self = shift;
 
-    $self->_generate_javascript;
+    $self->generate_javascript;
     Jifty->web->out(
         qq[<script type="text/javascript" src="@{[ $self->cdn ]}/__jifty/js/]
           . Jifty::CAS->key( 'ccjs', 'js-all' )
@@ -160,53 +167,65 @@ sub generate_css {
     );
 
     Jifty::CAS->publish( 'ccjs', 'css-all', $css,
-        { content_type => 'text/css', deflate => $self->gzip_enabled, time => time() } );
+        { content_type => 'text/css', time => time() } );
 }
 
 
 
-=head3 _generate_javascript
+=head3 generate_javascript
 
 Checks if the compressed JS is generated, and if it isn't, generates
 and caches it.
 
 =cut
 
-sub _generate_javascript {
+sub generate_javascript {
     my $self = shift;
 
     return if Jifty::CAS->key('ccjs', 'js-all') && !Jifty->config->framework('DevelMode');
+
+    my $js = $self->_generate_javascript_nocache;
+
+    Jifty::CAS->publish( 'ccjs', 'js-all', $js,
+        { content_type => 'application/x-javascript', time => time() } );
+}
+
+=head3 _generate_javascript_nocache
+
+Generates compressed javascript, ignoring the cache completely.
+
+=cut
+
+sub _generate_javascript_nocache {
+    my $self = shift;
     $self->log->debug("Generating JS...");
 
     # for the file cascading logic
-        my $static_handler = Jifty->handler->view('Jifty::View::Static::Handler');
-        my $js = "";
+    my $js = "";
 
-        for my $file ( @{ Jifty::Web->javascript_libs } ) {
-            next if $self->_js_is_skipped($file);
-            my $include = $static_handler->file_path( File::Spec->catdir( 'js', $file ) );
+    my $static_app = Jifty->handler->psgi_app_static;
 
-            if ( defined $include ) {
-                my $fh;
+    for my $file ( @{ Jifty::Web->javascript_libs } ) {
+        next if $self->_js_is_skipped($file);
 
-                if ( open $fh, '<', $include ) {
-                    $js .= "/* Including '$file' */\n\n";
-                    $js .= $_ while <$fh>;
-                    $js .= "\n/* End of '$file' */\n\n";
-                } else {
-                    $js .= "\n/* Unable to open '$file': $! */\n";
-                }
-            } else {
-                $js .= "\n/* Unable to find '$file' */\n";
-            }
+        my $res = Plack::Util::run_app
+            ( $static_app,
+              HTTP::Request->new(GET => "/js/$file")->to_psgi );
+        if ($res->[0] == 200) {
+            Plack::Util::foreach($res->[2], sub { $js .= $_[0] } );
         }
-        if ($self->jsmin) {
-            eval { $self->minify_js(\$js) };
-            $self->log->error("Unable to run jsmin: $@") if $@;
+        else {
+            $self->log->error("Unable to include '$file': $res->[0]");
+            $js .= "\n/* Unable to include '$file': $res->[0] */\n";
         }
+    }
 
-    Jifty::CAS->publish( 'ccjs', 'js-all', $js,
-        { content_type => 'application/x-javascript', deflate => $self->gzip_enabled, time => time() } );
+    if ($self->jsmin) {
+        eval { $self->minify_js(\$js) };
+        $self->log->error("Unable to run jsmin: $@") if $@;
+    }
+
+    return $js;
 }
 
 =head2 minify_js \$js
@@ -218,7 +237,7 @@ Runs the given JS through jsmin
 sub minify_js {
     my $self = shift;
     my $input = shift;
-    my $output;
+    my ($output, $err);
 
     $self->log->debug("Minifying JS...");
 
@@ -234,38 +253,12 @@ sub minify_js {
     local *STDERR = $stderr;
 
     local $SIG{'CHLD'} = 'DEFAULT';
-    run3 [$self->jsmin], $input, \$output, undef;
+    run3 [$self->jsmin], $input, \$output, \$err;
+
+    my $ret = $? >> 8;
+    $self->log->warn("Javascript minify @{[$self->jsmin]} returned $ret:\n$err") if $ret;
 
     $$input = $output;
-}
-
-# this should be cleaned up and moved to Jifty::CAS
-sub _serve_cas_object {
-    my ($self, $name, $incoming_key) = @_;
-    my $key = Jifty::CAS->key('ccjs', $name);
-
-    if ( Jifty->handler->cgi->http('If-Modified-Since') and $incoming_key eq $key ) {
-        $self->log->debug("Returning 304 for cached $name");
-        Jifty->handler->apache->header_out( Status => 304 );
-        return;
-    }
-
-    my $obj = Jifty::CAS->retrieve('ccjs', $key);
-    my $compression = '';
-    $compression = 'gzip' if $obj->metadata->{deflate}
-      && Jifty::View::Static::Handler->client_accepts_gzipped_content;
-
-    Jifty->handler->apache->content_type($obj->metadata->{content_type});
-    Jifty::View::Static::Handler->send_http_header($compression, length($obj->content));
-
-    if ( $compression ) {
-        $self->log->debug("Sending gzipped squished $name");
-        binmode STDOUT;
-        print $obj->content_deflated;
-    } else {
-        $self->log->debug("Sending squished $name");
-        print $obj->content;
-    }
 }
 
 sub _js_is_skipped {
@@ -274,6 +267,37 @@ sub _js_is_skipped {
     my $skipped_js = $self->skipped_js;
     return unless $self->skipped_js;
     return grep { $file eq $_ } @{ $self->skipped_js };
+}
+
+=head2 wrap
+
+psgi app wrapper to serve url controlled by us
+
+=cut
+
+sub wrap {
+    my ($self, $app) = @_;
+
+    sub {
+        my $env = shift;
+        if (my ($mode, $arg) = $env->{PATH_INFO} =~ m{/__jifty/(css|js)/(.*)}) {
+            if ( $arg !~ /^[0-9a-f]{32}\.$mode$/ ) {
+                # This doesn't look like a real request for squished JS or CSS,
+                # so redirect to a more failsafe place
+                my $res = Plack::Response->new;
+                $res->redirect( "/static/$mode/$arg" );
+                return $res->finalize;
+            }
+
+            my $method = "generate_".($mode eq 'js' ? 'javascript' : 'css');
+            $self->can($method)->($self);
+            $arg =~ s/\.$mode//;
+            return Jifty::CAS->serve_by_name( 'ccjs', $mode.'-all', $arg, $env );
+        }
+        else {
+            return $app->($env);
+        }
+    };
 }
 
 

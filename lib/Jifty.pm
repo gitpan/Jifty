@@ -13,7 +13,7 @@ BEGIN {
     require Time::Local;
 
     # Declare early to make sure Jifty::Record::schema_version works
-    $Jifty::VERSION = '0.91117';
+    $Jifty::VERSION = '1.01209';
 }
 
 =head1 NAME
@@ -136,7 +136,7 @@ handle to exist.  Defaults to false.
 
 The name that Jifty::Logger will log under.  If you don't specify anything
 Jifty::Logger will log under the empty string.  See L<Jifty::Logger> for
-more infomation.
+more information.
 
 =back
 
@@ -153,7 +153,7 @@ sub new {
         @_
     );
 
-    # Add the appliation's library path
+    # Add the application's library path
     push @INC, File::Spec->catdir(Jifty::Util->app_root, "lib");
 
     # Now that we've loaded the configuration, we can remove the temporary 
@@ -165,6 +165,12 @@ sub new {
     my $record_base_class = Jifty->config->framework('Database')->{'RecordBaseClass'};
     Jifty::Util->require( $record_base_class );
     push @Jifty::Record::ISA, $record_base_class unless $record_base_class eq 'Jifty::Record';
+
+    # Configure the base class for Jifty::CAS
+    @Jifty::CAS::ISA = grep { $_ ne 'Jifty::CAS::Store' } @Jifty::CAS::ISA;
+    my $cas_base = Jifty->config->framework('CAS')->{'BaseClass'};
+    Jifty::Util->require( $cas_base );
+    push @Jifty::CAS::ISA, $cas_base unless $cas_base eq 'Jifty::CAS';
 
     # Logger turn on
     Jifty->logger( Jifty::Logger->new( $args{'logger_component'} ) );
@@ -453,7 +459,7 @@ sub class_loader {
 
 =head2 setup_database_connection
 
-Set up our database connection. Optionally takes a param hash with a
+Set up our database connection. Optionally takes a paramhash with a
 single argument.  This method is automatically called by L</new>.
 
 =over
@@ -464,9 +470,9 @@ Defaults to false. If true, Jifty won't try to set up a database handle
 
 =item pre_init
 
-Defaults to false. If true, plugins are notificed that this is a
+Defaults to false. If true, plugins are notified that this is a
 pre-init, any trigger registration in C<init()> should not happen
-during this stage.  Note that model mixins's register_triggers is
+during this stage.  Note that model mixins' C<register_triggers> is
 unrelated to this.
 
 =back
@@ -488,7 +494,7 @@ sub setup_database_connection {
         or not Jifty->config->framework('Database') )
     {
 
-        # Load the app's database handle and connect
+        # Load the application's database handle and connect
         my $handle_class = Jifty->app_class("Handle");
         Jifty::Util->require( $handle_class );
         Jifty->handle( $handle_class->new );
@@ -538,7 +544,7 @@ sub background {
     } else {
         close STDOUT;
         close STDIN;
-        $Jifty::SERVER->close_client_sockets if $Jifty::SERVER;
+        # XXX: make $Jifty::SERVER close client sockets if exists
         Jifty->handle->dbh->{InactiveDestroy} = 1;
         Jifty->setup_database_connection();
         $sub->();
@@ -568,7 +574,7 @@ Jesse Vincent, Alex Vandiver and David Glasser.
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2009 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 

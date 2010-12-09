@@ -1,9 +1,0 @@
---- 
-framework: 
-  Database: 
-    Database: testapp_plugin_setupwizarduginsetupwizardt001basic45ebceea
-    Driver: SQLite
-  SetupMode: 0
-  Web: 
-    BaseURL: http://localhost
-    Port: 13250

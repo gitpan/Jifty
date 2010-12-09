@@ -61,7 +61,6 @@ sub new {
     my $self = $package->SUPER::new( request_class => 'Jifty::View::Mason::Request',
                                      out_method => sub {Carp::cluck("Mason output skipped Jifty's output stack!") if grep {defined and length} @_},
                                      %p );
-    $self->interp->compiler->add_allowed_globals('$r');
     $self->interp->set_escape( h => \&escape_utf8 );
     $self->interp->set_escape( u => \&escape_uri );
 
@@ -115,7 +114,8 @@ sub config {
 
     # In developer mode, we want halos, refreshing and all that other good stuff. 
     if (Jifty->config->framework('DevelMode') ) {
-        push @{$config{'plugins'}}, 'Jifty::View::Mason::Halo';
+        push @{$config{'plugins'}}, 'Jifty::View::Mason::Halo'
+            unless Jifty->config->framework('HideHalos');
         $config{static_source}    = 0;
         $config{use_object_files} = 0;
     }
@@ -165,7 +165,7 @@ sub escape_uri {
 =head2 template_exists COMPONENT
 
 Checks if the C<COMPONENT> exists, or if C<COMPONENT/index.html>
-exists, and returns which one did.  If neither did, it seaches for
+exists, and returns which one did.  If neither did, it searches for
 C<dhandler> components which could match, returning C<COMPONENT> if it
 finds one.  Finally, if it finds no possible component matches,
 returns undef.
@@ -210,17 +210,11 @@ sub show {
 sub _comp_setup {
     my ($self, $comp, $args) = @_;
 
-    Jifty->web->session->set_cookie;
-
-    # Set up the global
-    my $r = Jifty->handler->apache;
-    $self->interp->set_global('$r', $r);
-
     # XXX FIXME This is a kludge to get use_mason_wrapper to work
     $self->interp->set_global('$jifty_internal_request', 0);
     $self->interp->set_global('$jifty_internal_request', 1) if defined $args;
 
-    return $args ? %$args : $self->request_args($r);
+    return $args ? %$args : $self->request_args;
 }
 
 sub handle_comp {
@@ -245,7 +239,7 @@ sub request_args {
 
 =head2 create_cache_directories
 
-Attempts to create our app's mason cache directory.
+Attempts to create our application's mason cache directory.
 
 =cut
 

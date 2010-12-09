@@ -125,7 +125,7 @@ sub new {
 
         # XXX Should this be pickier about sanitized monikers?
 
-        # Monkiers must not contain semi-colons
+        # Monikers must not contain semi-colons
         if ( $args{'moniker'} =~ /[\;]/ ) {
 
             # Replace the semis with underscores and warn
@@ -473,7 +473,8 @@ sub _form_widget {
         render_mode => 'update',
         @_,
     );
-    my $cache_key = join '!!', %args;
+    my $cache_key = join '!!',
+      map { $_ => defined $args{$_} ? $args{$_} : '' } keys %args;
 
     # Setup the field name
     my $field = $args{'argument'};
@@ -855,14 +856,14 @@ sub _canonicalize_argument {
         and defined &{ $field_info->{canonicalizer} } ) {
         
         # Run it, sucka
-        $value = $field_info->{canonicalizer}->( $self, $value );
+        $value = $field_info->{canonicalizer}->( $self, $value, $self->argument_values, $self->_extra_canonicalizer_args );
     } 
     
     # How about a method named canonicalize_$field?
     elsif ( $self->can($default_method) ) {
 
         # Run that, foo'
-        $value = $self->$default_method( $value );
+        $value = $self->$default_method( $value, $self->argument_values, $self->_extra_canonicalizer_args );
     } 
     
     # Or is it a date?
@@ -870,7 +871,7 @@ sub _canonicalize_argument {
              && lc( $field_info->{render_as} ) eq 'date') {
 
         # Use the default date canonicalizer, Mr. T!
-        $value = $self->_canonicalize_date( $value );
+        $value = $self->_canonicalize_date( $value, $self->argument_values, $self->_extra_canonicalizer_args );
     }
 
     $self->argument_value($field => $value);
@@ -943,7 +944,7 @@ sub _validate_argument {
     # When it isn't even given, check if it's mandatory and whine about it
     if ( !defined $value || !length $value ) {
         if ( $field_info->{mandatory} and ($self->has_argument($field) or not defined $field_info->{default_value})) {
-            return $self->validation_error( $field => _("You need to fill in the '%1' field", $field) );
+            return $self->validation_error( $field => _("You need to fill in the '%1' field", $field_info->{label} || $field) );
         }
     }
 
@@ -961,12 +962,12 @@ sub _validate_argument {
     if ( $field_info->{validator}
         and defined &{ $field_info->{validator} } )
     {
-        return $field_info->{validator}->( $self, $value, $self->argument_values );
+        return $field_info->{validator}->( $self, $value, $self->argument_values, $self->_extra_validator_args );
     }
 
     # Check to see if it's the validate_$field method instead and use that
     elsif ( $self->can($default_validator) ) {
-        return $self->$default_validator( $value, $self->argument_values );
+        return $self->$default_validator( $value, $self->argument_values, $self->_extra_validator_args );
     }
 
     # Check if we already have a failure for it, from some other field
@@ -978,6 +979,41 @@ sub _validate_argument {
     else {
         return $self->validation_ok($field);
     }
+}
+
+=head2 _extra_validator_args
+
+Returns a list of extra arguments to pass to validators. By default, an empty
+hash reference, but subclasses can override it to pass, say, a better C<for>.
+
+=cut
+
+sub _extra_validator_args {
+    return {};
+}
+
+=head2 _extra_canonicalizer_args
+
+Returns a list of extra arguments to pass to canonicalizers. By default, an
+empty hash reference, but subclasses can override it to pass, say, a better
+C<for>.
+
+=cut
+
+sub _extra_canonicalizer_args {
+    return {};
+}
+
+=head2 _extra_autocompleter_args
+
+Returns a list of extra arguments to pass to autocompleters. By default, an
+empty hash reference, but subclasses can override it to pass, say, a better
+C<for>.
+
+=cut
+
+sub _extra_autocompleter_args {
+    return {};
 }
 
 =head2 _autocomplete_argument ARGUMENT
@@ -1014,12 +1050,12 @@ sub _autocomplete_argument {
     # If it's defined on the field, use that autocompleter
     if ( $field_info->{autocompleter}  )
     {
-        return $field_info->{autocompleter}->( $self, $value );
+        return $field_info->{autocompleter}->( $self, $value, $self->argument_values, $self->_extra_autocompleter_args );
     }
 
     # If it's a method on the class, use that autocompleter
     elsif ( $self->can($default_autocomplete) ) {
-        return $self->$default_autocomplete( $value );
+        return $self->$default_autocomplete( $value, $self->argument_values, $self->_extra_autocompleter_args );
     }
 
     # Otherwise, return zip-zero-notta
@@ -1031,7 +1067,7 @@ sub _autocomplete_argument {
 Given an L<parameter|Jifty::Manual::Glossary/parameter> name, returns the
 list of valid values for it, based on its C<valid_values> field.
 
-This method returns a hash referenece with a C<display> field for the string
+This method returns a hash reference with a C<display> field for the string
 to display for the value, and a C<value> field for the value to actually send
 to the server.
 
@@ -1105,7 +1141,7 @@ sub _values_for_field {
             # Check for a collection spec
             if ( $v->{'collection'} ) {
 
-                # Load the display_from/value_from paramters
+                # Load the display_from/value_from parameters
                 my $disp = $v->{'display_from'};
                 my $val  = $v->{'value_from'};
 
@@ -1269,7 +1305,7 @@ sub deny {
 =head2 Canonicalization
 
 If you wish to have the data in a field normalized into a particular
-format (such as changing a date into YYYY-MM-DD format, adding commas
+format (such as changing a date into C<YYYY-MM-DD> format, adding commas
 to numbers, capitalizing words, or whatever you need) you can do so
 using a canonicalizer.
 
@@ -1277,16 +1313,20 @@ This is just a method titled C<canonicalize_FIELD> where C<FIELD> is
 the name of the field be normalized. Here is an example:
 
   sub canonicalize_foo {
-      my ($self, $value) = @_;
+      my ($self, $value, $other, $metadata) = @_;
 
       # do something to canonicalize the value
-      my $normal_form = lc($value);
+      my $normal_form = lc($value) . '-' . $other->{other_field};
+      $normal_form .= '-update' if $metadata->{for} eq 'update';
       
       return $normal_form;
   }
 
-In this case, all values in the "foo" field will be changed into lower
-case.
+The first parameter to your canonicalizer will be the value to be
+canonicalized. The next will be a hash reference of all the parameters
+submitted with this canonicalization, so you can be smarter. Finally, the third
+parameter is a hash reference of other metadata, such as C<for>, whose value
+will be C<create> or C<update>.
 
 While doing this you might also want to call the
 L</canonicalization_note> to inform the client of the modification:
@@ -1309,7 +1349,7 @@ A validation method is one named C<validate_FIELD> where C<FIELD> is
 the name of the field being checked. Here is an example:
 
   sub validate_foo {
-      my ($self, $value) = @_;
+      my ($self, $value, $other, $metadata) = @_;
 
       # Check for uppercase letters
       if ($value =~ /\p{Lu}/) {
@@ -1331,6 +1371,8 @@ contain the characters '-', '*', '+', or '?'. You can use
 L</validation_error> and L</validation_warning> to return the results
 of your validation to the user or simply return 1 to indicate a valid
 value.
+
+Note that the parameters are the same as in L</Canonicalization>.
 
 If you just have a list of valid values, you may want to use the
 C<valid_values> schema parameter to perform this task instead.
@@ -1393,7 +1435,7 @@ L<Jifty::Param::Schema>, L<Jifty::Manual::Actions>
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2006 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 =cut

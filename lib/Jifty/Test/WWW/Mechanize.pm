@@ -12,8 +12,8 @@ use HTML::Lint;
 use Test::HTML::Lint qw();
 use HTTP::Cookies;
 use XML::XPath;
-use Hook::LexWrap;
 use List::Util qw(first);
+use Plack::Test;
 use Carp;
 
 # XXX TODO: We're leaving out FLUFF errors because it complains about non-standard
@@ -36,12 +36,33 @@ bot a cookie jar.
 
 =cut
 
+my $plack_server_pid;
+
 sub new {
-    my $class = shift;
-    my $self = $class->SUPER::new(@_);
+    my ($class, @args) = @_;
+
+    push @args, app => Jifty->handler->psgi_app
+        if $class->isa('Test::WWW::Mechanize::PSGI');
+
+    my $self = $class->SUPER::new(@args);
     $self->cookie_jar(HTTP::Cookies->new);
+
     return $self;
-} 
+}
+
+=head2 request
+
+We override L<WWW::Mechanize>'s default request method so accept-encoding is
+not set to gzip by default.
+
+=cut
+
+sub _modify_request {
+    my ($self, $req) = @_;
+    $req->header( 'Accept-Encoding', 'identity' )
+        unless $req->header( 'Accept-Encoding' );
+    return $self->SUPER::_modify_request($req);
+}
 
 =head2 moniker_for ACTION, FIELD1 => VALUE1, FIELD2 => VALUE2
 
@@ -56,12 +77,12 @@ any more arguments to this method, or the method will return undef.
 NOTE that if you're using this in a series of different pages or forms, 
 you'll need to run it again for each new form:
 
-    $mech->fill_in_action_ok($mech->moniker_for('MyApp::Action::UpdateInfo'), 
+    $mech->fill_in_action_ok($mech->moniker_for('MyApp::Action::UpdateInfo'),
                              owner_id => 'someone');
-    $mech->submit_html_ok();  
+    $mech->submit_html_ok();
 
     is($mech->action_field_value($mech->moniker_for("MyApp::Action::UpdateInfo"),
-			     'owner_id'), 
+                                 'owner_id'),
        'someone',
        "Owner was reassigned properly to owner 'someone'");
 
@@ -126,7 +147,9 @@ sub fill_in_action {
         unless ($input) {
             return;
         } 
-        $input->value($args{$arg});
+
+        # not $input->value($args{$arg}), because it doesn't handle arrayref
+        $action_form->param( $input->name, $args{$arg} );
     } 
 
     return $action_form;
@@ -244,30 +267,39 @@ using the "back button" after making the webservice request.
 
 =cut
 
+sub _build_webservices_request {
+    my ($self, $endpoint, $data) = @_;
+
+    my $uri = $self->uri->clone;
+    $uri->path($endpoint);
+    $uri->query('');
+
+    my $body = Jifty::YAML::Dump({ path => $endpoint, %$data});
+
+    HTTP::Request->new(
+        POST => $uri,
+        [ 'Content-Type' => 'text/x-yaml',
+          'Content-Length' => length($body) ],
+        $body
+    );
+}
+
 sub send_action {
     my $self = shift;
     my $class = shift;
     my %args = @_;
 
-
-    my $uri = $self->uri->clone;
-    $uri->path("__jifty/webservices/yaml");
-
-    my $request = HTTP::Request->new(
-        POST => $uri,
-        [ 'Content-Type' => 'text/x-yaml' ],
-        Jifty::YAML::Dump(
-            {   path => $uri->path,
-                actions => {
-                    action => {
-                        moniker => 'action',
-                        class   => $class,
-                        fields  => \%args
-                    }
+    my $request = $self->_build_webservices_request
+        ( "__jifty/webservices/yaml",
+          { actions => {
+                action => {
+                    moniker => 'action',
+                    class   => $class,
+                    fields  => \%args
                 }
             }
-        )
-    );
+        });
+
     my $result = $self->request( $request );
     my $content = eval { Jifty::YAML::Load($result->content)->{action} } || undef;
     $self->back;
@@ -286,50 +318,24 @@ sub fragment_request {
     my $path = shift;
     my %args = @_;
 
-    my $uri = $self->uri->clone;
-    $uri->path("__jifty/webservices/xml");
-
-    my $request = HTTP::Request->new(
-        POST => $uri,
-        [ 'Content-Type' => 'text/x-yaml' ],
-        Jifty::YAML::Dump(
-            {   path => $uri->path,
-                fragments => {
-                    fragment => {
-                        name  => 'fragment',
-                        path  => $path,
-                        args  => \%args
-                    }
+    my $request = $self->_build_webservices_request
+        ( "__jifty/webservices/xml",
+          { fragments => {
+                fragment => {
+                    name  => 'fragment',
+                    path  => $path,
+                    args  => \%args
                 }
             }
-        )
-    );
+        });
+
     my $result = $self->request( $request );
+
     use XML::Simple;
     my $content = eval { XML::Simple::XMLin($result->content, SuppressEmpty => '')->{fragment}{content} } || '';
     $self->back;
     return $content;
 }
-
-
-# When it sees something like
-# http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd as a DOCTYPE, this will make
-# it open static/dtd/xhtml1-strict.dtd instead -- great for offline hacking!
- 
-# This "require" is just to give us something to hook on to, and to prevent a
-# future require from taking effect.
-require 'XML/Parser/LWPExternEnt.pl';
-wrap 'XML::Parser::lwp_ext_ent_handler', pre => sub {
-    my $root = Jifty::Util->share_root;
-    $_[2] =~ s{ \A .+ / ([^/]+) \z }{$root/dtd/$1}xms;
-    open my $fh, '<', $_[2] or die "can't open $_[2]: $!";
-    my $content = do {local $/; <$fh>};
-    close $fh;
-    $_[-1] = $content; # override return value
-};
-wrap 'XML::Parser::lwp_ext_ent_cleanup', pre => sub {
-    $_[-1] = 1; # just return please
-};
 
 =head2 field_error_text MONIKER, FIELD
 
@@ -429,22 +435,24 @@ sub follow_link_ok {
     my $self = shift;
 
 
+    my $desc;
+
     # Test::WWW::Mechanize allows passing in a hashref of arguments, so we should to
     if  ( ref($_[0]) eq 'HASH') {
         # if the user is pashing in { text => 'foo' } ...
-
+        $desc = $_[1] if $_[1];
         @_ = %{$_[0]};
     } elsif (@_ % 2 ) {
         # IF the user is passing in text => 'foo' ,"Cicked the right thing"
         # Remove reason from end if it's there
-        pop @_ ;
-
+        $desc = pop @_ ;
     }
+
     carp("Couldn't find link") unless $self->follow_link(@_);
     {
         local $Test::Builder::Level = $Test::Builder::Level;
         $Test::Builder::Level++;
-        Test::HTML::Lint::html_ok( $lint, $self->content );
+        Test::HTML::Lint::html_ok( $lint, $self->content, $desc );
     }
 }
 

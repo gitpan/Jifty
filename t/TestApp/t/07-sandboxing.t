@@ -2,58 +2,49 @@
 use warnings;
 use strict;
 
-use Jifty::Test::Dist tests => 125;
+use Jifty::Test::Dist tests => 104, actual_server => 1;
 use Jifty::Test::WWW::Mechanize;
 use Net::HTTP;
 use URI;
 
 my $server  = Jifty::Test->make_server;
 
-isa_ok($server, 'Jifty::Server');
+isa_ok($server, 'Jifty::TestServer');
 
 my $uri = URI->new($server->started_ok);
 my $plugin = Jifty->find_plugin("Jifty::Plugin::TestServerWarnings");
 
-my @bogus = qw{
-    ../../../../../../../../../etc/passwd
-    /../../../../../../../../../etc/passwd
-    /__jifty/../../../../../../../../../../etc/passwd
-    /static/../../../../../../../../../../etc/passwd
-    ../templates/index.html
-    ../templates/_elements/nav
-    /static/../templates/_elements/nav
-    /static/css/../../templates/index.html
-    /static/css/../../templates/_elements/nav
-};
-
-for my $path (@bogus) {
-    my ($status, $body) = bogus_request($path);
-    isnt($status, 200, "Didn't get a 200" );
-    unlike( $body, qr/root/, "Doesn't have a root user in it");
-    unlike( $body, qr{\Q<&|/_elements/\E}, "Doesn't have the source code" );
-    unlike( $body, qr/Jifty->web->navigation/, "Doesn't have the source" );
-    is(scalar $plugin->decoded_warnings($uri), 1);
-}
-
-my %ok = (
-    "/static/css/base.css" => qr/body/,
-    "/static/css/../css/base.css" => qr/body/,
-    "/static/css//../css/base.css" => qr/body/,
-    "/somedir/stuff" => qr/dhandler arg is stuff/,
-    "/somedir/stuff/../things" => qr/dhandler arg is things/,
-    "__jifty/webservices/yaml" => qr/--- {}/,
-    "/__jifty//../__jifty/webservices/yaml" => qr/--- {}/,
-    "/__jifty/webservices/../webservices/yaml" => qr/--- {}/,
-    "///__jifty/webservices/yaml" => qr/--- {}/,
-    "/__jifty/../index.html" => qr/pony/,
+my @requests = (
+    "../../../../../../../../../etc/passwd"             => 404,
+    "/../../../../../../../../../etc/passwd"            => 404,
+    "/__jifty/../../../../../../../../../../etc/passwd" => 404,
+    "/static/../../../../../../../../../../etc/passwd"  => 403,
+    "../templates/index.html"                           => 404,
+    "../templates/_elements/nav"                        => 404,
+    "/static/../templates/_elements/nav"                => 403,
+    "/static/css/../../templates/index.html"            => 403,
+    "/static/css/../../templates/_elements/nav"         => 403,
+    "/static/css/base.css"                              => qr/body/,
+    "/static/css/../css/base.css"                       => 403,
+    "/static/css//../css/base.css"                      => 403,
+    "/somedir/stuff"                                    => qr/dhandler arg is stuff/,
+    "/somedir/stuff/../things"                          => qr/dhandler arg is things/,
+    "__jifty/webservices/yaml"                          => 404,
+    "/__jifty//../__jifty/webservices/yaml"             => qr/--- {}/,
+    "/__jifty/webservices/../webservices/yaml"          => qr/--- {}/,
+    "///__jifty/webservices/yaml"                       => qr/--- {}/,
+    "/__jifty/../index.html"                            => qr/pony/,
 );
 
-for my $path (keys %ok) {
+while (my ($path, $expect) = splice(@requests,0,2)) {
     my ($status, $body) = bogus_request($path);
-    is( $status, 200, "Got a 200" );
-    like( $body, $ok{$path}, "Has content" );
-    unlike( $body, qr{\Q<&|/_elements/\E}, "Doesn't have the source code" );
-    is(scalar $plugin->decoded_warnings($uri), 0);
+    my $expect_status = $expect =~ /\D/ ? 200 : $expect;
+    is($status, $expect_status, "Got a $status" );
+
+    unlike( $body, qr/root/, "Doesn't have a root user in it");
+    unlike( $body, qr{\Q<&|/_elements/\E|Jifty->web}, "Doesn't have the source code" );
+
+    like( $body, $expect, "Has content" ) if $expect_status == 200;
 }
 
 sub bogus_request {

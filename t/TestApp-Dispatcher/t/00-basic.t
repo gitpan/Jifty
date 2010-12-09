@@ -9,7 +9,7 @@ use Jifty::Test::WWW::Mechanize;
 my $server = Jifty::Test->make_server;
 ok($server, 'got a server');
 
-isa_ok($server, 'Jifty::Server');
+isa_ok($server, 'Jifty::TestServer');
 
 my $url     = $server->started_ok;
 my $mech    = Jifty::Test::WWW::Mechanize->new();
@@ -33,4 +33,4 @@ get_ok("/on_not_exist_show");
 $mech->content_contains("woot");
 
 get_nok("/something_that_really_not_exists");
-$mech->warnings_like(qr/404/);
+$mech->content_like(qr/we don&#39;t think exists/);

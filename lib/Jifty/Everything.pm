@@ -9,7 +9,7 @@ Jifty::Everything - Load all of the important Jifty modules at once.
 
 =head1 DESCRIPTION
 
-This package is loaded very early in the processof loading Jifty to bring in all of the wonderful goodies that make up Jifty. If you use L<JIfty>:
+This package is loaded very early in the process of loading Jifty to bring in all of the wonderful goodies that make up Jifty. If you use L<JIfty>:
 
   use Jifty;
 
@@ -40,6 +40,7 @@ use Jifty::DateTime ();
 use Jifty::Record ();
 use Jifty::Collection ();
 use Jifty::Action ();
+use Jifty::Action::AboutMe ();
 use Jifty::Action::Autocomplete ();
 use Jifty::Action::Redirect ();
 use Jifty::Action::Record ();
@@ -68,11 +69,6 @@ use Jifty::Request::Mapper ();
 use Jifty::Result ();
 use Jifty::Response ();
 use Jifty::CurrentUser ();
-
-# We can _not_ load Server.pm unless we're in a Server context because
-# HTTP::Server::Simple::Mason bastardizes HTML::Mason::FakeApache::send_http_header
-# with hook::lexwrap
-#use Jifty::Server;
 
 use Jifty::Web ();
 use Jifty::Web::Session ();
@@ -108,7 +104,7 @@ L<Jifty>
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2007 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 =cut

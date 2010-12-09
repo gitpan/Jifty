@@ -47,7 +47,7 @@ information.
 
 If your results from the query are guaranteed to be readable by
 current_user, you can create the collection with
-C<results_are_readable => 1>.  This causes check_read_rights to bypass
+C<< results_are_readable => 1 >>.  This causes check_read_rights to bypass
 normal current_user_can checks.
 
 =cut
@@ -163,7 +163,7 @@ L<Jifty::DBI::Collection>, L<Jifty::Object>, L<Jifty::Record>
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2007 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 =cut

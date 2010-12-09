@@ -184,6 +184,25 @@ sub get_language_handle {
     # optional argument makes it easy to disable I18N
     # while comparing test strings (without loading session)
     my $lang = shift || Jifty->web->session->get('jifty_lang');
+
+    if (   !$lang
+        && Jifty->web->current_user
+        && Jifty->web->current_user->id )
+    {
+        my $user = Jifty->web->current_user->user_object;
+        for my $column (qw/language lang/) {
+            if ( $user->can($column) ) {
+                $lang = $user->$column;
+                last;
+            }
+        }
+    }
+
+    # I18N::LangTags::Detect wants these for detecting
+    local $ENV{REQUEST_METHOD} = Jifty->web->request->method
+        if Jifty->web->request;
+    local $ENV{HTTP_ACCEPT_LANGUAGE} = Jifty->web->request->header("Accept-Language") || ""
+        if Jifty->web->request;
     $$DynamicLH = $self->get_handle($lang ? $lang : ()) if $DynamicLH;
 }
 

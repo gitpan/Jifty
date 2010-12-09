@@ -23,6 +23,7 @@ use Storable ();
 use Compress::Zlib ();
 use Crypt::CBC ();
 use Crypt::Rijndael ();
+use CGI::Cookie;
 use CGI::Cookie::Splitter ();
 use MIME::Base64;
 
@@ -71,6 +72,23 @@ sub id {
     return $self->loaded ? $self->_session->{session_id} : undef;
 }
 
+=head2 create
+
+Since there is no server-side storage, this simply clears the object's
+local state.
+
+=cut
+
+sub create {
+    my $self = shift;
+    $self->_session({
+        session_id   => Jifty::Model::Session->new_session_id,
+        continuation => {},
+        metadata     => {},
+        key          => {},
+    });
+}
+
 =head2 load [ID]
 
 Load up the current session from the given C<ID>, or the appropriate
@@ -83,11 +101,11 @@ If both of those fail, creates a session in memory.
 sub load {
     my $self       = shift;
     my $session_id = shift;
-    my %cookies    = CGI::Cookie->fetch();
+    my %cookies    = %{ Jifty->web->request->cookies };
 
     unless ($session_id) {
         my $cookie_name = $self->cookie_name;
-        $session_id = $cookies{$cookie_name}->value() if $cookies{$cookie_name};
+        $session_id = $cookies{$cookie_name} if $cookies{$cookie_name};
         $session_id ||= Jifty::Model::Session->new_session_id;
     }
 
@@ -97,12 +115,17 @@ sub load {
     {
         local $@;
         eval {
-            ($data) = grep {
-                $_->name eq "JIFTY_DAT_$session_id"
-            } $splitter->join(values %cookies);
+            ($data)
+                = grep { $_->name eq "JIFTY_DAT_$session_id" }
+                $splitter->join(
+                map {
+                    CGI::Cookie->new( -name => $_, -value => $cookies{$_} )
+                    } keys %cookies
+                );
         };
 
         if ($@) {
+
             # Reassembly of cookie failed -- start a new session
             $session_id = Jifty::Model::Session->new_session_id;
             warn $@;
@@ -238,9 +261,7 @@ sub flush {
     );
 
     foreach my $cookie ($splitter->split( $data_cookie )) {
-        Jifty->web->response->add_header(
-            'Set-Cookie' => $cookie->as_string
-        );
+        Jifty->web->response->cookies->{$cookie->name} = $cookie;
     }
 }
 

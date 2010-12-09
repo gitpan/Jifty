@@ -28,7 +28,8 @@ L<Template::Declare>.
 sub init {
     my $self = shift;
     return if $self->_pre_init;
-    return unless Jifty->config->framework('DevelMode');
+    return unless Jifty->config->framework('DevelMode')
+               && !Jifty->config->framework('HideHalos');
 
     warn "Overwriting an existing Template::Declare->around_template"
         if Template::Declare->around_template;
@@ -193,7 +194,10 @@ sub new_frame {
 
                 if ($ref) {
                     my $expanded = Jifty->web->serial;
-                    my $yaml = Jifty->web->escape(Jifty::YAML::Dump($value));
+                    my $yaml =
+                      eval { defined $value && fileno($value) }
+                      ? '*GLOB*' : Jifty->web->escape( Jifty::YAML::Dump($value) );
+
                     $out .= qq{<a href="#" onclick="jQuery(Jifty.\$('$expanded')).toggle(); return false">$ref</a><div id="$expanded" class="halo-argument" style="display: none"><pre>$yaml</pre></div>};
                 }
                 elsif (defined $value) {
@@ -233,7 +237,7 @@ sub new_frame {
 =head2 push_frame -> frame
 
 Creates and pushes a frame onto the render stack. Mason's halos do not support
-"around"ing a component, so we fake it with an explicit stack.
+I<arounding> a component, so we fake it with an explicit stack.
 
 This also triggers C<halo_pre_template> for plugins adding halo data.
 
@@ -262,7 +266,7 @@ sub push_frame {
 =head2 pop_frame -> frame
 
 Pops a frame off the render stack. Mason's halos do not support
-"around"ing a component, so we fake it with an explicit stack.
+C<arounding> a component, so we fake it with an explicit stack.
 
 This also triggers C<halo_post_template> for plugins adding halo data.
 

@@ -11,7 +11,7 @@ use Jifty::Schema;
 
 =head1 NAME
 
-Jifty::Script::Schema - Create SQL to update or create your Jifty app's tables
+Jifty::Script::Schema - Create SQL to update or create your Jifty application's tables
 
 =head1 SYNOPSIS
 
@@ -64,7 +64,7 @@ the same as the application's version.
 
 =item B<--ignore-reserved-words>
 
-Ignore any SQL reserved words used in table or column deffinitions, if
+Ignore any SQL reserved words used in table or column definitions, if
 this option is not used and a reserved word is found it will cause an error.
 
 =item B<--no-bootstrap>
@@ -557,7 +557,7 @@ sub upgrade_tables {
     } elsif ( $appv == $dbv ) {
 
         # Shouldn't happen
-        print "$baseclass version $appv up to date.\n";
+        print "$baseclass database version $appv up to date.\n";
         return;
     }
     $log->info("Generating SQL to upgrade $baseclass $dbv database to $appv");
@@ -592,7 +592,7 @@ sub upgrade_tables {
         } else {
 
             # Go through the currently-active columns
-            for my $col ( grep { not $_->virtual } $model->columns ) {
+            for my $col ( grep { not $_->virtual and not $_->computed } $model->columns ) {
 
                 # If they're new, add them
                 if (    $col->can('since')
@@ -604,8 +604,7 @@ sub upgrade_tables {
                         my $renamed = $upgradeclass->just_renamed || {};
 
                         # skip it if this was added by a rename
-                        $model->add_column_in_db( $col->name )
-                            unless
+                        $model->add_column_in_db( $col->name ) unless
                             defined $renamed->{ $model->table }->{'add'}
                             ->{ $col->name };
                     };

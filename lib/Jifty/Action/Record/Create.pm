@@ -80,14 +80,6 @@ sub take_action {
 
         # Prepare the hash to pass to create for each argument
         $values{$_} = $self->argument_value($_);
-
-        # Handle file uploads
-        if (ref $values{$_} eq "Fh") { # CGI.pm's "lightweight filehandle class"
-            local $/;
-            my $fh = $values{$_};
-            binmode $fh;
-            $values{$_} = scalar <$fh>;
-        }
     }
 
     # Attempt creating the record
@@ -158,13 +150,43 @@ sub possible_columns {
     return grep {not $_->protected} $self->SUPER::possible_columns( @_ );
 }
 
+=head2 _extra_validator_args
+
+Passes C<< for => 'create' >> to validators.
+
+=cut
+
+sub _extra_validator_args {
+    return { for => 'create' };
+}
+
+=head2 _extra_canonicalizer_args
+
+Passes C<< for => 'create' >> to canonicalizers.
+
+=cut
+
+sub _extra_canonicalizer_args {
+    return { for => 'create' };
+}
+
+=head2 _extra_autocompleter_args
+
+Passes C<< for => 'create' >> to autocompleters.
+
+=cut
+
+sub _extra_autocompleter_args {
+    return { for => 'create' };
+}
+
 =head1 SEE ALSO
 
 L<Jifty::Action::Record>, L<Jifty::Record>
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2007 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 =cut

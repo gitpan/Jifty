@@ -9,7 +9,6 @@ Jifty::Web - Web framework for a Jifty application
 
 =cut
 
-use CGI::Cookie;
 use XML::Writer;
 use CSS::Squish;
 use Digest::MD5 qw(md5_hex);
@@ -32,21 +31,14 @@ __PACKAGE__->css_files([qw( main.css )]);
 __PACKAGE__->external_javascript_libs([]);
 
 __PACKAGE__->javascript_libs([qw(
-    jsan/JSAN.js
-    jsan/Push.js
-    setup_jsan.js
-    jsan/Upgrade/Array/push.js
-    jsan/DOM/Events.js
     json.js
-    jquery-1.2.6.js
+    jquery-1.4.1.js
     iutil.js
-    iautocompleter.js
     jifty_interface.js
     jquery_noconflict.js
     jquery.jgrowl.js
     facebox.js
     behaviour.js
-    formatDate.js
     jifty.js
     jifty_utils.js
     jifty_subs.js
@@ -58,7 +50,6 @@ __PACKAGE__->javascript_libs([qw(
     combobox.js
     key_bindings.js
     context_menu.js
-    bps_util.js
     yui/yahoo.js
     yui/dom.js
     yui/event.js
@@ -72,6 +63,13 @@ __PACKAGE__->javascript_libs([qw(
     css_browser_selector.js
     cssQuery-jquery.js
     jquery.timepickr.js
+    jquery.ajaxQueue.js
+    jquery.bgiframe.min.js
+    jquery.autocomplete.js
+    ui.core.js
+    ui.sortable.js
+    ordered-list.js
+    uploads.js
 )]);
 
 use Class::Trigger;
@@ -106,7 +104,7 @@ sub mason {
 
 =head3 out
 
-Send a string to the browser. The default implementation uses Mason->out;
+Send a string to the browser.
 
 =cut
 
@@ -132,61 +130,44 @@ sub url {
 
     my $uri;
 
-    # Try to get a host out of the environment, useful in remote testing.
-    # The code is a little hairy because there's no guarantee these
-    # environment variables have all the information.
-    if (my $http_host_env = $ENV{HTTP_HOST}) {
-        # Explicit flag needed because URI->new("noscheme") is structurally
-        # different from URI->new("http://smth"). Clunky, but works.
-        my $dirty;
-        if ($http_host_env !~ m{^http(s?)://}) {
-            $dirty++;
-            $http_host_env = (Jifty->web->is_ssl ? "https" : "http") ."://$http_host_env";
-        }
-        $uri = URI->new($http_host_env);
-        if ($dirty && (my $req_uri_env = $ENV{REQUEST_URI})) {
-            my $req_uri = URI->new($req_uri_env);
-            $uri->scheme($req_uri->scheme) if $req_uri->can('scheme');
-            $dirty = $uri->scheme;
-        }
-        # As a last resort, peek at the BaseURL configuration setting
-        # for the scheme, which is an often-missing part.
-        if ($dirty) {
-            my $config_uri = URI->new(
-                    Jifty->config->framework("Web")->{BaseURL});
-            $uri->scheme($config_uri->scheme);
-        }
+    my $req = Jifty->web->request;
+    if ($req && $req->uri->host) {
+        $uri = $req->uri->clone;
+        $uri->path_query('/');
+    }
+    else {
+        $uri = URI->new(Jifty->config->framework("Web")->{BaseURL});
+        $uri->port(Jifty->config->framework("Web")->{Port});
     }
 
-    if (!$uri) {
-      my $url  = Jifty->config->framework("Web")->{BaseURL};
-      my $port = Jifty->config->framework("Web")->{Port};
-   
-      $uri = URI->new($url);
-      $uri->port($port);
+    if (defined (my $path = $args{path})) {
+        # strip off leading '/' because ->canonical provides one
+        $path =~ s{^/}{};
+        $uri->path_query($path);
     }
 
     # https is sticky
     $uri->scheme('https') if $uri->scheme eq 'http' && Jifty->web->is_ssl;
 
-    if ( defined $args{'scheme'} ) {
-        $uri->scheme( $args{'scheme'} );
+    # If we're generating a URL from an email (really a Jifty::Notification
+    # subclass), default to http
+    my $level = 0;
+    while ( my $class = caller($level++) ) {
+        if ( $class->isa("Jifty::Notification") ) {
+            $uri->scheme('http');
+            last;
+        }
     }
 
-    if (defined $args{path}) {
-      my $path = $args{path};
-      # strip off leading '/' because ->canonical provides one
-      $path =~ s{^/}{};
-      $uri->path_query($path);
-    }
-    
+    $uri->scheme( $args{'scheme'} ) if defined $args{'scheme'};
+
     return $uri->canonical->as_string;
 }
 
 =head3 serial 
 
 Returns a unique identifier, guaranteed to be unique within the
-runtime of a particular process (ie, within the lifetime of Jifty.pm).
+runtime of a particular process (i.e., within the lifetime of Jifty.pm).
 There's no sort of global uniqueness guarantee, but it should be good
 enough for generating things like moniker names.
 
@@ -251,20 +232,21 @@ sub current_user {
     }
 
     my $object;
-
     if ( defined $self->temporary_current_user ) {
         return $self->temporary_current_user;
     } elsif ( defined $self->{current_user} ) {
         return $self->{current_user};
     } elsif ( my $id = $self->session->get('user_id') ) {
-         $object = Jifty->app_class({require => 0}, "CurrentUser")->new( id => $id );
+        $object = Jifty->app_class({require => 0}, "CurrentUser")->new( id => $id );
     } elsif ( Jifty->admin_mode ) {
-         $object = Jifty->app_class({require => 0}, "CurrentUser")->superuser;
+        $object = Jifty->app_class({require => 0}, "CurrentUser")->superuser;
     } else {
-         $object = Jifty->app_class({require => 0}, "CurrentUser")->new;
+        $object = Jifty->app_class({require => 0}, "CurrentUser")->new;
     }
-    
-    $self->{current_user} = $object;
+
+    # Don't cache the result unless the session had actually been
+    # loaded already.
+    $self->{current_user} = $object if $self->session->loaded;
     return $object;
 }
 
@@ -316,7 +298,7 @@ sub handle_request {
     # In the case where we have a continuation and want to redirect
     if ( $self->request->continuation_path && Jifty->web->request->argument('_webservice_redirect') ) {
         # for continuation - perform internal redirect under webservices
-	$self->webservices_redirect($self->request->continuation_path);
+        $self->webservices_redirect($self->request->continuation_path);
         return;
     }
 
@@ -365,7 +347,7 @@ sub _validate_request_actions {
                         . "'" );
                 $self->log->warn( Jifty->api->explain($request_action->class ) );
                 # Possible cross-site request forgery
-                $self->log->error("Action " . $request_action->class . " has been denied because the request is a GET") if $self->request->request_method eq "GET";
+                $self->log->error("Action " . $request_action->class . " has been denied because the request is a GET") if $self->request->method eq "GET";
                 push @denied_actions, $request_action;
                 next;
             }
@@ -734,10 +716,13 @@ sub redirect {
                 has_run   => $_->has_run,
                 arguments => $_->arguments,
             );
+
             # Clear out filehandles, which don't go thorugh continuations well
-            $new_action->arguments->{$_} = ''
-              for grep {ref $new_action->arguments->{$_} eq "Fh"}
-                keys %{$new_action->arguments || {}};
+            for (keys %{$new_action->arguments || {}}) {
+                $new_action->arguments->{$_} = ''
+                    if ref($new_action->arguments->{$_}) eq "Fh"
+                    || ref($new_action->arguments->{$_}) eq "Jifty::Web::FileUpload";
+            }
         }
         my %parameters = ($page->parameters);
         $request->argument($_ => $parameters{$_}) for keys %parameters;
@@ -746,7 +731,9 @@ sub redirect {
         # PATH_INFO, which is what $request->path is normally set to.
         # We should replicate that here.
         $request->path( URI::Escape::uri_unescape( $page->url ) );
-        $request->request_method("GET"); # ..effectively.
+        $request->request_uri( URI->new($page->url)->path_query );
+        $request->method("GET"); # ..effectively.
+        $request->scheme($self->request->scheme);
         $request->continuation($self->request->continuation);
         my $cont = Jifty::Continuation->new(
             request  => $request,
@@ -778,8 +765,8 @@ sub _redirect {
     }
 
     if (my $redir = Jifty->web->request->argument('_webservice_redirect')) {
-	push @$redir, $page;
-	return;
+        push @$redir, $page;
+        return;
     }
     # $page can't lead with // or it assumes it's a URI scheme.
     $page =~ s{^/+}{/};
@@ -790,17 +777,15 @@ sub _redirect {
     # Clear out the output, if any
     Jifty->handler->buffer->clear;
 
-    my $apache = Jifty->handler->apache;
+    my $response = Jifty->web->response;
 
     $self->log->debug("Execing redirect to $page");
     # Headers..
-    $apache->header_out( Location => $page );
-    $apache->header_out( Status => 302 );
+    $response->header( Location => $page );
+    $response->status( 302 );
 
     # cookie has to be sent or returning from continuations breaks
     Jifty->web->session->set_cookie;
-
-    Jifty->handler->send_http_header;
 
     # Mason abort, or dispatcher abort out of here
     $self->mason->abort if $self->mason;
@@ -927,6 +912,129 @@ sub return {
     }
 }
 
+
+=head2 template_exists PATH
+
+Returns true if PATH is a valid template inside your template
+root. This checks for both Template::Declare and HTML::Mason
+Templates.  Specifically, returns a reference to the handler which can
+process the template.
+
+If PATH is a I<reference> to the path, it will update the path to
+append C</index.html> if the path in question doesn't exist, but the
+index does.
+
+=cut
+
+sub template_exists {
+    my $self     = shift;
+    my $template = shift;
+
+    my $value = ref $template ? $$template : $template;
+
+    # Strip trailing slashes
+    $value =~ s{/$}{} if $value ne "/";
+
+    foreach my $handler ( map {Jifty->handler->view($_)} Jifty->handler->view_handlers ) {
+        if ( my $path = $handler->template_exists($value) ) {
+            $$template = $path if ref $template;
+            return $handler;
+        }
+    }
+    return undef;
+}
+
+
+
+my %TEMPLATE_CACHE;
+
+=head2 render_template PATH
+
+Use our templating system to render a template.  Searches through
+L<Jifty::Handler/view_handlers> to find the first handler which
+provides the given template, and caches the handler for future
+requests.
+
+Catches errors, and redirects to C</errors/500>; also shows
+C</errors/404> if the template cannot be found.
+
+=cut
+
+sub render_template {
+    my $self     = shift;
+    my $template = shift;
+    my $handler;
+    my $content;
+        my $void_context = ( defined wantarray ? 0 :1);
+
+    # Look for a possible handler, and cache it for future requests.
+    # With DevelMode, always look it up.
+    if ( not exists $TEMPLATE_CACHE{$template} or Jifty->config->framework('DevelMode')) {
+        my $found = $template;
+        $handler = $self->template_exists( \$found );
+        # We don't cache failing URLs, so clients' can't cause us to
+        # chew up memory by requesting 404's
+        $TEMPLATE_CACHE{$template} = [ $found, $handler ] if $handler;
+    }
+
+    # Dig out the actual template (which could have a "/index.html" on
+    # it, or what have you) and its handler.
+    ($template, $handler) = @{$TEMPLATE_CACHE{$template} || [$template, undef] };
+
+    # Handle 404's
+    unless ($handler) {
+        return $self->render_template("/errors/404") unless defined $template and $template eq "/errors/404";
+        $self->log->warn("Can't find 404 page!");
+        die "ABORT";
+    }
+
+    $self->log->debug("Showing path $template using @{[ref $handler]}");
+
+    my $start_depth = Jifty->handler->buffer->depth;
+
+    Jifty->handler->buffer->push( private => 1 ) unless $void_context;
+
+    Jifty->handler->call_trigger("before_render_template", $handler, $template);
+    eval { $handler->show($template) };
+
+    # Handle parse errors
+    my $err = $@;
+
+    $content = Jifty->handler->buffer->pop unless $void_context;
+
+    Jifty->handler->call_trigger("after_render_template", $handler, $template, $content);
+
+    if ( $err and not (eval { $err->isa('HTML::Mason::Exception::Abort') } or $err =~ /^ABORT/) ) {
+        $self->log->fatal("View error: $err") if $err;
+        if ($template eq '/errors/500') {
+            $self->log->warn("Can't render internal_error: $err");
+            # XXX Built-in static "oh noes" page?
+                        die "ABORT";
+        }
+
+        # XXX: This may leave a half-written tag open
+        $err->template_stack;
+        Jifty->handler->buffer->pop while Jifty->handler->buffer->depth > $start_depth;
+
+        # Save the request away, and redirect to an error page
+        Jifty->web->response->error($err);
+        my $c = Jifty::Continuation->new(
+            request  => Jifty->web->request->top_request,
+            response => Jifty->web->response,
+            parent   => Jifty->web->request->continuation,
+        );
+        # Redirect with a continuation
+        Jifty->web->_redirect( "/errors/500?J:C=" . $c->id );
+    } elsif ($err) {
+        Jifty->handler->buffer->pop while Jifty->handler->buffer->depth > $start_depth;
+                die "ABORT";
+
+    } else {
+        return $content;
+    }
+}
+
+
 =head3 render_messages [MONIKER]
 
 Outputs any messages that have been added, in <div id="messages"> and
@@ -1006,10 +1114,17 @@ sub _render_messages {
     $self->out(qq{<div class="jifty results messages" id="$plural">});
     
     foreach my $moniker ( sort keys %results ) {
-        if ( $results{$moniker}->$type() ) {
-            $self->out( qq{<div class="$type $moniker">}
-                        . $results{$moniker}->$type()
-                        . qq{</div>} );
+        if ( my $text = $results{$moniker}->$type() ) {
+            if ( ref $text eq 'ARRAY' ) {
+                $text = join '', @$text;
+            }
+            elsif ( ref $text ) {
+                $self->log->warn(
+                    ref($text) . " reference provided as result $type "
+                    . "for action $moniker (@{[$results{$moniker}->action_class]})"
+                );
+            }
+            $self->out( qq{<div class="$type $moniker">$text</div>} );
         }
     }
     $self->out(qq{</div>});
@@ -1099,10 +1214,12 @@ sub include_css {
 
     # if there's no trigger, 0 is returned.  if aborted/handled, undef
     # is returned.
-    defined $self->call_trigger( 'include_css', @_ ) or return '';
+    if ( defined $self->call_trigger( 'include_css', @_ )) {
+        $self->out( qq[<link rel="stylesheet" type="text/css" href="/static/css/$_" />\n] )
+            for @{ Jifty->web->css_files };
+    }
 
-    $self->out( qq[<link rel="stylesheet" type="text/css" href="/static/css/$_" />\n] )
-        for @{ Jifty->web->css_files };
+    $self->call_trigger('after_include_css', @_);
 
     return '';
 }
@@ -1149,7 +1266,7 @@ The L<add_javascript> method will append the files to javascript_libs.
 If you need a different order, you'll have to massage javascript_libs
 directly.
 
-Jifty will look for javascript libraries under share/web/static/js/ by
+Jifty will look for javascript libraries under F<share/web/static/js/> by
 default as well as any plugin static roots.
 
 =cut
@@ -1195,7 +1312,7 @@ Removes the given files from C<< Jifty->web->javascript_libs >>.
 
 This is intended for plugins or applications that provide another version of
 the functionality given in our default JS libraries. For example, the CSSQuery
-plugin will get rid of the cssQuery-jQuery.js back-compat script.
+plugin will get rid of the F<cssQuery-jQuery.js> back-compat script.
 
 =cut
 
@@ -1210,7 +1327,7 @@ sub remove_javascript {
 
 =head3 add_external_javascript URL1, URL2, ...
 
-Pushes urls onto C<< Jifty->web->external_javascript_libs >>
+Pushes URLs onto C<< Jifty->web->external_javascript_libs >>
 
 =cut
 
@@ -1395,6 +1512,6 @@ Indicates whether the current request was made using SSL.
 
 =cut
 
-sub is_ssl { $ENV{HTTPS} }
+sub is_ssl { Jifty->web->request && Jifty->web->request->secure }
 
 1;

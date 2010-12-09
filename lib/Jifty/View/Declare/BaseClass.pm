@@ -45,7 +45,6 @@ sub use_mason_wrapper {
         my $req = $interp->make_request( comp => '/_elements/wrapper' );
         my $wrapper = $interp->load("/_elements/wrapper");
         local $HTML::Mason::Commands::m = $req;
-        local $HTML::Mason::Commands::r = Jifty->handler->apache;
         $req->comp(
             {content => sub {$code->()}},
             $wrapper,
@@ -91,7 +90,7 @@ L<Jifty::View::Declare>, L<Template::Declare>, L<Jifty::View::Declare::Helpers>
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2007 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 =cut

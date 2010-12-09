@@ -100,7 +100,7 @@ sub page (&;$) {
     my ( $meta, $code ) = @_;
     my $ret = sub {
         my $self = shift;
-        Jifty->handler->apache->content_type('text/html; charset=utf-8');
+        Jifty->web->response->content_type('text/html; charset=utf-8');
         my $wrapper = Jifty->app_class('View')->can('wrapper') || \&wrapper;
         my @metadata = $meta ? $meta->($self) : ();
         my $metadata = $#metadata == 0 ? $metadata[0] : {@metadata};
@@ -132,7 +132,7 @@ This badly wants to be redone.
 sub wrapper {
     my $content_code = shift;
     my $meta = shift;
-    my $page = _page_class()->new({ content_code => $content_code, _meta => $meta });
+    my $page = _page_class( $meta )->new({ content_code => $content_code, _meta => $meta });
 
     my ($spa) = Jifty->find_plugin('Jifty::Plugin::SinglePage');
 
@@ -159,8 +159,11 @@ sub wrapper {
 
 sub _page_class {
     my $hard_require = 0;
-    my $app_class = get_current_attr('PageClass');;
-    delete $Template::Declare::Tags::ATTRIBUTES{ 'PageClass' };
+    my $app_class = $_[0]->{'class'};
+    unless ( $app_class ) {
+        $app_class = get_current_attr('PageClass');;
+        delete $Template::Declare::Tags::ATTRIBUTES{ 'PageClass' };
+    }
     $hard_require = 1 if $app_class;
 
     my $page_class = Jifty->app_class( $app_class || 'View::Page' );
@@ -310,7 +313,7 @@ sub form_next_page(@) {
     Jifty->web->form->next_page(@_);
 }
 
-=head2 Other functions and shortcutxs
+=head2 Other functions and shortcuts
 
 =head3 hyperlink
 

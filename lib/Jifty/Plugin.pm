@@ -260,7 +260,7 @@ sub bootstrapper {
 
 =head2 upgrade_class
 
-Returns the name of the class that can be used to upgrade the database models and schema (such as adding new data, fixing default values, and renaming columns). This normally returns the plugin's class name with C<::Upgrade> added to the end. Plugin upgraders can be built in exactly the same was as application upgrade classes.
+Returns the name of the class that can be used to upgrade the database models and schema (such as adding new data, fixing default values, and renaming columns). This normally returns the plugin's class name with C<::Upgrade> added to the end. Plugin upgrade classes can be built in exactly the same was as application upgrade classes.
 
 See L<Jifty::Upgrade>.
 
@@ -284,6 +284,34 @@ sub table_prefix {
     $class =~ s/\W+/_/g;
     $class .= '_';
     return lc $class;
+}
+
+=head2 wrap
+
+Takes a PSGI-$app closure and returns the wrapped one if your plugin
+wants to do something to the request handling process.  See also
+L<Plack::Middleware>.
+
+=cut
+
+sub wrap {
+    my ($self, $app) = @_;
+    return $app;
+}
+
+=head2 psgi_app_static
+
+Returns a PSGI-$app that serves the static content of the plugin if
+any.  The default is a <Plack::App::File> app with root set to
+plugin's C<static_root>
+
+=cut
+
+sub psgi_app_static {
+    my $self = shift;
+    my $static_root = $self->static_root;
+    return unless defined $static_root && -d $static_root && -r $static_root;
+    Plack::App::File->new(root => $static_root)->to_app
 }
 
 1;

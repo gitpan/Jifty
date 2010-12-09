@@ -4,7 +4,7 @@ use warnings;
 use Exporter;
 use Jifty::YAML;
 use base qw/Exporter Jifty::Object/;
-           
+use Carp::Clan; # croak
 
 =head1 NAME
 
@@ -130,8 +130,8 @@ that is, given a C<before plugin qr/^Jifty::Plugin::Auth::/> and both
 a C<Jifty::Plugin::Auth::Basic> and a C<Jifty::Plugin::Auth::Complex>,
 the rules will be placed before the first.
 
-C<after app> inserts the folowing C<RULES> after the application's
-dispatcher rules, and is identical to, but hopefuly clearer than,
+C<after app> inserts the following C<RULES> after the application's
+dispatcher rules, and is identical to, but hopefully clearer than,
 C<< after plugin Jifty => RULES >>.
 
 C<RULES> may either be a single C<before>, C<on>, C<under>, or
@@ -214,6 +214,11 @@ Run a block of code unconditionally; all rules are allowed inside a C<run>
 block, as well as user code.  You can think of the {...} as an anonymous 
 subroutine.
 
+=head2 stream {...}
+
+Run a block of code unconditionally, which should return a coderef
+that is a PSGI streamy response.
+
 =head2 set $arg => $val
 
 Adds an argument to what we're passing to our template, overriding 
@@ -272,7 +277,7 @@ our @EXPORT = qw<
 
     before on after
 
-    show dispatch abort redirect tangent
+    show dispatch abort redirect tangent stream
 
     GET POST PUT HEAD DELETE OPTIONS
 
@@ -298,6 +303,7 @@ sub on ($$@)      { _ret @_ }    # exact match on the path component
 sub after ($$@)   { _ret @_ }    # exact match on the path component
 sub when (&@)     { _ret @_ }    # exact match on the path component
 sub run (&@)      { _ret @_ }    # execute a block of code
+sub stream (&@)   { _ret @_ }    # web return a PSGI-streamy response
 sub show (;$@)    { _ret @_ }    # render a page
 sub dispatch ($@) { _ret @_ }    # run dispatch again with another URI
 sub redirect ($@) { _ret @_ }    # web redirect
@@ -493,13 +499,12 @@ sub handle_request {
     local $Request = Jifty->web->request;
 
     eval {
-        my $path = $Request->path;
-        utf8::downgrade($path); # Mason handle non utf8 path.
-        $Dispatcher->_do_dispatch( $path );
+         $Dispatcher->_do_dispatch( Jifty->web->request->path);
     };
     if ( my $err = $@ ) {
         $self->log->warn(ref($err) . " " ."'$err'") if ( $err !~ /^ABORT/ );
     }
+    return $Dispatcher->{stream};
 }
 
 =head2 _handle_stage NAME, EXTRA_RULES
@@ -517,13 +522,16 @@ sub _handle_stage {
 
     # Set the current stage so that rules can make smarter choices;
     local $CURRENT_STAGE = $stage;
+    Jifty->handler->call_trigger("before_dispatcher_$stage");
 
     eval { $self->_handle_rules( [ $self->rules($stage), @rules ] ); };
     if ( my $err = $@ ) {
         $self->log->warn( ref($err) . " " . "'$err'" )
             if ( $err !~ /^(LAST RULE|ABORT)/ );
+        Jifty->handler->call_trigger("after_dispatcher_$stage");
         return $err =~ /^ABORT/ ? 0 : 1;
     }
+    Jifty->handler->call_trigger("after_dispatcher_$stage");
     return 1;
 }
 
@@ -744,6 +752,20 @@ sub _do_tangent {
     Jifty->web->tangent(url => $path);
 }
 
+=head2 _do_stream CODE
+
+The method is called by the dispatcher internally. You shouldn't need to.
+
+Take a coderef that returns a PSGI streamy response code.
+
+=cut
+
+sub _do_stream {
+    my ( $self, $code ) = @_;
+    $self->{stream} = $code->();
+    $self->_abort;
+}
+
 =head2 _do_abort 
 
 This method is called by the dispatcher internally. You shouldn't need to.
@@ -755,16 +777,13 @@ Don't display any page. just stop.
 sub _do_abort {
     my $self = shift;
     $self->log->debug("Aborting processing");
-    if (@_) {
+    if (my $code = shift) {
         # This is the status code
-        my $status = shift;
-        my $apache = Jifty->handler->apache;
-        $apache->header_out(Status => $status);
-        Jifty->handler->send_http_header;
-
-        # The body should just be the status
-        require HTTP::Status;
-        print STDOUT $status, ' ' , HTTP::Status::status_message($status);
+        Jifty->web->response->status( $code );
+        if ( $code == 403 && !Jifty->web->response->body) {
+            Jifty->web->response->content_type('text/plain');
+            Jifty->web->response->body('403 Forbidden');
+        }
     }
     $self->_abort;
 }
@@ -780,7 +799,6 @@ Otherwise, just render whatever we were going to anyway.
 
 =cut
 
-my %TEMPLATE_CACHE;
 
 sub _do_show {
     my $self = shift;
@@ -791,7 +809,7 @@ sub _do_show {
     $path = $self->{path} unless defined $path and length $path;
 
     unless ($CURRENT_STAGE eq 'RUN') {
-        die "You can't call a 'show' rule in a 'before' or 'after' block in the dispatcher.  Not showing path $path";
+        croak "You can't call a 'show' rule in a 'before' or 'after' block in the dispatcher.  Not showing path $path";
     }
 
     # If we've got a working directory (from an "under" rule) and we have
@@ -801,10 +819,10 @@ sub _do_show {
     # Check for ../../../../../etc/passwd
     my $abs_template_path = Jifty::Util->absolute_path( Jifty->config->framework('Web')->{'TemplateRoot'} . $path );
     my $abs_root_path = Jifty::Util->absolute_path( Jifty->config->framework('Web')->{'TemplateRoot'} );
-    $self->render_template('/errors/500')
+    Jifty->web->render_template('/errors/500')
         if $abs_template_path !~ /^\Q$abs_root_path\E/;
 
-    $self->render_template( $path );
+    Jifty->web->render_template( $path );
 
     last_rule;
 }
@@ -869,16 +887,20 @@ sub _do_dispatch {
 
     # Close the handle down, so the client can go on their merry way
     unless (Jifty->web->request->is_subrequest) {
+        Jifty->handler->call_trigger("before_flush");
         Jifty->handler->buffer->flush_output;
-        close(STDOUT);
-        $Jifty::SERVER->close_client_sockets if $Jifty::SERVER;
+		# XXX: flush
+		#close(STDOUT);
+		#$Jifty::SERVER->close_client_sockets if $Jifty::SERVER;
+        Jifty->handler->call_trigger("after_flush");
     }
 
     # Cleanup
     $self->_handle_stage('CLEANUP');
 
-    # Out to the next dispatcher's cleanup
-    $self->_abort;
+    # Out to the next dispatcher's cleanup; since try/catch using die
+    # is slow, we only do this if we're not in the topmost dispatcher.
+    $self->_abort if $self->{path} ne "/";
 }
 
 =head2 _match CONDITION
@@ -896,7 +918,7 @@ as the first match is found.
 Hashref conditions are conjunctions: each non-empty hash key triggers a
 separate C<_match_$keyname> call on the dispatcher object. For example, a
 C<method> key would call C<_match_method> with its value to be matched against.
-After each subcondition is tried (in lexographical order) and succeeded,
+After each subcondition is tried (in lexicographical order) and succeeded,
 the value associated with the C<''> key is matched again as the condition.
 
 =cut
@@ -960,8 +982,8 @@ came in with that method.
 
 sub _match_method {
     my ( $self, $method ) = @_;
-    #$self->log->debug("Matching method ".request->request_method." against ".$method);
-    $Request->request_method eq uc($method);
+    #$self->log->debug("Matching method ".Jifty->web->request->method." against ".$method);
+    $Request->method eq uc($method);
 }
 
 =head2 _match_https
@@ -973,7 +995,7 @@ Returns true if the current request is under SSL.
 sub _match_https {
     my $self = shift;
     $self->log->debug("Matching request against HTTPS");
-    return exists $ENV{HTTPS} ? 1 : 0;
+    return Jifty->web->request->secure;
 }
 
 =head2 _match_http
@@ -985,7 +1007,7 @@ Returns true if the current request is not under SSL.
 sub _match_http {
     my $self = shift;
     $self->log->debug("Matching request against HTTP");
-    return exists $ENV{HTTPS} ? 0 : 1;
+    return !Jifty->web->request->secure;
 }
 
 sub _match_plugin {
@@ -1184,110 +1206,6 @@ sub _unescape {
     return $text;
 }
 
-
-=head2 template_exists PATH
-
-Returns true if PATH is a valid template inside your template
-root. This checks for both Template::Declare and HTML::Mason
-Templates.  Specifically, returns a reference to the handler which can
-process the template.
-
-If PATH is a I<reference> to the path, it will update the path to
-append C</index.html> if the path in question doesn't exist, but the
-index does.
-
-=cut
-
-sub template_exists {
-    my $self     = shift;
-    my $template = shift;
-
-    my $value = ref $template ? $$template : $template;
-
-    foreach my $handler ( map {Jifty->handler->view($_)} Jifty->handler->view_handlers ) {
-        if ( my $path = $handler->template_exists($value) ) {
-            $$template = $path if ref $template;
-            return $handler;
-        }
-    }
-    return undef;
-}
-
-
-=head2 render_template PATH
-
-Use our templating system to render a template.  Searches through
-L<Jifty::Handler/view_handlers> to find the first handler which
-provides the given template, and caches the handler for future
-requests.
-
-Catches errors, and redirects to C</errors/500>; also shows
-C</errors/404> if the template cannot be found.
-
-=cut
-
-sub render_template {
-    my $self     = shift;
-    my $template = shift;
-    my $handler;
-
-    # Look for a possible handler, and cache it for future requests.
-    # With DevelMode, always look it up.
-    if ( not exists $TEMPLATE_CACHE{$template} or Jifty->config->framework('DevelMode')) {
-        my $found = $template;
-        $handler = $self->template_exists( \$found );
-        # We don't cache failing URLs, so clients' can't cause us to
-        # chew up memory by requesting 404's
-        $TEMPLATE_CACHE{$template} = [ $found, $handler ] if $handler;
-    }
-
-    # Dig out the actual template (which could have a "/index.html" on
-    # it, or what have you) and its handler.
-    ($template, $handler) = @{$TEMPLATE_CACHE{$template} || [$template, undef] };
-
-    # Handle 404's
-    unless ($handler) {
-        return $self->render_template("/errors/404") unless defined $template and $template eq "/errors/404";
-        $self->log->warn("Can't find 404 page!");
-        $self->_abort;
-    }
-
-    $self->log->debug("Showing path $template using @{[ref $handler]}");
-
-    my $start_depth = Jifty->handler->buffer->depth;
-    eval {
-        $handler->show($template);
-    };
-
-    # Handle parse errors
-    my $err = $@;
-    if ( $err and not (eval { $err->isa('HTML::Mason::Exception::Abort') } or $err =~ /^ABORT/) ) {
-        $self->log->fatal("View error: $err") if $err;
-        if ($template eq '/errors/500') {
-            $self->log->warn("Can't render internal_error: $err");
-            # XXX Built-in static "oh noes" page?
-            $self->_abort;
-            return;
-        }
-
-        # XXX: This may leave a half-written tag open
-        $err->template_stack;
-        Jifty->handler->buffer->pop while Jifty->handler->buffer->depth > $start_depth;
-
-        # Save the request away, and redirect to an error page
-        Jifty->web->response->error($err);
-        my $c = Jifty::Continuation->new(
-            request  => Jifty->web->request->top_request,
-            response => Jifty->web->response,
-            parent   => Jifty->web->request->continuation,
-        );
-        # Redirect with a continuation
-        Jifty->web->_redirect( "/errors/500?J:C=" . $c->id );
-    } elsif ($err) {
-        Jifty->handler->buffer->pop while Jifty->handler->buffer->depth > $start_depth;
-        $self->_abort;
-    }
-}
 
 
 =head2 import_plugins

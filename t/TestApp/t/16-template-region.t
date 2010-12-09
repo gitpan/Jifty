@@ -10,7 +10,7 @@ my @tests = (
         text => q|list!
 <span>1</span>
 <span>2</span><script type="text/javascript">
-new Region('special',{'id':3},'/foo/item',null,null);
+new Region('special',{"id":3},'/foo/item',null,null);
 </script><div id="region-special" class="jifty-region">
 <span>3</span></div>|
     },
@@ -20,7 +20,7 @@ new Region('special',{'id':3},'/foo/item',null,null);
 plan tests => 2 + scalar(@tests) * 2;
 
 my $server = Jifty::Test->make_server;
-isa_ok( $server, 'Jifty::Server' );
+isa_ok( $server, 'Jifty::TestServer' );
 my $URL = $server->started_ok;
 
 use Test::LongString;

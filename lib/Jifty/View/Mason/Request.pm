@@ -39,26 +39,18 @@ running the component, and we're supposed to send headers, sends them.
 sub exec
 {
     my $self = shift;
-    my $r = Jifty->handler->apache;
     my $retval;
 
     eval { $retval = $self->SUPER::exec(@_) };
 
     if (my $err = $@)
     {
-	$retval = isa_mason_exception($err, 'Abort')   ? $err->aborted_value  :
+        $retval = isa_mason_exception($err, 'Abort')   ? $err->aborted_value  :
                   isa_mason_exception($err, 'Decline') ? $err->declined_value :
                   rethrow_exception $err;
     }
 
-    # On a success code, send headers if they have not been sent and
-    # if we are the top-level request. Since the out_method sends
-    # headers, this will typically only apply after $m->abort.
-    if ($self->auto_send_headers
-        and not $r->http_header_sent
-        and (!$retval or $retval==200)) {
-        Jifty->handler->send_http_header;
-    }
+    return $retval;
 }
 
 =head2 print

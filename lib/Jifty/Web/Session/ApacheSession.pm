@@ -59,6 +59,20 @@ sub id {
     return $self->loaded ? $self->_session->{_session_id} : undef;
 }
 
+=head2 create
+
+Creates a new session.
+
+=cut
+
+sub create {
+    my $self = shift;
+    my %session;
+    my $options = Jifty->config->framework('Web')->{'SessionOptions'};
+    tie %session => $self->{_backend_class}, undef, $options;
+    $self->{_session} = \%session;
+}
+
 =head2 load [ID]
 
 Load up the current session from the given C<ID>, or the appropriate
@@ -71,13 +85,11 @@ If both of those fail, creates a session in memory.
 sub load {
     my $self       = shift;
     my $session_id = shift;
-    my %cookies    = CGI::Cookie->fetch();
 
     unless ($session_id) {
         my $cookie_name = $self->cookie_name;
-        $session_id = $cookies{$cookie_name}
-            ? $cookies{$cookie_name}->value()
-            : Jifty::Model::Session->new_session_id,
+        $session_id = Jifty->web->request->cookies->{$cookie_name}
+            || Jifty::Model::Session->new_session_id,
     }
 
     my $options = Jifty->config->framework('Web')->{'SessionOptions'};

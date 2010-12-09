@@ -7,6 +7,11 @@ template '/__jifty/admin/requests' => page {
     title => "Request Inspector"
 }
 content {
+    render_region(
+        name => 'aggregate',
+        path => '/__jifty/admin/requests/aggregate',
+    );
+
     h2 { "Request Inspector" };
 
     render_region(
@@ -17,12 +22,17 @@ content {
     div {
         hyperlink(
             label => "Clear requests",
-            onclick => {
-                refresh => 'request_inspector',
-                args => {
-                    clear_requests => 1,
+            onclick => [
+                {
+                    refresh => 'request_inspector',
+                    args => {
+                        clear_requests => 1,
+                    },
                 },
-            },
+                {
+                    refresh => "aggregate",
+                }
+            ],
         ),
     };
 };
@@ -47,8 +57,7 @@ template '/__jifty/admin/requests/requests' => sub {
 
 template '/__jifty/admin/requests/more_button' => sub {
     my $request_inspector = Jifty->find_plugin('Jifty::Plugin::RequestInspector');
-    my $last_request = ($request_inspector->requests)[-1];
-    my $starting_id = $last_request ? $last_request->{id} + 1 : 0;
+    my $last_id = $request_inspector->last_id;
 
     hyperlink(
         label => "Load subsequent requests",
@@ -57,25 +66,70 @@ template '/__jifty/admin/requests/more_button' => sub {
             append  => '/__jifty/admin/requests/more_requests',
             effect  => 'slideDown',
             arguments => {
-                starting_id => $starting_id,
+                last_id => $last_id,
             },
         },
         {
             refresh_self => 1,
+        },
+        {
+            refresh => "aggregate",
         }],
     );
 };
 
 template '/__jifty/admin/requests/more_requests' => sub {
     my $request_inspector = Jifty->find_plugin('Jifty::Plugin::RequestInspector');
-    my $starting_id = get('starting_id');
+    my $last_id = get('last_id');
 
-    my @requests = $request_inspector->requests;
-    splice @requests, 0, $starting_id;
+    my @requests = $request_inspector->requests( after => $last_id );
 
     for my $request (@requests) {
         _render_request($request);
     }
+};
+
+template '/__jifty/admin/requests/aggregate' => sub {
+    my $request_inspector = Jifty->find_plugin('Jifty::Plugin::RequestInspector');
+    my @aggregates = grep {$_->can('inspect_render_aggregate')} $request_inspector->inspector_plugins;
+    return unless @aggregates;
+
+    h2 { "Aggregate information" };
+    dl {
+        for my $plugin (@aggregates) {
+            my $plugin_name = ref $plugin;
+            (my $short_name = $plugin_name) =~ s/^Jifty::Plugin:://;
+            dt {
+                hyperlink(
+                    label => $short_name,
+                    onclick => {
+                        region => Jifty->web->qualified_region($plugin_name),
+                        replace_with => '/__jifty/admin/requests/aggregate_plugin',
+                        toggle => 1,
+                        effect => 'slideDown',
+                        arguments => {
+                            plugin_name => $plugin_name,
+                        },
+                    },
+                );
+            };
+            dd {
+                render_region($plugin_name);
+            };
+        }
+    }
+};
+
+template '/__jifty/admin/requests/aggregate_plugin' => sub {
+    my $plugin_name = get('plugin_name');
+
+    my $request_inspector = Jifty->find_plugin('Jifty::Plugin::RequestInspector');
+    my @plugin_data = $request_inspector->get_all_plugin_data($plugin_name);
+
+    my $plugin = Jifty->find_plugin($plugin_name)
+        or abort(404);
+
+    $plugin->inspect_render_aggregate(@plugin_data);
 };
 
 template '/__jifty/admin/requests/plugins' => sub {
@@ -152,6 +206,9 @@ sub _render_request {
         );
 
         outs sprintf ' (%.2gs)',  $request->{end} - $request->{start};
+        if ($request->{cookie}) {
+            outs " [" . $request->{cookie} . "]";
+        }
 
         render_region("request_$id");
     };

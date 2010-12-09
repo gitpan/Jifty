@@ -35,20 +35,11 @@ creates a new object.  Possible special keys in the metadata include:
 Provides the data to hash to generate the address.  If no C<hash_with>
 is provided, the content itself is hashed.
 
-=item deflate
-
-If set to a true value, deflates the content using
-L<Compress::Zlib/memGzip>, and stores that in L</content_deflated>.
-
 =back
 
 =head2 content
 
 Returns the content of the blob.
-
-=head2 content_deflated
-
-If L</deflate> in the metadata was set, contains the deflated content.
 
 =head2 metadata
 
@@ -56,11 +47,11 @@ Returns a hashref of metadata.
 
 =head2 key
 
-Retuens the key calculated for this content.
+Returns the key calculated for this content.
 
 =cut
 
-__PACKAGE__->mk_accessors(qw(content content_deflated metadata key));
+__PACKAGE__->mk_accessors(qw(content metadata key));
 
 sub new {
     my $class = shift;
@@ -71,8 +62,6 @@ sub new {
         %$args,
     } );
     $self->key( md5_hex( $self->metadata->{hash_with} || $self->content ) );
-    $self->content_deflated( Compress::Zlib::memGzip( $self->content ) )
-        if $self->metadata->{deflate};
     return $self;
 }
 

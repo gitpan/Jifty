@@ -2,7 +2,6 @@ package Jifty::Plugin::ErrorTemplates::View;
 
 use strict;
 use warnings;
-use vars qw( $r );
 
 use Jifty::View::Declare -base;
 
@@ -50,7 +49,7 @@ template '/error/_elements/error_text' => sub {
 =head2 wrapper
 
 This exists as a fallback wrapper, in case the error in question is
-caused by the Jifty app's wrapper, for instance.
+caused by the Jifty application's wrapper, for instance.
 
 =cut
 
@@ -81,7 +80,7 @@ caused by the Jifty app's wrapper, for instance.
 
 
 template '__jifty/error/error.css' => sub {
-    Jifty->handler->apache->content_type("text/css");
+    Jifty->web->response->content_type("text/css");
     h1 {
         outs('color: red');
     };
@@ -111,8 +110,8 @@ sub maybe_page (&;$) {
 
 template '/errors/404' => sub {
     my $file = get('path') || Jifty->web->request->path;
-    Jifty->log->error( "404: user tried to get to " . $file );
-    Jifty->handler->apache->header_out( Status => '404' )
+    Jifty->log->info( "404: user tried to get to " . $file );
+    Jifty->web->response->status( 404 )
         unless Jifty->web->request->is_subrequest;
     maybe_page { title => _("Something's not quite right") } content {
         with( id => "overview" ), div {

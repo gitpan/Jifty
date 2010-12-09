@@ -152,53 +152,68 @@ L</label> defaults to the I<KEY>, and the L</sort_order> defaults to the
 pre-existing child's sort order (if a C<KEY> is being over-written) or
 the end of the list, if it is a new C<KEY>.
 
+If the paramhash contains a key called C<menu>, that will be used instead
+of creating a new Jifty::Web::Menu.
+
+
 =cut
 
 sub child {
-    my $self = shift;
-    my $key = shift;
+    my $self  = shift;
+    my $key   = shift;
     my $proto = ref $self || $self;
 
-    if (@_) {
+    if ( my %args = @_ ) {
+
         # Clear children ordering cache
         delete $self->{children_list};
 
-        # Set us up the child
-        my $child = $proto->new({parent => $self,
-                                 sort_order => ($self->{children}{$key}{sort_order}
-                                                    || scalar values %{$self->{children}}),
-                                 label => $key,
-                                 escape_label => 1,
-                                 @_
-                             });
+        my $child;
+        if ( $child = $args{menu} ) {
+            $child->parent($self);
+        } else {
+            $child = $proto->new(
+                {   parent     => $self,
+                    label        => $key,
+                    escape_label => 1,
+                    %args
+                }
+            );
+        }
         $self->{children}{$key} = $child;
 
+        $child->sort_order( $args{sort_order} || (scalar values %{ $self->{children} })  )
+            unless ($child->sort_order());
+
         # URL is relative to parents, and cached, so set it up now
-        $child->url($child->{url});
-        
+        $child->url( $child->{url} );
+
         # Figure out the URL
-        my $url   =   ( defined $child->link
-                    and ref $child->link
-                    and $child->link->can('url') )
-                        ? $child->link->url : $child->url;
+        my $url
+            = (     defined $child->link
+                and ref $child->link
+                and $child->link->can('url') )
+            ? $child->link->url
+            : $child->url;
 
         # Activate it
         if ( defined $url and length $url and Jifty->web->request ) {
+
             # XXX TODO cleanup for mod_perl
             my $base_path = Jifty->web->request->path;
             chomp($base_path);
-            
+
             $base_path =~ s/index\.html$//;
             $base_path =~ s/\/+$//;
-            $url =~ s/\/+$//;
-            
-            if ($url eq $base_path) {
-                $self->{children}{$key}->active(1); 
+            $url       =~ s/\/+$//;
+
+            if ( $url eq $base_path ) {
+                $self->{children}{$key}->active(1);
             }
         }
     }
 
-    return $self->{children}{$key}
+    return $self->{children}{$key};
 }
 
 =head2 active_child
@@ -285,7 +300,8 @@ sub render_as_context_menu {
 =head2 render_as_hierarchical_menu_item
 
 Render an <li> for this item. suitable for use in a regular or contextual
-menu. Currently renders one level of submenu, if it exists.
+menu. Currently renders one level of submenu, if it exists, using
+L</render_submenu>.
 
 =cut
 
@@ -296,35 +312,50 @@ sub render_as_hierarchical_menu_item {
         @_
     );
     my @kids = $self->children;
-    my $web = Jifty->web;
-    my $id   = $web->serial;
+    my $web  = Jifty->web;
     $web->out( qq{<li class="toplevel }
             . ( $self->active ? 'active' : 'closed' ) .' '.($self->class||"").' '. qq{">}
             . qq{<span class="title">} );
     $web->out( $self->as_link );
     $web->out(qq{</span>});
     if (@kids) {
+        my $id = $web->serial;
         $web->out(
             qq{<span class="expand"><a href="#" onclick="Jifty.ContextMenu.hideshow('}
                 . $id
-                . qq{'); return false;">&nbsp;</a></span>}
-                . qq{<ul id="}
-                . $id
-                . qq{">} );
-        for (@kids) {
-            $web->out(qq{<li class="submenu }.($_->active ? 'active' : '' ).' '. ($_->class || "").qq{">});
-
-            # We should be able to get this as a string.
-            # Either stringify the link object or output the label
-            # This is really icky. XXX TODO
-            $web->out( $_->as_link );
-            $web->out("</li>");
-        }
-        $web->out(qq{</ul>});
+                . qq{'); return false;">&nbsp;</a></span>} );
+        $self->render_submenu( id => $id );
     }
     $web->out(qq{</li>});
     '';
 
+}
+
+=head2 render_submenu
+
+Renders a <ul> for the children (but not descendants) of this menu object,
+suitable for use as part of a regular or contextual menu.  Called by
+L</render_as_hierarchical_menu_item>. You probably don't need to use this
+on it's own.
+
+=cut
+
+sub render_submenu {
+    my $self = shift;
+    my %args = ( id => '', @_ );
+
+    my $web = Jifty->web;
+    $web->out(qq(<ul id="$args{id}">));
+    for ($self->children) {
+        $web->out(qq{<li class="submenu }.($_->active ? 'active' : '' ).' '. ($_->class || "").qq{">});
+
+        # We should be able to get this as a string.
+        # Either stringify the link object or output the label
+        # This is really icky. XXX TODO
+        $web->out( $_->as_link );
+        $web->out("</li>");
+    }
+    $web->out(qq{</ul>});
 }
 
 =head2 render_as_classical_menu
@@ -371,16 +402,102 @@ sub _render_as_classical_menu_item {
 
 }
 
-=head2 render_as_yui_menubar [PARAMHASH]
+=head2 render_as_yui_menu [PARAMHASH]
+
+Render menu with YUI menu.  It can support arbitrary levels of submenus.
+
+Valid options for the paramhash are as follows:
+
+=over
+
+=item id
+
+The HTML element ID to use for the menu
+
+=item show
+
+A boolean indicating whether to show the menu after rendering the HTML.
+Defaults to true.  If you don't set this to true, you should use the
+button option (see below) or show the menu with Javascript like:
+
+    YAHOO.widget.MenuManager.getMenu("menu-html-id").show();
+
+=item button
+
+The ID of an HTML element.  The element's onclick Javascript event is bound
+to a function which shows the menu.
+
+=item options
+
+A hashref of options passed directly to the Javascript constructor for
+the menu.  See L<http://developer.yahoo.com/yui/menu/#configreference> for
+a list of the options available.
+
+=item beforeshow
+
+A string of Javascript to run immediately before the menu is shown.  The
+variable C<menu> is available and represents the current YUI Menu object.
+
+=back
+
+=cut
+
+sub render_as_yui_menu {
+    my $self = shift;
+    my %args = (
+        id      => Jifty->web->serial,
+        show    => 1,
+        options => {},
+        beforeshow => '',
+        @_
+    );
+
+    my $showjs = $args{'show'} ? "menu.show();" : "";
+    my $json   = Jifty::JSON::encode_json( $args{'options'} );
+
+    # Bind to a button to show the menu
+    my $binding = (defined $args{'button'} and length $args{'button'}) ? 1 : 0;
+
+    $self->_render_as_yui_menu_item( class => "yuimenu", id => $args{'id'} );
+
+    Jifty->web->out(<<"    END");
+        <script type="text/javascript">
+            YAHOO.util.Event.onContentReady("$args{id}", function() {
+                // set container?
+                var menu = new YAHOO.widget.Menu("$args{id}", $json);
+                menu.render();
+                menu.subscribe("show", function() {
+                    if ( !this.cfg.getProperty("constraintoviewport") )
+                        Jifty.Utils.scrollToShow(this.id);
+                });
+                if ( $binding ) {
+                    YAHOO.util.Event.addListener("$args{button}", "click",
+                        function() {
+                           this.show();
+                        },
+                        null, menu
+                    );
+                    menu.subscribe("show", function() { if (!this.parent) jQuery("#$args{button}").addClass("open") });
+                    menu.subscribe("hide", function() { if (!this.parent) jQuery("#$args{button}").removeClass("open") });
+                }
+                $args{beforeshow}
+                $showjs
+            });
+        </script>
+    END
+    '';
+}
+
+=head2 render_as_yui_menubar
 
 Render menubar with YUI menu, suitable for an application's menu.
-It can support arbitary levels of submenu.
+It can support arbitrary levels of submenu.
 
 =cut
 
 sub render_as_yui_menubar {
     my $self = shift;
-    my $id   = Jifty->web->serial;
+    my $id   = shift || Jifty->web->serial;
     $self->_render_as_yui_menu_item( class => "yuimenubar", id => $id );
     Jifty->web->out(qq|<script type="text/javascript">\n|
         . qq|YAHOO.util.Event.onContentReady("|.$id.qq|", function() {\n|
@@ -428,7 +545,7 @@ sub _render_as_yui_menu_item {
         Jifty->web->out(
             qq{<div}
             . ($args{'id'} ? qq( id="$args{'id'}") : "")
-            . qq( class="$args{class}"><div class="bd">)
+            . qq( class="$args{class}"><div class="bd" @{[($args{id} ? "id=\"$args{id}-bd\"" : "")]}>)
         );
 
         my $count    = 1;
@@ -501,7 +618,11 @@ sub as_link {
                                  target => $self->target,
                                  class => $self->class );
     } else {
-        return _( $self->label );
+        if ( $self->class ) {
+            return "<span class=\"@{[$self->class]}\">"._( $self->label )."</span>";
+        } else {
+            return _( $self->label );
+        }
     }
 }
 

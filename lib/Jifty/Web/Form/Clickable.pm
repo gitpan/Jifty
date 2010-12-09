@@ -86,7 +86,7 @@ See L<Jifty::Request::Mapper/query_parameters> for details.
 =item submit
 
 A list of actions to run when the object is clicked.  This may be an
-array refrence or a single element; each element may either be a
+array reference or a single element; each element may either be a
 moniker or, a L<Jifty::Action> or a hashref with the keys 'action' and 'arguments'. 
 An undefined value submits B<all> actions in the form, an empty list 
 reference (the default) submits none.
@@ -155,7 +155,6 @@ get an unexpected error from your browser.
 
 sub new {
     my $class = shift;
-    my ($root) = $ENV{'REQUEST_URI'} =~ /([^\?]*)/;
 
     my %args = (
         parameters => {},
@@ -170,7 +169,7 @@ sub new {
     my $self = $class->SUPER::new(
         {   class            => '',
             label            => 'Click me!',
-            url              => $root,
+            url              => Jifty->web->request->top_request->path,
             escape_label     => 1,
             tooltip          => '',
             continuation     => Jifty->web->request->continuation,
@@ -275,7 +274,7 @@ L<Jifty::Request::Mapper> for details.
 =head2 submit [VALUE]
 
 Gets or sets the list of actions to run when the object is clicked.
-This may be an array refrence or a single element; each element may
+This may be an array reference or a single element; each element may
 either be a moniker or a L<Jifty::Action>.  An undefined value submits
 B<all> actions in the form, an empty list reference (the default)
 submits none.
@@ -288,7 +287,7 @@ otherwise.
 
 =head2 parameter KEY VALUE
 
-Sets the given HTTP paramter named C<KEY> to the given C<VALUE>.
+Sets the given HTTP parameter named C<KEY> to the given C<VALUE>.
 
 =cut
 
@@ -428,15 +427,13 @@ sub post_parameters {
     my %parameters
         = ( _map( %{ $self->{fallback} || {} } ), $self->parameters );
 
-    my ($root) = $ENV{'REQUEST_URI'} =~ /([^\?]*)/;
-
     # Submit actions should only show up once
     my %uniq;
     $self->submit( [ grep { not $uniq{$_}++ } @{ $self->submit } ] )
         if $self->submit;
 
     # Add a redirect, if this isn't to the right page
-    if ( $self->url ne $root and not $self->returns ) {
+    if ( $self->url ne Jifty->web->request->top_request->path and not $self->returns ) {
         Jifty::Util->require('Jifty::Action::Redirect');
         my $redirect = Jifty::Action::Redirect->new(
             arguments => { url => $self->url } );
@@ -479,8 +476,7 @@ sub complete_url {
 
     my %parameters = $self->get_parameters;
 
-    my ($root) = $ENV{'REQUEST_URI'} =~ /([^\?]*)/;
-    my $url = $self->returns ? $root : $self->url;
+    my $url = $self->returns ? URI->new(Jifty->web->request->request_uri)->path : $self->url;
     if (%parameters) {
         $url .= ( $url =~ /\?/ ) ? ";" : "?";
         $url .= Jifty->web->query_string(%parameters);
@@ -648,7 +644,7 @@ sub generate {
 
 =head2 register_action ACTION
 
-Reisters the action if it isn't registered already, but only on the
+Registers the action if it isn't registered already, but only on the
 link.  That is, the registration will not be seen by any other buttons
 in the form.
 

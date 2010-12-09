@@ -105,4 +105,22 @@ on '/dispatch/protocol' => run {
     set footer => 'normal';
 };
 
+
+
+before '/content-type-bug' => run {
+    
+    Jifty->web->navigation->child( test1 => label => '<i>Italic</i>', escape_label => 0);
+
+    my $content = Jifty->web->render_template('/sample-widget');
+    Jifty->web->navigation->child( test2 => label => $content, escape_label => 0);
+};
+
+
+before '/someplace' => run {
+    my $result = Jifty::Result->new;
+    $result->action_class("TestApp::Action::DoSomething");
+    Jifty->web->response->result(foo => $result);
+    redirect '/otherplace';
+};
+
 1;

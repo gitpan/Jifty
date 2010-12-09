@@ -37,7 +37,7 @@ sub arguments {
 
     # Mark read-only columns for read-only display
     for my $column ( $self->possible_columns ) {
-        if ( not $column->writable and $column->readable ) {
+        if ( (not $column->writable) and $column->readable ) {
             $arguments->{$column->name}{'render_mode'} = 'read';
         }
     }
@@ -127,13 +127,6 @@ sub take_action {
           and lc $self->arguments->{$field}{render_as} eq "upload"
           and (not defined $value or not ref $value);
 
-        # Handle file uploads
-        if (ref $value eq "Fh") { # CGI.pm's "lightweight filehandle class"
-            local $/;
-            binmode $value;
-            $value = scalar <$value>;
-        }
-
         # Skip fields that have not changed, but only if we can read the field.
         # This prevents us from getting an $old value that is wrongly undef
         # when really we are just denied read access.  At the same time, it means
@@ -199,6 +192,8 @@ sub take_action {
     $self->report_success
       if $changed and not $self->result->failure;
 
+    $self->result->content(id => $self->record->id);
+
     $self->result->content( detailed_messages => $detailed_messages )
         if $self->report_detailed_messages;
 
@@ -234,13 +229,43 @@ sub possible_columns {
     return grep { not $_->protected } $self->SUPER::possible_columns;
 }
 
+=head2 _extra_validator_args
+
+Passes C<< for => 'update' >> to validators.
+
+=cut
+
+sub _extra_validator_args {
+    return { for => 'update' };
+}
+
+=head2 _extra_canonicalizer_args
+
+Passes C<< for => 'update' >> to canonicalizers.
+
+=cut
+
+sub _extra_canonicalizer_args {
+    return { for => 'update' };
+}
+
+=head2 _extra_autocompleter_args
+
+Passes C<< for => 'update' >> to autocompleters.
+
+=cut
+
+sub _extra_autocompleter_args {
+    return { for => 'update' };
+}
+
 =head1 SEE ALSO
 
 L<Jifty::Action::Record>, L<Jifty::Record>
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2007 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 =cut

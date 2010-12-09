@@ -14,9 +14,10 @@ use Hash::Merge;
 use Digest::MD5 qw/md5_hex/;
 use Cwd qw/abs_path cwd/;
 
-# this is required here because we want Test::HTTP::Server::Simple's
-# END to be at the very last, later than Jifty::Test's
-use Test::HTTP::Server::Simple;
+# Mechanize uses Test::LongString to report mismatches.  Increase the
+# limit so we can see where errors come from more easily.
+use Test::LongString;
+$Test::LongString::Max = 128;
 
 =head1 NAME
 
@@ -194,6 +195,31 @@ sub setup {
     $args ||= [];
     my %args = @{$args} % 2 ? (@{$args}, 1) : @{$args};
 
+    my $root = Jifty::Util->app_root;
+
+    require Jifty::YAML;
+    # naive detect of configfileversion before jifty->new, since you
+    # probably don't want to override it in site_config or other places.
+    my $config = eval { Jifty::YAML::LoadFile("$root/etc/config.yml") };
+    if ($config && $config->{framework}{ConfigFileVersion} &&
+                   $config->{framework}{ConfigFileVersion} < 5) {
+        $ENV{JIFTY_TEST_SERVER} ||= 'Standalone';
+    }
+
+    my $server = $ENV{JIFTY_TEST_SERVER} ||=
+        $args{actual_server} ? 'Standalone' : 'Inline';
+
+    if ($server eq 'Inline') {
+        require Jifty::Test::WWW::Mechanize;
+        require Test::WWW::Mechanize::PSGI;
+        unshift @Jifty::Test::WWW::Mechanize::ISA, 'Test::WWW::Mechanize::PSGI';
+    }
+
+    if ($args{actual_server}) {
+        $class->builder->plan(skip_all => "This test requires an actual test server to run.  Run with JIFTY_TEST_SERVER=Standalone instead")
+            if $ENV{JIFTY_TEST_SERVER} eq 'Inline';
+    }
+
     # Spit out a plan (if we got one) *before* we load modules, in
     # case of compilation errors
     unless ($class->builder->has_plan) {
@@ -202,8 +228,6 @@ sub setup {
     }
 
     # Require the things we need
-    require Jifty::YAML;
-    require Jifty::Server;
     require Jifty::Script::Schema;
 
     $class->builder->{no_handle} = $args{no_handle};
@@ -233,8 +257,6 @@ sub setup {
       }
         
     }
-    my $root = Jifty::Util->app_root;
-
     # Mason's disk caching sometimes causes false tests
     rmtree([ File::Spec->canonpath("$root/var/mason") ], 0, 1);
 
@@ -259,34 +281,34 @@ sub setup_test_database {
     }
 
     if ($ENV{JIFTY_FAST_TEST}) {
-	local $SIG{__WARN__} = sub {};
-	eval { Jifty->new( no_version_check => 1 ); Jifty->handle->check_schema_version };
-	my $booted;
-	if (Jifty->handle && !$@) {
-	    my $baseclass = Jifty->app_class;
-	    for my $model_class ( grep {/^\Q$baseclass\E::Model::/} Jifty::Schema->new->models ) {
-		# We don't want to get the Collections, for example.
-		next unless $model_class->isa('Jifty::DBI::Record');
-		Jifty->handle->simple_query('TRUNCATE '.$model_class->table );
-		Jifty->handle->simple_query('ALTER SEQUENCE '.$model_class->table.'_id_seq RESTART 1');
-	    }
-	    # Load initial data
-	    eval {
-		my $bootstrapper = Jifty->app_class("Bootstrap");
-		Jifty::Util->require($bootstrapper);
-		$bootstrapper->run() if $bootstrapper->can('run');
-	    };
-	    die $@ if $@;
-	    $booted = 1;
-	}
-	if (Jifty->handle) {
-	    Jifty->handle->disconnect;
-	    Jifty->handle(undef);
-	}
-	if ($booted) {
+        local $SIG{__WARN__} = sub {};
+        eval { Jifty->new( no_version_check => 1 ); Jifty->handle->check_schema_version };
+        my $booted;
+        if (Jifty->handle && !$@) {
+            my $baseclass = Jifty->app_class;
+            for my $model_class ( grep {/^\Q$baseclass\E::Model::/} Jifty::Schema->new->models ) {
+                # We don't want to get the Collections, for example.
+                next unless $model_class->isa('Jifty::DBI::Record');
+                Jifty->handle->simple_query('TRUNCATE '.$model_class->table );
+                Jifty->handle->simple_query('ALTER SEQUENCE '.$model_class->table.'_id_seq RESTART 1');
+            }
+            # Load initial data
+            eval {
+                my $bootstrapper = Jifty->app_class("Bootstrap");
+                Jifty::Util->require($bootstrapper);
+                $bootstrapper->run() if $bootstrapper->can('run');
+            };
+            die $@ if $@;
+            $booted = 1;
+        }
+        if (Jifty->handle) {
+            Jifty->handle->disconnect;
+            Jifty->handle(undef);
+        }
+        if ($booted) {
             Jifty->new();
-	    return;
-	}
+            return;
+        }
     }
 
     Jifty->new( no_handle => 1, pre_init => 1 );
@@ -350,9 +372,11 @@ sub load_test_configs {
         $test_options = _read_and_merge_config_file($file, $test_options);
 
         # are we at the app root? if so, then we can stop moving up
+        # did abs_path return undef? if so, there's not much we can do from here
         $directory = abs_path(File::Spec->catdir($directory, File::Spec->updir($directory)));
         return $test_options
-            if Jifty::Util->is_app_root($directory);
+            if not defined $directory
+            or Jifty::Util->is_app_root($directory);
     }
 
     Jifty->log->fatal("Stopping looking for test config files after recursing upwards $depth times. Either you have a nonstandard layout or an incredibly deep test hierarchy. If you really do have an incredibly deep test hierarchy, you can set the environment variable JIFTY_TEST_DEPTH to a larger value.") if (Jifty->logger);
@@ -420,7 +444,7 @@ sub test_config {
             ],
             Mailer => 'Jifty::Test',
             MailerArgs => [],
-            LogLevel => 'WARN',
+            LogLevel => $ENV{JIFTY_TEST_LOGLEVEL} || 'FATAL',
             TestMode => 1,
         }
     };
@@ -448,35 +472,22 @@ sub _testfile_to_dbname {
 
 =head2 make_server
 
-Creates a new L<Jifty::Server> which C<ISA> L<Jifty::TestServer> and
-returns it.
+Creates a new L<Jifty::TestServer> depending on the value of
+C<$ENV{JIFTY_TEST_SERVER}>.  If the environment variable is C<Inline>,
+we run tests using PSGI inline without spawning an actual server.
+Otherwise, we fork off a L<Plack::Server> to run tests against.
 
 =cut
 
 sub make_server {
     my $class = shift;
+    use Jifty::TestServer;
 
-    # XXX: Jifty::TestServer is not a Jifty::Server, it is actually
-    # server controller that invokes bin/jifty server. kill the
-    # unshift here once we fix all the tests expecting it to be
-    # jifty::server.
-    if ($ENV{JIFTY_TESTSERVER_PROFILE} ||
-        $ENV{JIFTY_TESTSERVER_COVERAGE} ||
-        $ENV{JIFTY_TESTSERVER_DBIPROF} ||
-        $^O eq 'MSWin32') {
-        require Jifty::TestServer;
-        unshift @Jifty::Server::ISA, 'Jifty::TestServer';
-    } elsif ($ENV{JIFTY_APACHETEST}) {
-        require Jifty::TestServer::Apache;
-        unshift @Jifty::Server::ISA, 'Jifty::TestServer::Apache';
-    }
-    else {
-        unshift @Jifty::Server::ISA, 'Test::HTTP::Server::Simple';
-    }
+    my $server_class = $ENV{JIFTY_TEST_SERVER} eq 'Inline'
+        ? 'Jifty::TestServer::Inline' : 'Jifty::TestServer';
+    Jifty::Util->require($server_class) or die $!;
 
-    my $server = Jifty::Server->new;
-    $Jifty::SERVER = $server;
-    return $server;
+    $Jifty::SERVER = $server_class->new;
 }
 
 =head2 web
@@ -657,7 +668,9 @@ sub _ending {
     return if $Test->{Original_Pid} != $$;
 
     my $should_die = 0;
-    if ($Jifty::SERVER && (my $plugin = Jifty->find_plugin("Jifty::Plugin::TestServerWarnings"))) {
+    if ($Jifty::SERVER &&
+        (my $plugin = Jifty->find_plugin("Jifty::Plugin::TestServerWarnings")) &&
+        grep { $_ eq 'Jifty::View::Declare::Handler' } Jifty->handler->view_handlers) { # testserverwarnings plugin requires TD handler to work properly.
         my @warnings = $plugin->decoded_warnings( 'http://localhost:'.$Jifty::SERVER->port );
 
         $Test->diag("Uncaught warning: $_") for @warnings;
@@ -666,6 +679,9 @@ sub _ending {
             $should_die = 1;
         }
     }
+
+    # Turn off the server
+    undef $Jifty::SERVER;
 
     # If all tests passed..
     if (Jifty::Test->is_passing && Jifty::Test->is_done) {

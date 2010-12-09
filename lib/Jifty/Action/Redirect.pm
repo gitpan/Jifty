@@ -16,7 +16,7 @@ Jifty::Action::Redirect - Redirect the browser
 
 =head1 DESCRIPTION
 
-Given a URL, this action forces Jifty to perform a redirect to thast URL after processing the rest of the request.
+Given a URL, this action forces Jifty to perform a redirect to that URL after processing the rest of the request.
 
 =cut
 
@@ -88,7 +88,7 @@ L<Jifty::Action>, L<Jifty::Web/next_page>, L<Jity::Web/force_redirect>
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2007 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 =cut

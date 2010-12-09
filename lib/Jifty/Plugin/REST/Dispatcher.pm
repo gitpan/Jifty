@@ -15,13 +15,13 @@ use Data::Dumper ();
 use XML::Simple;
 
 before qr{^ (/=/ .*) \. (js|json|yml|yaml|perl|pl|xml|html) $}x => run {
-    $ENV{HTTP_ACCEPT} = $2;
+    Jifty->web->request->env->{HTTP_ACCEPT} = $2;
     dispatch $1;
 };
 
 before POST qr{^ (/=/ .*) ! (DELETE|PUT|GET|POST|OPTIONS|HEAD|TRACE|CONNECT) $}x => run {
-    Jifty->web->request->request_method($2);
-    $ENV{REST_REWROTE_METHOD} = 1;
+    Jifty->web->request->method($2);
+    Jifty->web->request->env->{REST_REWROTE_METHOD} = 1;
     dispatch $1;
 };
 
@@ -53,17 +53,14 @@ Jifty::Plugin::REST::Dispatcher - Dispatcher for REST plugin
 
 =head2 show_help
 
-Shows basic help about resources and formats available via this RESTian interface.
+Shows basic help about resources and formats available via this RESTful interface.
 
 =cut
 
 sub show_help {
-    my $apache = Jifty->handler->apache;
+    Jifty->web->response->content_type('text/plain; charset=utf-8');
 
-    $apache->header_out('Content-Type' => 'text/plain; charset=UTF-8');
-    Jifty->handler->send_http_header;
-   
-    print qq{
+    Jifty->web->response->body(qq{
 Accessing resources:
 
 on GET    /=/model                                   list models
@@ -99,7 +96,7 @@ or appending one of the extensions to any resource:
 
 HTML is output only if the Accept: header or an extension does not request a
 specific format.
-};
+});
     last_rule;
 }
 
@@ -115,12 +112,8 @@ sub show_help_specific {
     my $method = "show_help_specific_$topic";
     __PACKAGE__->can($method) or abort(404);
 
-    my $apache = Jifty->handler->apache;
-
-    $apache->header_out('Content-Type' => 'text/plain; charset=UTF-8');
-    Jifty->handler->send_http_header;
-
-    print __PACKAGE__->$method;
+    Jifty->web->response->content_type('text/plain; charset=utf-8');
+    Jifty->web->response->body(__PACKAGE__->$method);
     last_rule;
 }
 
@@ -147,8 +140,18 @@ looking for Tasks with due dates 1999-12-25 OR 2000-12-25, you can use:
 
     /=/search/Task/due/1999-12-25/due/2000-12-25/
 
-There are also some pseudo-columns that affect the results, but are not columns
-that are searched:
+
+There are also some pseudo-columns. They are prefixed by __ to avoid collisions
+with actual column names.
+
+Not:
+
+    .../__not/<column>/<value>
+
+This lets you search for records whose value for the column is NOT equal
+to the specified value.
+
+Ordering:
 
     .../__order_by/<column>
     .../__order_by_asc/<column>
@@ -156,6 +159,8 @@ that are searched:
 
 These let you change the output order of the results. Multiple '__order_by's
 will be respected.
+
+Pagination:
 
     .../__page/<number>
     .../__per_page/<number>
@@ -202,7 +207,7 @@ Returns the user's desired output format. Returns a hashref of:
 
 sub output_format {
     my $prefix = shift;
-    my $accept = ($ENV{HTTP_ACCEPT} || '');
+    my $accept = (Jifty->web->request->env->{HTTP_ACCEPT} || '');
 
     my (@prefix, $url);
     if ($prefix) {
@@ -223,7 +228,7 @@ sub output_format {
             format       => 'JSON',
             extension    => 'json',
             content_type => 'application/json; charset=UTF-8',
-            freezer      => \&Jifty::JSON::objToJson,
+            freezer      => \&Jifty::JSON::encode_json,
         };
     }
     elsif ($accept =~ /j(?:ava)?s|ecmascript/i) {
@@ -231,7 +236,7 @@ sub output_format {
             format       => 'JS',
             extension    => 'js',
             content_type => 'application/javascript; charset=UTF-8',
-            freezer      => sub { 'var $_ = ' . Jifty::JSON::objToJson( @_, { singlequote => 1 } ) },
+            freezer      => sub { 'var $_ = ' . Jifty::JSON::encode_json( @_ ) },
         };
     }
     elsif ($accept =~ qr{^(?:application/x-)?(?:perl|pl)$}i) {
@@ -277,25 +282,22 @@ sub output_format {
 
 =head2 outs PREFIX DATASTRUCTURE
 
-TAkes a url path prefix and a datastructure.  Depending on what content types the other side of the HTTP connection can accept,
-renders the content as yaml, json, javascript, perl, xml or html.
+Takes a url path prefix and a data structure.  Depending on what content types the other side of the HTTP connection can accept,
+renders the content as YAML, JSON, JavaScript, Perl, XML or HTML.
 
 =cut
 
 sub outs {
     my $prefix = shift;
-    my $apache = Jifty->handler->apache;
-
     my $format = output_format($prefix);
+    warn "==> using $format->{format}" if $main::DEBUG;
 
-    $apache->header_out('Content-Type' => $format->{content_type});
-    Jifty->handler->send_http_header;
-    print $format->{freezer}->(@_);
-
+    Jifty->web->response->content_type($format->{content_type});
+    Jifty->handler->buffer->out_method->($format->{freezer}->(@_));
     last_rule;
 }
 
-our $xml_config = { SuppressEmpty   => '',
+our $xml_config = { SuppressEmpty   => undef,
                     NoAttr          => 1,
                     RootName        => 'data' };
 
@@ -365,7 +367,7 @@ sub render_as_html {
 
 =head2 html_dump DATASTRUCTURE
 
-Recursively render DATASTRUCTURE as some simple html dls and ols. 
+Recursively render DATASTRUCTURE as some simple HTML C<dl>s and C<ol>s. 
 
 =cut
 
@@ -544,6 +546,9 @@ sub list_model_columns {
             $cols{ $col->name }->{ $_ } = Scalar::Defer::force($val)
                 if defined $val and length $val;
         }
+        if (my $serialized = $model->column_serialized_as($col)) {
+            $cols{ $col->name }->{serialized_as} = $serialized;
+        }
         $cols{ $col->name }{writable} = 0 if exists $cols{$col->name}{writable} and $col->protected;
     }
 
@@ -552,7 +557,7 @@ sub list_model_columns {
 
 =head2 list_model_items MODELCLASS COLUMNNAME
 
-Returns a list of items in MODELCLASS sorted by COLUMNNAME, with only COLUMNAME displayed.  (This should have some limiting thrown in)
+Returns a list of items in MODELCLASS sorted by COLUMNNAME, with only COLUMNNAME displayed.  (This should have some limiting thrown in)
 
 =cut
 
@@ -656,12 +661,6 @@ sub search_items {
     my @pieces = grep {length} split '/', $fragment;
     my $ret = ['search', $model, @pieces];
 
-    # if they provided an odd number of pieces, the last is the output column
-    my $field;
-    if (@pieces % 2 == 1) {
-        $field = pop @pieces;
-    }
-
     # limit to the key => value pairs they gave us
     my $collection = eval { $model->collection_class->new }
         or abort(404);
@@ -713,6 +712,20 @@ sub search_items {
                 );
             }
         },
+        __not => sub {
+            my $column = shift;
+            my $value  = shift @pieces;
+
+            my $canonicalizer = "canonicalize_$column";
+            $value = $record->$canonicalizer($value)
+                if $record->can($canonicalizer);
+
+            $collection->limit(
+                column   => $column,
+                value    => $value,
+                operator => '!=',
+            );
+        },
     );
 
     # this was called __limit before it was generalized
@@ -725,7 +738,7 @@ sub search_items {
     $special{__order_by_asc}  = $special{__order_by};
     $special{__order_by_desc} = sub { $special{__order_by}->($_[0], 'DESC') };
 
-    while (@pieces) {
+    while (@pieces > 1) {
         my $column = shift @pieces;
         my $value  = shift @pieces;
 
@@ -739,6 +752,12 @@ sub search_items {
 
             $collection->limit(column => $column, value => $value);
         }
+    }
+
+    # if they provided an odd number of pieces, the last is the output column
+    my $field;
+    if (@pieces) {
+        $field = shift @pieces;
     }
 
     if (defined($per_page) || defined($current_page)) {
@@ -821,31 +840,7 @@ sub _dispatch_to_action {
             if defined $rec->id;
     }
     
-    # CGI.pm doesn't handle form encoded data in PUT requests, so we have
-    # to read the request body from PUTDATA and have CGI.pm parse it
-    if ( Jifty->web->request->request_method eq 'PUT'
-        and (   $ENV{'CONTENT_TYPE'} =~ m|^application/x-www-form-urlencoded$|
-              or $ENV{'CONTENT_TYPE'} =~ m|^multipart/form-data$| ) )
-    {
-        my $cgi    = Jifty->handler->cgi;
-        my $length = defined $ENV{'CONTENT_LENGTH'} ? $ENV{'CONTENT_LENGTH'} : 0;
-        my $data = $cgi->param('PUTDATA');
-
-        if ( defined $data ) {
-            my @params = $cgi->all_parameters;
-            $cgi->parse_params( $data );
-            push @params, $cgi->all_parameters;
-            
-            my %seen;
-            my @uniq = map { $seen{$_}++ == 0 ? $_ : () } @params;
-
-            # Add only the newly parsed arguments to the Jifty::Request
-            Jifty->web->request->argument( $_ => $cgi->param( $_ ) )
-                for @uniq;
-        }
-    }
-
-    Jifty->web->request->request_method('POST');
+    Jifty->web->request->method('POST');
     dispatch "/=/action/$action";
 }
 
@@ -889,7 +884,11 @@ sub list_action_params {
     for my $arg ( keys %$arguments ) {
         $args{ $arg } = { };
         for ( @param_attrs ) {
-            my $val = $arguments->{ $arg }{ $_ };
+            # Valid values is special because sometimes it has a collection
+            # object that needs to be abstracted away
+            my $val = $_ eq 'valid_values'
+                        ? $action->valid_values($arg)
+                        : $arguments->{ $arg }{ $_ };
             $args{ $arg }->{ $_ } = Scalar::Defer::force($val)
                 if defined $val and length $val;
         }
@@ -910,22 +909,20 @@ sub show_action_form {
     my ($action) = action(shift);
     Jifty::Util->require($action) or abort(404);
     $action = $action->new or abort(404);
-
     # XXX - Encapsulation?  Someone please think of the encapsulation!
     no warnings 'redefine';
-    local *Jifty::Web::out = sub { shift; print @_ };
     local *Jifty::Action::form_field_name = sub { shift; $_[0] };
     local *Jifty::Action::register = sub { 1 };
     local *Jifty::Web::Form::Field::Unrendered::render = \&Jifty::Web::Form::Field::render;
 
-    print start_html(-encoding => 'UTF-8', -declare_xml => 1, -title => ref($action));
+    Jifty->web->response->{body} .= start_html(-encoding => 'UTF-8', -declare_xml => 1, -title => ref($action));
     Jifty->web->form->start;
     for my $name ($action->argument_names) {
-        print $action->form_field($name);
+        Jifty->web->response->{body} .= $action->form_field($name);
     }
     Jifty->web->form->submit( label => 'POST' );
     Jifty->web->form->end;
-    print end_html;
+    Jifty->web->response->{body} .= end_html;
     last_rule;
 }
 
@@ -942,7 +939,7 @@ Returns the action's result.
 TODO, doc the format of the result.
 
 On an invalid action name, throws a C<404>.
-On a disallowed action mame, throws a C<403>. 
+On a disallowed action name, throws a C<403>. 
 On an internal error, throws a C<500>.
 
 =cut
@@ -969,7 +966,7 @@ sub run_action {
     }
 
     my $rec = $action->{record};
-    if ($action->result->success && $rec and $rec->isa('Jifty::Record') and $rec->id) {
+    if ($action->result->success && $rec and $rec->isa('Jifty::Record') and $rec->id and ($rec->load($rec->id))[0]) {
         my @fragments = ('model', ref($rec), 'id', $rec->id);
 
         my $path = join '/', '=', map { Jifty::Web->escape_uri($_) } @fragments;
@@ -979,7 +976,8 @@ sub run_action {
 
         my $url = Jifty->web->url(path => $path);
 
-        Jifty->handler->apache->header_out('Location' => $url);
+        Jifty->web->response->status( 302 );
+        Jifty->web->response->header('Location' => $url);
     }
 
     outs(undef, $action->result->as_hash);

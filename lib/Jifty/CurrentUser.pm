@@ -57,16 +57,15 @@ Applications should override this method to provide any application-specific use
 
 If you do nothing, code similar to this will be called by _init.
 
-	sub _init {
-	    my $self = shift;
-	    my %args = (@_);
-	
+    sub _init {
+        my $self = shift;
+        my %args = (@_);
         if (keys %args and UNIVERSAL::can(Jifty->app_class('Model', 'User'), 'new')) {
-	        $self->user_object(Jifty->app_class('Model', 'User')->new(current_user => $self));
-	        $self->user_object->load_by_cols(%args);
-	    }
+            $self->user_object(Jifty->app_class('Model', 'User')->new(current_user => $self));
+            $self->user_object->load_by_cols(%args);
+        }
         return 1;
-	}
+    }
 
 That is, it will attempt to load the columns given in the model named C<App::Model::User> (where I<App> is the name of your application class). If your notion of a user object isn't a typical Jifty model or named something else, you will definitely need to override this method. If you need to perform any additional initialization for user objects, you may want to override this as well.
 
@@ -258,13 +257,25 @@ sub current_user_can {
     return (0);
 }
 
+=head2 jifty_serialize_format
+
+Serializes as the user_object.
+
+=cut
+
+sub jifty_serialize_format {
+    my $self = shift;
+    return {} if !$self->user_object;
+    return $self->user_object->jifty_serialize_format(@_);
+}
+
 =head1 SEE ALSO
 
 L<Jifty::Object>, L<Jifty::Plugin::User>
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2007 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 =cut

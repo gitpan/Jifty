@@ -65,7 +65,7 @@ or just about anything else.
 
 =item I<Application>
 
-An empty application base class is created that doen't provide any
+An empty application base class is created that doesn't provide any
 methods or inherit from anything.
 
 =item I<Application>::Action
@@ -412,7 +412,7 @@ line of code(*).
 working on it.
 
 This method finds all database-backed models and instantiates jifty classes for
-them it returns a list of classnames of the models it created.
+them it returns a list of class names of the models it created.
 
 =cut
 
@@ -543,7 +543,7 @@ L<Jifty> and just about every other class that this provides an empty override f
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2007 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 =cut

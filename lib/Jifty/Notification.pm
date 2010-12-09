@@ -5,9 +5,7 @@ package Jifty::Notification;
 
 use base qw/Jifty::Object Class::Accessor::Fast/;
 use Email::Send            ();
-use Email::MIME::Creator;
 use Email::MIME::CreateHTML;
-use Email::MIME::Modifier;
 
 __PACKAGE__->mk_accessors(
     qw/body html_body preface footer subject from _recipients _to_list to/);
@@ -102,37 +100,53 @@ sub send_one_message {
 
     my %attrs = ( charset => 'UTF-8' );
 
-    if (defined $self->html_body) {
-      $message = Email::MIME->create_html(
-					     header => [
-							From    => ($self->from    || _('%1 <%2>' , $appname, Jifty->config->framework('AdminEmail'))) ,
-							To      => $to,
-							Subject => Encode::encode('MIME-Header', $self->subject || _("A notification from %1!",$appname )),
-						       ],
-					     attributes => \%attrs,
-                         text_body_attributes => \%attrs,
-                         body_attributes => \%attrs,
-					     text_body => Encode::encode_utf8($self->full_body),
-					     body => Encode::encode_utf8($self->full_html),
-                         embed => 0,
-                         inline_css => 0
-					    );
+    my $from = Encode::encode(
+        'MIME-Header',
+        $self->from || _('%1 <%2>' , $appname, Jifty->config->framework('AdminEmail'))
+    );
+    my $subj = Encode::encode(
+        'MIME-Header',
+        $self->subject || _("A notification from %1!",$appname )
+    );
+
+    if ( defined $self->html_body ) {
+
+        # Email::MIME takes _bytes_, not characters, for the "body"
+        # argument, so we need to encode the full_body into UTF8.
+        # Modern Email::MIME->create takes a "body_str" argument which
+        # does the encoding for us, but Email::MIME::CreateHTML
+        # doesn't grok it.  See also L</parts> for the other location
+        # which does the encode.
+        $message = Email::MIME->create_html(
+            header => [
+                From    => $from,
+                To      => $to,
+                Subject => $subj,
+            ],
+            attributes           => \%attrs,
+            text_body_attributes => \%attrs,
+            body_attributes      => \%attrs,
+            text_body            => Encode::encode_utf8( $self->full_body ),
+            body                 => Encode::encode_utf8( $self->full_html ),
+            embed                => 0,
+            inline_css           => 0,
+        );
+
         # Since the containing messsage will still be us-ascii otherwise
         $message->charset_set( $attrs{'charset'} );
     } else {
-            $message = Email::MIME->create(
-					     header => [
-							From    => ($self->from    || _('%1 <%2>' , $appname, Jifty->config->framework('AdminEmail'))) ,
-							To      => $to,
-							Subject => Encode::encode('MIME-Header', $self->subject || _("A notification from %1!",$appname )),
-						       ],
-					     attributes => \%attrs,
-					     
-					     parts => $self->parts
-					    );
-	  }
+        $message = Email::MIME->create(
+            header => [
+                From    => $from,
+                To      => $to,
+                Subject => $subj,
+            ],
+            attributes => \%attrs,
+            parts      => $self->parts,
+        );
+    }
     $message->encoding_set('8bit')
-        if (scalar $message->parts == 1);
+        if ( scalar $message->parts == 1 );
     $self->set_headers($message);
 
     my $method   = Jifty->config->framework('Mailer');
@@ -315,13 +329,13 @@ Returns the parts as an array reference.
 
 sub parts {
   my $self = shift;
-  return [
-    Email::MIME->create(
+# NOTICE: we should keep string in perl string (with utf8 flag)
+# rather then encode it into octets. Email::MIME would call Encode::encode in 
+# its create function.
+  return [ Email::MIME->create(
       attributes => { charset => 'UTF-8' },
-      body       => Encode::encode_utf8($self->full_body),
-    )
-  ];
-
+      body       => Encode::encode_utf8( $self->full_body ),
+    ) ];
 }
 
 =head2 magic_letme_token_for PATH

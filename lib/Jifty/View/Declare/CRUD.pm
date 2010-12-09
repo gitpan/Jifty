@@ -69,9 +69,9 @@ Basically, you can use this class to do most (and maybe all) of the work you nee
 
 =end pod_coverage
 
-=head2 mount_view MODELCASS VIEWCLASS /path
+=head2 mount_view MODELCLASS VIEWCLASS /path
 
-Call this method in your appliation's view class to add the CRUD views you're looking for. Only the first argument is required.
+Call this method in your application's view class to add the CRUD views you're looking for. Only the first argument is required.
 
 Arguments:
 
@@ -123,11 +123,11 @@ sub _dispatch_template {
     my $class = shift;
     my $code  = shift;
     if ($VIEW{$code} && !UNIVERSAL::isa($_[0], 'Evil')) {
-	my ( $object_type, $id ) = ( $class->object_type, get('id') );
-	@_ = ($class, $class->_get_record($id), @_);
+        my ( $object_type, $id ) = ( $class->object_type, get('id') );
+        @_ = ($class, $class->_get_record($id), @_);
     }
     else {
-	unshift @_, $class;
+        unshift @_, $class;
     }
     goto $code;
 }
@@ -154,7 +154,7 @@ This is the full name of the model class these CRUD views are for. The default i
 
   Jifty->app_class('Model', $self->object_type);
 
-You will want to override this if (in addition to L</object_type>) if you want to provide CRUD views in a plugin, or from an external model class, or for one of the Jifty built-in models.
+You will want to override this (in addition to L</object_type>) if you want to provide CRUD views in a plugin, or from an external model class, or for one of the Jifty built-in models.
 
 =cut
 
@@ -162,7 +162,7 @@ You will want to override this if (in addition to L</object_type>) if you want t
 # the mount_view() method is generally called very early in the Jifty
 # lifecycle. As such, Jifty->app_class() might not work yet since it requires
 # the Jifty singleton to be built and the configuration to be loaded. So, this
-# implementation caches teh record class after the first calculation, which
+# implementation caches the record class after the first calculation, which
 # should happen during the request dispatch process, which always happens after
 # Jifty is completely initialized.
 sub record_class {
@@ -282,7 +282,7 @@ sub edit_columns {
 =head2 create_columns ACTION
 
 Returns a list of all of the columns that this REST view should
-displat for create.  Defaults to L</edit_columns>.
+display for create.  Defaults to L</edit_columns>.
 
 =cut
 
@@ -382,9 +382,8 @@ Contains the master form and page region containing the list of items. This is m
 
 =cut
 
-template 'index.html' => page {
+template 'index.html' => page { title => shift->page_title } content {
     my $self = shift;
-    title is $self->page_title;
     form {
         render_region(
             name     => $self->object_type.'-list',
@@ -396,7 +395,11 @@ template 'index.html' => page {
 
 =head2 search
 
-The search fragment displays a search screen connected to the search action of the module. 
+The search fragment displays a search screen connected to the search action of
+the module.  If your subclass can C<search_fields>, then that method will be
+called and the return value (which should be a list) will be used as a list of
+fields to render.  Otherwise, all the fields of the Search action are
+displayed.
 
 See L<Jifty::Action::Record::Search>.
 
@@ -411,14 +414,21 @@ template 'search' => sub {
     );
 
     div {
-        { class is "jifty_admin" };
-        render_action($search);
+        { class is "jifty_admin crud-search-form" };
+
+        if ( $self->can('search_fields') ) {
+            render_param( $search => $_ )
+                for $self->search_fields;
+        }
+        else {
+            render_action($search);
+        }
 
         $search->button(
             label   => _('Search'),
             onclick => [
                 { submit => $search },
-                "jQuery(document).trigger('close.facebox');",
+                "Jifty.closeLightbox();",
                 {
                     refresh => Jifty->web->current_region->parent,
                     args    => { page => 1 },
@@ -443,7 +453,7 @@ template 'view' => sub :CRUDView {
         moniker => "update-" . Jifty->web->serial,
     );
 
-    my @fields = $self->display_columns;
+    my @fields = $self->display_columns($update);
     for my $field (@fields) {
         div { { class is 'crud-field view-argument-'.$field};
             $self->render_field(
@@ -454,7 +464,9 @@ template 'view' => sub :CRUDView {
             );
         };
     }
-    show ('./view_item_controls', $record, $update);
+    div { { class is 'crud-field view-item-controls'};
+        show ('./view_item_controls', $record, $update);
+    };
 };
 
 =head2 private template view_item_controls
@@ -499,7 +511,7 @@ template 'update' => sub {
     );
 
     div {
-        { class is "crud update item " . $object_type }
+        { class is "crud-field update item " . $object_type }
 
         show('./edit_item', $update);
         show('./edit_item_controls', $record, $update);
@@ -531,7 +543,7 @@ private template edit_item_controls => sub {
             label   => _("Save"),
             onclick => [
                 { submit => $update },
-                "jQuery(document).trigger('close.facebox');",
+                "Jifty.closeLightbox();",
                 { refresh => $view_region },
             ],
         );
@@ -543,7 +555,7 @@ private template edit_item_controls => sub {
                         submit  => $delete,
                         confirm => _('Really delete?'),
                     },
-                    "jQuery(document).trigger('close.facebox');",
+                    "Jifty.closeLightbox();",
                     {
                         region => $view_region,
                         replace_with => '/__jifty/empty',
@@ -638,37 +650,87 @@ template 'sort_header' => sub {
     my $sort_by = shift;
     my $order = shift;
     my $record_class = $self->record_class;
+    my $update = $record_class->as_update_action();
 
     div {
         { class is "crud-column-headers" };
-        for my $argument ($self->display_columns) {
+        for my $argument ($self->display_columns($update)) {
+            my $column = $record_class->column($argument);
+            unless ($column) {
+
+                # in case we want to show a field but it's not a real column
+                div {
+                    { class is 'crud-column-header' };
+                    $argument;
+                };
+                next;
+            }
+
             div {
                 { class is 'crud-column-header' };
-                my $css_class = ($sort_by && !$order && $sort_by eq $argument)?'up_select':'up';
-                span {
-                    { class is $css_class };
-                    hyperlink(
-                        label => _("asc"),
-                        onclick =>
-                            { args => { sort_by => $argument, order => undef } },
-                    );
-                };
-                $css_class = ($sort_by && $order && $sort_by eq $argument)?'down_select':'down' ;
-                span {
-                    { class is $css_class };
-                    hyperlink(
-                        label => _("desc"),
-                        onclick =>
-                            { args => { sort_by => $argument, order => 'D' } },
-                    );
+                ul { attr { class => 'crud-sort-menu', style => 'display:none;' };
+                    li {
+                        my $imgdown ="<img height='16' width='16' src='/images/silk/bullet_arrow_down.png' alt='down' name='down'>";
+                        hyperlink(
+                            label => $imgdown,
+                            escape_label => 0,
+                            onclick =>
+                                { args => { sort_by => $argument, order => undef } },
+                        );
+                    } if (!($sort_by && !$order && $argument eq $sort_by));
+                    li {
+                        my $imgup ="<img height='16' width='16' src='/images/silk/bullet_arrow_up.png' alt='up' name='up'>";
+                        hyperlink(
+                            label => $imgup,
+                            escape_label => 0,
+                            onclick =>
+                                { args => { sort_by => $argument, order => 'D' } },
+                        );
+                    } if (!($sort_by && $order && $argument eq $sort_by));
+                    li {
+                        my $imgup ="<img height='16' width='16' rc='/images/silk/cancel_grey.png' alt='del' name='del'>";
+                        hyperlink(
+                            label => $imgup,
+                            escape_label => 0,
+                            onclick =>
+                                { args => { sort_by =>'', order => '' } },
+                        );
+                    } if ($sort_by && $argument eq $sort_by);
                 };
                 span{
                     {class is "field"};
-                    outs $record_class->column($argument)->label || $argument;
+                    my $label = $record_class->column($argument)->label || $argument;
+                    if ( $sort_by && $argument eq $sort_by ) {
+                        div { class is 'crud-sort-selected';
+                        hyperlink ( label =>$label );
+                        my $img = ($order eq 'D')?'up':'down';
+                        img { attr {
+                            height => 16,
+                            width  => 16,
+                            src    => '/images/silk/bullet_arrow_'.$img.'.png' }; };
+                        };
+                    }
+                    else {
+                        hyperlink(label => $label);
+                    };
                 };
             }
         }
     };
+    outs_raw("<script type=\"text/javascript\">
+    jQuery(document).ready(function() {
+      jQuery('.crud-sort-menu').each(function(){
+        jQuery(this).parent().hover(
+        function(){
+        jQuery(this).children('.crud-sort-menu').show();
+        },
+        function(){
+            jQuery(this).children('.crud-sort-menu').hide();
+        });
+      });
+    });
+    </script>");
+
 };
 
 
@@ -804,7 +866,7 @@ private template 'list_items' => sub {
     # XXX TODO, should use a real API to force the search
 
     div {
-        { class is 'crud-list' };
+        { class is 'crud-list list' };
         if ( $collection->count == 0 ) {
             render_region(
                 name => 'no_items_found',
@@ -963,7 +1025,7 @@ L<Jifty::Action::Record::Create>, L<Jifty::Action::Record::Search>, L<Jifty::Act
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2007 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 =cut

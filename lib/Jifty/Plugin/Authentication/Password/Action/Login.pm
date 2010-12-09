@@ -10,6 +10,7 @@ Jifty::Plugin::Authentication::Password::Action::Login - process login with pass
 package Jifty::Plugin::Authentication::Password::Action::Login;
 use base qw/Jifty::Action/;
 use Digest::MD5 qw(md5_hex);
+use HTTP::Date ();
 
 use constant TOKEN_EXPIRE_TIME => 30;
 
@@ -62,7 +63,7 @@ sub arguments {
 
               password => { type => 'password',
                             label => _('Password'),
-			    # mandatory in some cases; see validate_password
+                            # mandatory in some cases; see validate_password
                             mandatory => 0,
                         },
               hashed_password => { type => 'hidden',
@@ -73,9 +74,9 @@ sub arguments {
                             hints => _('Your browser can remember your login for you'),
                             default => 0,
                           },
-	      token => { type => 'hidden',
-			 label => 'token',
-			 mandatory => 0 },
+              token => { type => 'hidden',
+                         label => 'token',
+                         mandatory => 0 },
 
           });
 
@@ -169,14 +170,15 @@ time out the request.
 sub validate_token {
     my $self = shift;
     my $value = shift;
+    my $token = Jifty->web->session->get('login_token');
+    Jifty->web->session->remove('login_token');
     if ($value) {
         if(int $value < (time - TOKEN_EXPIRE_TIME)) { 
             return $self->validation_error(token => "Your login attempt has timed out. Please try again.");
         }
-        if ($value ne Jifty->web->session->get('login_token')) {
+        if ($value ne $token) {
             return $self->validation_error(token => "That didn't work. Please try again.");
         }
-        Jifty->web->session->set(login_token => '');
     }
     return $self->validation_ok("token");
 }
@@ -204,7 +206,6 @@ sub take_action {
             $self->result->error($BAD_PW);
             return;
         }
-        Jifty->web->session->set( login_token => '' );
     } else {                # no password hashing over the wire
         unless ( $user->id && $user->password_is($password) ) {
             $self->result->error($BAD_PW);
@@ -221,7 +222,7 @@ sub take_action {
 
     # Actually do the signin thing.
     Jifty->web->current_user(Jifty->app_class('CurrentUser')->new( id => $user->id));
-    Jifty->web->session->expires( $self->argument_value('remember') ? '+1y' : undef );
+    Jifty->web->session->expires($self->argument_value('remember') ? HTTP::Date::time2str( time() + 31536000 ) : undef);
     Jifty->web->session->set_cookie;
 
     return 1;

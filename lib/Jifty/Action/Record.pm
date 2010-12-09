@@ -79,7 +79,7 @@ Construct a new C<Jifty::Action::Record> (as mentioned in
 L<Jifty::Action>, this should only be called by C<<
 framework->new_action >>.  The C<record> value, if provided in the
 PARAMHASH, will be used to load the L</record>; otherwise, the
-parimary keys will be loaded from the action's argument values, and
+primary keys will be loaded from the action's argument values, and
 the L</record> loaded from those primary keys.
 
 =cut
@@ -391,11 +391,13 @@ sub _argument_canonicalizer {
     # Add a canonicalizer for the column if the record provides one
     if ( $self->record->has_canonicalizer_for_column($field) ) {
         $do_ajax = 1 unless defined $column->render_as and lc( $column->render_as ) eq 'checkbox';
+        my $for = $self->isa('Jifty::Action::Record::Create') ? 'create' : 'update';
         $method ||= sub {
             my ( $self, $value ) = @_;
             return $self->record->run_canonicalization_for_column(
                 column => $field,
-                value  => $value
+                value  => $value,
+                extra  => [$self->argument_values, { for => $for }],
             );
         };
     }
@@ -538,7 +540,7 @@ sub possible_columns {
     my $self = shift;
     return grep {
         $_->container
-            or ( !$_->private and !$_->virtual and $_->type ne "serial" )
+            or ( !$_->private and !$_->virtual and !$_->computed and $_->type ne "serial" )
     } $self->record->columns;
 }
 
@@ -616,7 +618,7 @@ L<Jifty::Action::Record::Delete>
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2006 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 =cut

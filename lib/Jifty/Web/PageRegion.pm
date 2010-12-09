@@ -41,6 +41,8 @@ C</__jifty/empty>, which, as its name implies, is empty.
 Specifies an optional set of parameter defaults.  These should all be
 simple scalars, as they might be passed across HTTP if AJAX is used.
 
+See L<Jifty::Web::Form::Element> for a list of the supported parameters.
+
 =item force_arguments (optional)
 
 Specifies an optional set of parameter values. They will override anything
@@ -63,7 +65,7 @@ Defaults to true.
 =item lazy (optional)
 
 Delays the loading of the fragment until client render-time.
-Obviously, does not work with downlevel browsers which don't uspport
+Obviously, does not work with downlevel browsers which don't support
 javascript.
 
 =item loading_path (optional)
@@ -318,7 +320,7 @@ sub make_body {
     if ( $self->region_wrapper ) {
          $buffer->append(qq|<script type="text/javascript">\n|
             . qq|new Region('| . $self->qualified_name . qq|',|
-            . Jifty::JSON::objToJson( \%arguments, { singlequote => 1 } ) . qq|,| 
+            . Jifty::JSON::encode_json( \%arguments ) . qq|,| 
             . qq|'| . $self->path . qq|',|
             . ( $self->parent ? qq|'| . $self->parent->qualified_name . qq|'| : q|null|)
             . qq|,| . (Jifty->web->form->is_open ? '1' : 'null')
@@ -366,28 +368,28 @@ sub render_as_subrequest {
 
     my %args;
     if ($self->path =~ m/\?/) {
-	# XXX: this only happens if we are redirect within region AND
-	# with continuation, which is already taken care of by the
-	# clone.
-	my ($path, $arg) = split(/\?/, $self->path, 2);
-	$subrequest->path( $path );
-	%args = (map { split /=/, $_ } split /&/, $arg);
-	if ($args{'J:C'}) {
-	    $subrequest->continuation($args{'J:C'});
-	}
+        # XXX: this only happens if we are redirect within region AND
+        # with continuation, which is already taken care of by the
+        # clone.
+        my ($path, $arg) = split(/\?/, $self->path, 2);
+        $subrequest->path( $path );
+        %args = (map { split /=/, $_ } split /&/, $arg);
+        if ($args{'J:C'}) {
+            $subrequest->continuation($args{'J:C'});
+        }
     }
     # Remove all of the actions
     unless ($enable_actions) {
-	$_->active(0) for ($subrequest->actions);
+        $_->active(0) for ($subrequest->actions);
     }
     # $subrequest->clear_actions;
     local Jifty->web->{request} = $subrequest;
     if ($args{'J:RETURN'}) {
-	my $top = Jifty->web->request->top_request;
-	my $cont = Jifty->web->session->get_continuation($args{'J:RETURN'});
-	$cont->return;
-	# need to set this as subrequest again as it's clobbered by the return
-	Jifty->web->request->top_request($top);
+        my $top = Jifty->web->request->top_request;
+        my $cont = Jifty->web->session->get_continuation($args{'J:RETURN'});
+        $cont->return;
+        # need to set this as subrequest again as it's clobbered by the return
+        Jifty->web->request->top_request($top);
     }
 
     # Call into the dispatcher
@@ -411,7 +413,7 @@ sub get_element {
 
 =head2 client_cacheable
 
-Returns the client cacheable state of the regions path. Returns false if the template has not been marked as client cacheable. Otherwise it returns the string "static" or "action" based uon the cacheable attribute set on the template.
+Returns the client cacheable state of the regions path. Returns false if the template has not been marked as client cacheable. Otherwise it returns the string "static" or "action" based on the cacheable attribute set on the template.
 
 =cut
 

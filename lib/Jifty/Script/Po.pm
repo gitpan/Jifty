@@ -95,10 +95,9 @@ sub _js_gen {
 
         no strict 'refs';
         print $fh
-            Jifty::JSON::objToJson( { map { my $text = ${"Jifty::I18N::".$lang."::Lexicon"}{$_};
-                                            defined $text ? ( $_ => $text ) : () }
-                                      keys %{$LMExtract->lexicon} },
-                                    { singlequote => 1 } );
+            Jifty::JSON::encode_json( { map { my $text = ${"Jifty::I18N::".$lang."::Lexicon"}{$_};
+                                              defined $text ? ( $_ => $text ) : () }
+                                        keys %{$LMExtract->lexicon} } );
     }
 }
 
@@ -286,7 +285,7 @@ Jifty::Script::Po - Extract translatable strings from your application
 
  Options:
    --language         Language to deal with
-   --dir              Additionl dirs to extract from
+   --dir              Additional directories to extract from
    --js               Generate json files from the current po files
 
    --help             brief help message
@@ -304,7 +303,7 @@ name of a message catalog to create.
 =item B<--dir>
 
 Specify explicit directories to extract from. Can be used multiple
-times.  The default directores will not be extracted if you use this option.
+times.  The default directories will not be extracted if you use this option.
 
 =item B<--template_name>
 

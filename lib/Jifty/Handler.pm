@@ -12,10 +12,8 @@ Jifty::Handler - Methods related to the finding and returning content
   use Jifty;
   Jifty->new();
 
-  my $handler = Jifty::Handler->handle_request( cgi => $cgi );
-
-  # after each request is handled
-  Jifty::Handler->cleanup_request;
+  my $handler = Jifty::Handler->new;
+  $handler->handle_request( $env );
 
 =head1 DESCRIPTION
 
@@ -29,28 +27,10 @@ use base qw/Class::Accessor::Fast Jifty::Object/;
 use Jifty::View::Declare::Handler ();
 use Class::Trigger;
 use String::BufferStack;
+use Plack::Builder;
+use Plack::Request;
 
-BEGIN {
-    # Creating a new CGI object breaks FastCGI in all sorts of painful
-    # ways.  So wrap the call and preempt it if we already have one
-    use CGI ();
-
-    # If this file gets reloaded using Module::Refresh, don't do this
-    # magic again, or we'll get infinite recursion
-    unless (CGI->can('__jifty_real_new')) {
-        *CGI::__jifty_real_new = \&CGI::new;
-
-        no warnings qw(redefine);
-        *CGI::new = sub {
-            return Jifty->handler->cgi if Jifty->handler->cgi;
-            CGI::__jifty_real_new(@_);	
-        }
-    }
-};
-
-
-
-__PACKAGE__->mk_accessors(qw(dispatcher _view_handlers cgi apache stash buffer));
+__PACKAGE__->mk_accessors(qw(dispatcher _view_handlers stash buffer));
 
 =head2 new
 
@@ -133,44 +113,122 @@ sub view {
     return $self->_view_handlers->{$class};
 }
 
-=head2 cgi
+=head2 psgi_app_static
 
-Returns the L<CGI> object for the current request, or C<undef> if
-there is none.
-
-=head2 apache
-
-Returns the L<HTML::Mason::FakeApache> or L<Apache> object for the
-current request, ot C<undef> if there is none.
-
-=head2 handle_request
-
-When your server processs (be it Jifty-internal, FastCGI or anything
-else) wants to handle a request coming in from the outside world, you
-should call C<handle_request>.
-
-=over
-
-=item cgi
-
-A L<CGI> object that your server has already set up and loaded with
-your request's data.
-
-=back
+Returns a closure for L<PSGI> application that handles all static
+content, including plugins.
 
 =cut
 
+sub psgi_app_static {
+    my $self = shift;
+
+    # XXX: this is no longer needed, however TestApp-Mason is having a
+    # static::handler-less config
+    my $view_handler = $self->view('Jifty::View::Static::Handler')
+        or return;;
+
+    require Plack::App::Cascade;
+    require Plack::App::File;
+    my $static = Plack::App::Cascade->new;
+
+    my $app_class = Jifty->app_class;
+
+    $static->add( $app_class->psgi_app_static )
+        if $app_class->can('psgi_app_static');
+
+    $static->add(
+        Plack::App::File->new(
+            root => Jifty::Util->absolute_path(
+                Jifty->config->framework('Web')->{StaticRoot}
+            )
+        )->to_app
+    );
+
+    for ( grep { defined $_ } map { $_->psgi_app_static } Jifty->plugins ) {
+        $static->add( $_ );
+    }
+
+    $static->add( Plack::App::File->new
+            ( root => Jifty->config->framework('Web')->{DefaultStaticRoot} )->to_app );
+
+    # the buffering and unsetting of psgi.streaming is to vivify the
+    # responded res from the $static cascade app.
+    builder {
+        enable 'Plack::Middleware::ConditionalGET';
+        enable
+            sub { my $app = shift;
+                  sub { my $env = shift;
+                        $env->{'psgi.streaming'} = 0;
+                        my $res = $app->($env);
+                        # skip streamy response
+                        return $res unless ref($res) eq 'ARRAY' && $res->[2];
+                        my $h = Plack::Util::headers($res->[1]);;
+                        $h->set( 'Cache-Control' => 'max-age=31536000, public' );
+                        $h->set( 'Expires' => HTTP::Date::time2str( time() + 31536000 ) );
+                        $res;
+                    };
+              };
+        enable 'Plack::Middleware::BufferedStreaming';
+        $static;
+    };
+}
+
+=head2 psgi_app
+
+Returns a closure for L<PSGI> application.
+
+=cut
+
+sub psgi_app {
+    my $self = shift;
+
+    my $app = sub { $self->handle_request(@_) };
+    my $static = $self->psgi_app_static;
+
+    $app = builder {
+        mount '/static' => $static;
+        mount '/'       => $app
+    }
+        if Jifty->config->framework("Web")->{PSGIStatic} && $static;
+
+    # allow plugin to wrap $app
+    for ( Jifty->plugins ) {
+        $app = $_->wrap($app);
+    }
+
+    return $app;
+}
+
+=head2 handle_request
+
+When your server process (be it Jifty-internal, FastCGI or anything
+else) wants to handle a request coming in from the outside world, you
+should call C<handle_request>.
+
+=cut
 
 sub handle_request {
-    my $self = shift;
-    my %args = (
-        cgi => undef,
-        @_
-    );
+    my ($self, $env) = @_;
+    my $req = Plack::Request->new($env);
+    my $response;
 
     $self->setup_view_handlers() unless $self->_view_handlers;
 
-    $self->call_trigger('before_request', $args{cgi});
+    $self->call_trigger('before_request', $req);
+
+    # Simple ensure stdout is not writable in next major release
+    use IO::Handle::Util qw(io_prototype io_to_glob);
+    my $trapio= io_prototype
+        print => sub {
+            use Carp::Clan qw(^(Jifty::Handler|Carp::|IO::Handle::));
+            carp "printing to STDOUT is deprecated.  Use outs, outs_raw or Jifty->web->response->body() instead";
+
+            my $self = shift;
+            Jifty->handler->buffer->out_method->(shift);
+        };
+
+    local *STDOUT = io_to_glob($trapio);
 
     # this is scoped deeper because we want to make sure everything is cleaned
     # up for the LeakDetector plugin. I tried putting the triggers in the
@@ -187,52 +245,37 @@ sub handle_request {
             Jifty::I18N->refresh;
         }
 
-        $self->cgi( $args{cgi} );
-        $self->apache( HTML::Mason::FakeApache->new( cgi => $self->cgi ) );
-
-        Jifty->web->request( Jifty::Request->new()->fill( $self->cgi ) );
+        Jifty->web->request( Jifty::Request->promote( $req ) );
         Jifty->web->response( Jifty::Response->new );
+
+        $self->call_trigger('have_request');
 
         Jifty->api->reset;
         for ( Jifty->plugins ) {
             $_->new_request;
         }
-        $self->log->info( Jifty->web->request->request_method . " request for " . Jifty->web->request->path  );
+        $self->log->info( Jifty->web->request->method . " request for " . Jifty->web->request->path  );
         Jifty->web->setup_session;
+        Jifty->web->session->set_cookie;
 
         Jifty::I18N->get_language_handle;
 
         # Return from the continuation if need be
         unless (Jifty->web->request->return_from_continuation) {
             $self->buffer->out_method(\&Jifty::View::out_method);
-            $self->dispatcher->handle_request();
-            $self->buffer->flush_output;
-        } 
+            my $ret = $self->dispatcher->handle_request();
+            return $ret if $ret; # if dispatcher returns a coderef,
+                                 # it's a streamy response
+        }
 
-        $self->call_trigger('before_cleanup', $args{cgi});
+        $self->call_trigger('before_cleanup', $req);
 
         $self->cleanup_request();
+        $response = Jifty->web->response;
     }
 
-    $self->call_trigger('after_request', $args{cgi});
-}
-
-=head2 send_http_header
-
-Sends any relevent HTTP headers, by calling
-L<HTML::Mason::FakeApache/send_http_header>.  If this is running
-inside a standalone server, also sends the HTTP status header first.
-
-Returns false if the header has already been sent.
-
-=cut
-
-sub send_http_header {
-    my $self = shift;
-    return if $self->apache->http_header_sent;
-    $Jifty::SERVER->send_http_status if $Jifty::SERVER;
-    $self->apache->send_http_header;
-    return 1;
+    $self->call_trigger('after_request', $req);
+    return $response->finalize;
 }
 
 =head2 cleanup_request
@@ -250,8 +293,6 @@ sub cleanup_request {
 
     Jifty->web->session->unload();
     Jifty::Record->flush_cache if Jifty::Record->can('flush_cache');
-    $self->cgi(undef);
-    $self->apache(undef);
     $self->stash(undef);
     $self->buffer->pop for 1 .. $self->buffer->depth;
     $self->buffer->clear;

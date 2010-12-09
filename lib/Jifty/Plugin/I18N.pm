@@ -24,7 +24,7 @@ Jifty::Plugin::I18N - Additional i18n facility such as language selector
 
 =head1 DESCRIPTION
 
-This plugin provides additional i18n facility to jifty's core i18n
+This plugin provides additional i18n facility to Jifty's core i18n
 features, such as compiling l10n lexicon for client side javascript,
 and a language selector action.
 
@@ -82,9 +82,6 @@ sub _i18n_js {
 
         unless ( $current_lang =~ /^$allowed_regex/) {
             $self->log->error("user is requesting $current_lang which is not allowed");
-            my $headers = Jifty->handler->apache->headers_in;
-            use Data::Dumper;
-            $self->log->error(Dumper($headers));
         }
     }
 

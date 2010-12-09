@@ -100,7 +100,7 @@ specified will override arguments submitted by form field.
 
 If you explicitly pass C<undef>, then all actions will be submitted.
 This can be useful in conjunction with an C<onclick> handler, since
-declaring an C<onclick> handler inentionally turns off action submission.
+declaring an C<onclick> handler intentionally turns off action submission.
 
 =item disable => BOOLEAN
 
@@ -553,15 +553,13 @@ sub javascript_attrs {
                      @{ $trigger_structure->{value} };
 
         if ( @$fragments or ( !$actions || %$actions ) ) {
-            my $update_json = Jifty::JSON::objToJson({
+            my $update_json = Jifty::JSON::encode_json({
                     actions      => $actions,
                     action_arguments => $trigger_structure->{action_arguments},
                     fragments    => $fragments,
                     continuation => $self->continuation,
                     preload_key  => $trigger_structure->{preload_key},
-                },
-                { singlequote => 1 },
-            );
+                });
 
             my $update = "Jifty.update($update_json, this);";
 
@@ -575,10 +573,7 @@ sub javascript_attrs {
         }
 
         if ($trigger_structure->{confirm}) {
-            my $text = Jifty::JSON::objToJson(
-                $trigger_structure->{confirm},
-                {singlequote => 1},
-            );
+            my $text = Jifty::JSON::encode_json( $trigger_structure->{confirm} );
             $string = "if(!confirm($text)){ Jifty.stopEvent(event); return false; }" . $string;
         }
 
@@ -643,11 +638,15 @@ sub key_binding_javascript {
                     ? $self->key_binding_label
                     : $self->label;
     if ($key) {
+        $self->log->warn("Keybinding '@{[uc $key]}' will NOT work because the"
+                        ." element ('$label') does not have an ID.")
+            if not defined $self->id or not length $self->id;
+
         return "Jifty.KeyBindings.add("
-                . Jifty::JSON::objToJson( uc($key), { singlequote => 1 } ).","
+                . Jifty::JSON::encode_json( uc $key ).","
                 . "'click', "
-                . Jifty::JSON::objToJson( $self->id, { singlequote => 1 } ).","
-                . Jifty::JSON::objToJson( $label, { singlequote => 0 } )
+                . Jifty::JSON::encode_json( $self->id ).","
+                . Jifty::JSON::encode_json( $label )
                 . ");";
     }
 }
@@ -664,7 +663,7 @@ sub render_key_binding {
     return unless $self->key_binding;
     Jifty->web->out(
         '<script type="text/javascript">' .
-        Jifty->web->escape($self->key_binding_javascript).
+        $self->key_binding_javascript.
         "</script>");
     return '';
 }

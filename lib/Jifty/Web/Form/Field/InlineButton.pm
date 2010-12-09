@@ -27,6 +27,10 @@ Don't show a wrapper for an inline button
 
 Don't show a wrapper for an inline button
 
+=head2 render_preamble
+
+Don't show a label for an inline button
+
 =head2 render_label
 
 Don't show a label for an inline button
@@ -41,6 +45,7 @@ Don't show hints for an inline button
 
 sub render_wrapper_start { }
 sub render_wrapper_end {}
+sub render_preamble {}
 sub render_label {}
 sub render_hints {}
 

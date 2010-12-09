@@ -51,7 +51,7 @@ sub arguments {
 =head2 take_action
 
 Find the submitted action in the L<Jifty::Request> named by the
-C<action> above, and ask it for autocompletion possibilites for the
+C<action> above, and ask it for autocompletion possibilities for the
 L<argument> in question.
 
 =cut
@@ -80,7 +80,7 @@ L<Jifty::Action>
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2006 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 =cut

@@ -33,7 +33,7 @@ Jifty::Web::Form::Field - Web input of some sort
 =head1 DESCRIPTION
 
 Describes a form input in a L<Jifty::Action>.
-C<Jifty::Web::Form::Field>s know what action they are on, and aquire
+C<Jifty::Web::Form::Field>s know what action they are on, and acquire
 properties from the L<Jifty::Action> which they are part of.  Each key
 in the L<Jifty::Action/arguments> hash becomes a
 C<Jifty::Web::Form::Field> whose L</name> is that key.
@@ -138,7 +138,7 @@ __PACKAGE__->mk_accessors(@new_fields, map { "_$_" } @semiexposed_fields);
 
 =head2 name [VALUE]
 
-Gets or sets the name of the field.  This is seperate from the name of
+Gets or sets the name of the field.  This is separate from the name of
 the label (see L</label>) and the form input name (see
 L</input_name>), though both default to this name.  This name should
 match to a key in the L<Jifty::Action/arguments> hash.  If this
@@ -152,7 +152,7 @@ Gets or sets the CSS display class applied to the label and widget.
 =head2 type [VALUE]
 
 Gets or sets the type of the HTML <input> field -- that is, 'text' or
-'password'.  Defauts to 'text'.
+'password'.  Defaults to 'text'.
 
 =head2 key_binding VALUE
 
@@ -209,7 +209,7 @@ Gets or sets the preamble located in front of the field.
 =head2 multiple [VALUE]
 
 A boolean indicating that the field is multiple.
-aka. has multiple attribute, which is uselful for select field.
+aka. has multiple attribute, which is useful for select field.
 
 =head2 id 
 
@@ -354,7 +354,7 @@ Gets the current value we should be using for this form field.
 
 If the argument is marked as "sticky" (default) and there is a value for this 
 field from a previous action submit AND that action did not have a "success" 
-response, returns that submit's value. Otherwise, returns the action's argument's 
+response, returns that submit field's value. Otherwise, returns the action's argument's 
 default_value for this field.
 
 =cut
@@ -393,7 +393,6 @@ sub render {
     $self->render_label();
     if ($self->render_mode eq 'update') { 
         $self->render_widget();
-        $self->render_autocomplete_div();
         $self->render_inline_javascript();
         $self->render_hints();
         $self->render_errors();
@@ -465,7 +464,7 @@ Renders a default CSS class for each part of our widget.
 sub classes {
     my $self = shift;
     my $name = $self->name;
-    return join(' ', ($self->class||''), ($name ? "argument-".$name : ''));
+    return join(' ', ($self->class||()), ($name ? "argument-".$name : ()));
 }
 
 
@@ -577,7 +576,7 @@ sub render_widget {
 =head2 canonicalize_value
 
 Called when a value is about to be displayed. Can be overridden to, for example,
-display only the yyyy-mm-dd portion of a DateTime.
+display only the C<YYYY-MM-DD> portion of a L<DateTime>.
 
 =cut
 
@@ -613,10 +612,10 @@ sub _widget_class {
     my $self = shift;
     my @classes = ( 'widget',
                     $self->classes,
-                    ( $self->ajax_validates     ? ' ajaxvalidation' : '' ),
-                    ( $self->ajax_canonicalizes ? ' ajaxcanonicalization' : '' ),
-                    ( $self->autocompleter      ? ' ajaxautocompletes' : '' ),
-                    ( $self->focus              ? ' focus' : ''),
+                    ( $self->ajax_validates     ? ' ajaxvalidation' : () ),
+                    ( $self->ajax_canonicalizes ? ' ajaxcanonicalization' : () ),
+                    ( $self->autocompleter      ? ' ajaxautocompletes' : () ),
+                    ( $self->focus              ? ' focus' : ()),
                     @_ );
 
     return qq! class="!. join(' ',@classes).  qq!"!
@@ -643,28 +642,11 @@ sub render_value {
 
 
 
-=head2 render_autocomplete_div
-
-Renders an empty div that /__jifty/autocomplete.xml can fill
-in. Returns an empty string.
-
-=cut
-
-sub render_autocomplete_div { 
-    my $self = shift;
-    return unless($self->autocompleter);
-    Jifty->web->out(
-qq!<div class="autocomplete" id="@{[$self->element_id]}-autocomplete" style="display: none;"></div>!);
-
-    return '';
-}
-
 =head2 render_autocomplete
 
 Renders the div tag and javascript necessary to do autocompletion for
-this form field. Deprecated internally in favor of
-L</render_autocomplete_div> and L</autocomplete_javascript>, but kept
-for backwards compatability since there exists external code that uses
+this form field. Deprecated internally in favor of L</autocomplete_javascript>,
+but kept for backwards compatibility since there exists external code that uses
 it.
 
 =cut
@@ -672,12 +654,9 @@ it.
 sub render_autocomplete {
     my $self = shift;
     return unless $self->autocompleter;
-    $self->render_autocomplete_div;
     Jifty->web->out(qq!<script type="text/javascript">@{[$self->autocomplete_javascript]}</script>!);
     return '';
 }
-
-
 
 =head2 autocomplete_javascript
 
@@ -690,7 +669,7 @@ sub autocomplete_javascript {
     my $self = shift;
     return unless($self->autocompleter);
     my $element_id = $self->element_id;
-    return qq{new Jifty.Autocompleter('$element_id','$element_id-autocomplete')};
+    return "jQuery(document).ready(function(){Jifty.addAutocompleter('$element_id');});"
 }
 
 =head2 placeholder_javascript
@@ -722,8 +701,8 @@ sub focus_javascript {
     my $self = shift;
     return undef;
     if($self->focus) {
-        return qq!document.getElementById("@{[$self->element_id]}").focus()!;
-        return qq!DOM.Events.addListener( window, "load", function(){document.getElementById("@{[$self->element_id]}").focus()})!;
+        return qq!document.getElementById("@{[$self->element_id]}").focus();!;
+        return qq!jQuery(document).ready(function(){jQuery("#@{[$self->element_id]}").focus()});!;
     }
 }
 
@@ -747,12 +726,11 @@ sub preload_javascript {
 
         my @preloaded;
 
-        my $preload_json = Jifty::JSON::objToJson(
+        my $preload_json = Jifty::JSON::encode_json(
             {
                 fragments   => $trigger_structure->{fragments},
                 preload_key => $trigger_structure->{preload_key},
-            },
-            { singlequote => 1 },
+            }
         );
 
         push @javascript, "Jifty.preload($preload_json, this);";
@@ -853,7 +831,13 @@ sub available_values {
     }
 
     # Otherwise consult the action
-    return @{ $self->action->available_values($self->name) };
+
+    my $values =  $self->action->available_values($self->name);
+    if (!ref($values) || ref($values) ne 'ARRAY') {
+        die "available_values of parameter '" . $self->name . "' returned a " . (ref($values) || 'nonreference') . ", expected array reference";
+    }
+
+    return @$values;
 }
 
 =for private

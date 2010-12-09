@@ -6,7 +6,7 @@ use Jifty::View::Declare -base;
 
 =head1 NAME
 
-Jifty::Plugin::TestServerWarnings::View - Test warnings downloader
+Jifty::Plugin::TestServerWarnings::View - Downloads test warnings
 
 =head1 TEMPLATES
 
@@ -19,7 +19,7 @@ client.
 
 template "/__jifty/test_warnings" => sub {
     my $plugin = Jifty->find_plugin('Jifty::Plugin::TestServerWarnings');
-    Jifty->handler->apache->content_type("application/x-perl");
+    Jifty->web->response->content_type("application/x-perl");
     outs_raw($plugin->encoded_warnings);
 };
 

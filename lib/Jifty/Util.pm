@@ -50,6 +50,7 @@ both C</> and C<\> as valid separators in PATH.
 sub canonicalize_path {
     my $self = shift;
     my $path = shift;
+    my $keepempty = shift;
 
     my @path = File::Spec->splitdir($path);
 
@@ -65,13 +66,10 @@ sub canonicalize_path {
         } else {
             pop @newpath;
         }
-
     }
 
-    
-    return File::Spec::Unix->catdir(@newpath);
-
-
+    push @newpath, '' if $keepempty and @path and $path[-1] eq '';
+    return join("/",@newpath);
 }
 
 
@@ -300,7 +298,7 @@ sub _require {
 
 =head2 try_to_require Module
 
-This method works just like L</require>, except that it surpresses the error message
+This method works just like L</require>, except that it suppresses the error message
 in cases where the module isn't found.
 
 =cut
@@ -314,7 +312,7 @@ sub  try_to_require {
 
 =head2 already_required class
 
-Helper function to test whether a given class has already been require'd.
+Helper function to test whether a given class has already been loaded.
 
 =cut
 
@@ -351,7 +349,11 @@ sub reference_to_data {
     my $id = $obj->id;
 
     # probably a file extension, from the REST rewrite
-    my $extension = $ENV{HTTP_ACCEPT} =~ /^\w+$/ ? ".$ENV{HTTP_ACCEPT}" : '';
+    my $extension = '';
+    if (Jifty->web->request &&
+        Jifty->web->request->env->{HTTP_ACCEPT} =~ m/^\w+$/) {
+        $extension = '.'.Jifty->web->request->env->{HTTP_ACCEPT};
+    }
 
     return {
         jifty_model_reference => 1,

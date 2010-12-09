@@ -48,14 +48,7 @@ Resets the password.
 
 sub take_action {
     my $self        = shift;
-    my $LoginUser   = Jifty->app_class('Model', 'User');
-        my $CurrentUser   = Jifty->app_class('CurrentUser');
-
-
-
-
-    my $u = $LoginUser->new( current_user => $CurrentUser->superuser );
-    $u->load_by_cols( email => Jifty->web->current_user->user_object->email );
+    my $u = Jifty->web->current_user->user_object->as_superuser;
 
     unless ($u) {
         $self->result->error(
@@ -70,7 +63,7 @@ sub take_action {
     my $pass   = $self->argument_value('password');
     my $pass_c = $self->argument_value('password_confirm');
 
-    # Trying to set a password (ie, submitted the form)
+    # Trying to set a password (i.e., submitted the form)
     unless (defined $pass and defined $pass_c and length $pass and $pass eq $pass_c ) {
         $self->result->error( _("It looks like you didn't enter the same password into both boxes. Give it another shot?")
         );
@@ -85,6 +78,7 @@ sub take_action {
     $u->set_email_confirmed('1');
     # Log in!
     $self->result->message(_("Your password has been reset.  Welcome back."));
+    my $CurrentUser   = Jifty->app_class('CurrentUser');
     Jifty->web->current_user( $CurrentUser->new( id => $u->id ) );
     return 1;
 

@@ -63,6 +63,7 @@ use base qw/Class::Accessor::Fast Jifty::Object/;
 
 __PACKAGE__->mk_accessors(qw(id parent
                              request response code
+                             version
                              ));
 
 =head2 new PARAMHASH
@@ -112,7 +113,8 @@ sub new {
                 request  => Jifty::Request->new(),
                 response => Jifty::Response->new(),
                 code     => undef,
-                @_
+                @_,
+                version  => 2,
                );
 
     # We don't want refs
@@ -128,6 +130,15 @@ sub new {
     # FIXME: use a real ID
     my $key = Jifty->web->serial . "_" . int(rand(10)) . int(rand(10)) . int(rand(10)) . int(rand(10)) . int(rand(10)) . int(rand(10));
     $self->id($key);
+
+    # Make sure we don't store any of the connection information
+    my $req = $self->request;
+    local $req->{env};
+    local $req->{_body_parser}{input_handle} if defined $req->{_body_parser};
+    # We may also need to clean out the top request, if this is a subrequest
+    $req = $req->top_request;
+    local $req->{env};
+    local $req->{_body_parser}{input_handle} if defined $req->{_body_parser};
 
     # Save it into the session
     Jifty->web->session->set_continuation($key => $self);
@@ -145,20 +156,16 @@ to ask "are we about to call a continuation?"
 
 sub return_path_matches {
     my $self = shift;
-    my $called_uri = $ENV{'REQUEST_URI'};
-    my $request_path = $self->request->path;
 
-    # XXX TODO: WE should be using URI canonicalization
+    return unless Jifty->web->request->path eq $self->request->path
+        or Jifty->web->request->path eq $self->request->uri->canonical->path;
 
-    my $escape;
-    $called_uri =~ s{/+}{/}g;
-    $called_uri = Encode::encode_utf8($called_uri);
-    $called_uri = $escape while $called_uri ne ($escape = URI::Escape::uri_unescape($called_uri));
-    $request_path =~ s{/+}{/}g; 
-    $request_path = Encode::encode_utf8($request_path);
-    $request_path = $escape while $request_path ne ($escape = URI::Escape::uri_unescape($request_path));
+    my $args = Jifty->web->request->arguments;
+    return unless scalar keys %{$args} == 1;
 
-    return $called_uri =~ /^\Q$request_path\E[?&;]J:RETURN=@{[$self->id]}$/;
+    return unless exists $args->{"J:RETURN"} and $args->{"J:RETURN"} eq $self->id;
+
+    return 1;
 }
 
 =head2 call
@@ -187,7 +194,7 @@ sub call {
     # characters) then warn, because this may cause infinite
     # redirects
     $self->log->warn("Redirect to '@{[$self->request->path]}' contains unsafe characters")
-        if $self->request->path =~ m{[^A-Za-z0-9\-_.!~*'()/?&;+]};
+        if $self->request->path =~ m{[^A-Za-z0-9\-_.!~*'()/?&;+%]};
 
     # Clone our request
     my $request = $self->request->clone;
@@ -216,7 +223,12 @@ sub call {
         if defined $next->parent;
 
     # Redirect to right page if we're not there already
-    Jifty->web->_redirect($next->request->path . "?J:RETURN=" . $next->id);
+    # $next maybe only set path
+    my $path =
+      $next->request->request_uri
+      ? URI->new( $next->request->request_uri )->path
+      : $next->request->path;
+    Jifty->web->_redirect($path . "?J:RETURN=" . $next->id);
     return 1;
 }
 
@@ -225,7 +237,7 @@ sub call {
 Returns from the continuation by pulling out the stored request, and
 setting that to be the active request.  This shouldn't need to be
 called by hand -- use L<Jifty::Request/return_from_continuation>,
-which ensures that all requirements are ment before it calls this.
+which ensures that all requirements are met before it calls this.
 
 =cut
 
@@ -241,8 +253,19 @@ sub return {
     $self->code->(Jifty->web->request)
       if $self->code;
 
+    # We want to preserve the current actual request environment
+    # (headers, etc)
+    my $env = Jifty->web->request->top_request->env;
+
     # Set the current request to the one in the continuation
-    return Jifty->web->request($self->request->clone);
+    Jifty->web->request($self->request->clone);
+
+    # Restore the environment we came in with
+    Jifty->web->request->top_request->{env} = $env;
+    Jifty->web->request->setup_subrequest_env
+        if Jifty->web->request->is_subrequest;
+
+    return Jifty->web->request;
 }
 
 =head2 delete
@@ -270,7 +293,7 @@ L<Jifty::Manual::Continuations>
 
 =head1 LICENSE
 
-Jifty is Copyright 2005-2007 Best Practical Solutions, LLC.
+Jifty is Copyright 2005-2010 Best Practical Solutions, LLC.
 Jifty is distributed under the same terms as Perl itself.
 
 =cut
