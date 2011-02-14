@@ -214,6 +214,7 @@ sub probe_database_existence {
         Jifty->setup_database_connection(
             no_handle        => $no_handle,
             logger_component => 'SchemaTool',
+            check_opts       => { pretend => $self->{'print'} ? 1 : 0 }
         );
     };
     my $error = $@;
@@ -438,7 +439,7 @@ sub upgrade_jifty_tables {
         $appv, "Jifty::Upgrade::Internal"
         );
     if ( $self->{print} ) {
-        warn "Need to upgrade jifty_db_version to $appv here!";
+        warn "Need to upgrade jifty_db_version to $appv here!\n";
     } else {
         Jifty::Model::Metadata->store( jifty_db_version => $appv );
     }
@@ -459,7 +460,7 @@ sub upgrade_application_tables {
 
     return unless $self->upgrade_tables( Jifty->app_class, $dbv, $appv );
     if ( $self->{print} ) {
-        warn "Need to upgrade application_db_version to $appv here!";
+        warn "Need to upgrade application_db_version to $appv here!\n";
     } else {
         Jifty::Model::Metadata->store( application_db_version => $appv );
     }
@@ -490,7 +491,7 @@ sub upgrade_plugin_tables {
                 $plugin->upgrade_class );
             if ( $self->{print} ) {
                 warn
-                    "Need to upgrade ${plugin_class}_db_version to $appv here!";
+                    "Need to upgrade ${plugin_class}_db_version to $appv here!\n";
             } else {
                 Jifty::Model::Metadata->store(
                     $plugin_class . '_db_version' => $appv );
@@ -590,9 +591,19 @@ sub upgrade_tables {
             unshift @{ $UPGRADES{ $model->since } },
                 $model->table_schema_statements();
         } else {
+            # Go through the columns
+            for my $col ( grep { not $_->virtual and not $_->computed } $model->all_columns ) {
 
-            # Go through the currently-active columns
-            for my $col ( grep { not $_->virtual and not $_->computed } $model->columns ) {
+                # If they're old, drop them
+                if ( defined $col->till and $appv >= $col->till and $col->till > $dbv ) {
+                    push @{ $UPGRADES{ $col->till } }, sub {
+                        my $renamed = $upgradeclass->just_renamed || {};
+
+                        # skip it if this was dropped by a rename
+                        $model->drop_column_in_db($col->name)
+                            unless defined $renamed->{ $model->table }->{'drop'}->{ $col->name };
+                    };
+                }
 
                 # If they're new, add them
                 if (    $col->can('since')

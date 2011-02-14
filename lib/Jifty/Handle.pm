@@ -119,15 +119,20 @@ sub connect {
     }
 }
 
-=head2 check_schema_version
+=head2 check_schema_version [pretend => 0|1]
 
 Make sure that we have a recent enough database schema.  If we don't,
 then error out.
+
+If C<pretend => 1> is passed, then any auto-upgrade action this might take is
+dry-run only.
 
 =cut
 
 sub check_schema_version {
     my $self = shift;
+    my %opts = ( pretend => 0, @_ );
+
     require Jifty::Model::Metadata;
     my $autoup = delete Jifty->config->framework('Database')->{'AutoUpgrade'};
 
@@ -137,16 +142,17 @@ sub check_schema_version {
         my $dbv = $self->_fetch_dbv;
 
         unless (defined $dbv) {
-            warn "Application schema has no version in the database.\n";
+            my $error = "Application schema has no version in the database.\n";
 
             # we can just create it and we'll be up to date
             if ( $autoup ) {
+                warn $error;
                 warn "Automatically creating your database.\n";
                 $self->_create_original_database();
                 return 1;
             }
 
-            die "Please run `bin/jifty schema --setup` to create the database.\n";
+            die "${error}Please run `bin/jifty schema --setup` to create the database.\n";
         }
 
         unless ( version->new($appv) == version->new($dbv) ) {
@@ -157,15 +163,15 @@ sub check_schema_version {
             if (   version->new($appv) > version->new($dbv)
                 || version->new($compat) < version->new($dbv) )
             {
-                warn
+                my $error = 
                     "Application schema version in database ($dbv) doesn't match application schema version ($appv)\n";
                 if ( $autoup ) {
+                    warn $error;
                     warn
                         "Automatically upgrading your database to match the current application schema.\n";
-                    $self->_upgrade_schema();
+                    $self->_upgrade_schema('print' => $opts{pretend});
                 } else {
-                    die
-                        "Please run `bin/jifty schema --setup` to upgrade the database.\n";
+                    die "${error}Please run `bin/jifty schema --setup` to upgrade the database.\n";
                 }
             }
         }
@@ -182,15 +188,15 @@ sub check_schema_version {
                 || '0.60426' );
         my $appv = version->new($Jifty::VERSION);
         unless ( $appv == $dbv ) {
-            warn
+            my $error =
                 "Internal jifty schema version in database ($dbv) doesn't match running jifty version ($appv)\n";
             if ($autoup) {
+                warn $error;
                 warn
                     "Automatically upgrading your database to match the current Jifty schema\n";
-                $self->_upgrade_schema;
+                $self->_upgrade_schema('print' => $opts{pretend});
             } else {
-                die
-                    "Please run `bin/jifty schema --setup` to upgrade the database.\n";
+                die "${error}Please run `bin/jifty schema --setup` to upgrade the database.\n";
             }
         }
     }
@@ -204,26 +210,26 @@ sub check_schema_version {
         my $appv = version->new( $plugin->version );
 
         if ( not defined $dbv ) {
-            warn
+            my $error =
                 "$plugin_class plugin isn't installed in database\n";
             if ($autoup) {
+                warn $error;
                 warn
                     "Automatically upgrading your database to match the current plugin schema\n";
-                $self->_upgrade_schema;
+                $self->_upgrade_schema('print' => $opts{pretend});
             } else {
-                die
-                    "Please run `bin/jifty schema --setup` to upgrade the database.\n";
+                die "${error}Please run `bin/jifty schema --setup` to upgrade the database.\n";
             }
         } elsif (version->new($dbv) < $appv) {
-            warn
+            my $error =
                 "$plugin_class plugin version in database ($dbv) doesn't match running plugin version ($appv)\n";
             if ($autoup) {
+                warn $error;
                 warn
                     "Automatically upgrading your database to match the current plugin schema\n";
-                $self->_upgrade_schema;
+                $self->_upgrade_schema('print' => $opts{pretend});
             } else {
-                die
-                    "Please run `bin/jifty schema --setup` to upgrade the database.\n";
+                die "${error}Please run `bin/jifty schema --setup` to upgrade the database.\n";
             }
         }
     }
@@ -301,8 +307,7 @@ sub _create_original_database {
 
 sub _upgrade_schema {
     my $self = shift;
-
-    my $hack = {};
+    my $hack = { @_ };
     require Jifty::Script::Schema;
     bless $hack, "Jifty::Script::Schema";
     $hack->run_upgrades;

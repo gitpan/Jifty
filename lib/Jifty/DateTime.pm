@@ -45,6 +45,15 @@ BEGIN {
 
 use base qw(Jifty::Object DateTime);
 
+use Jifty::DBI::Schema;
+Jifty::DBI::Schema->register_types(
+    timestamp => sub {
+        encode_on_select is 1,
+        type is 'timestamp',
+        filters are qw( Jifty::Filter::DateTime Jifty::DBI::Filter::DateTime ),
+    },
+);
+
 =head2 new ARGS
 
 See L<DateTime/new>. If we get what appears to be a date, then we keep this in
@@ -241,7 +250,7 @@ latter is merely an alias for the former.
 
 sub set_current_user_timezone {
     my $self    = shift;
-    my $default = shift || 'UTC';
+    my $default = shift || Jifty->config->framework('Timezone') || 'UTC';
     my $tz = $self->current_user_has_timezone || $default;
 
     $self->set_time_zone($tz);

@@ -101,7 +101,7 @@ requires:
   IPC::Run3: 0
   JSON: 2.17
   JSON::XS: 2.27
-  Jifty::DBI: 0.62
+  Jifty::DBI: 0.66
   LWP::UserAgent: 0
   List::MoreUtils: 0
   Locale::Maketext::Extract: 0.35
@@ -154,4 +154,4 @@ requires:
   version: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 1.01209
+version: 1.10214
