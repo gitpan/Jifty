@@ -139,7 +139,7 @@ sub run {
     }
 
     if(-e $dest) {
-        print "$dest exists, overwrite? [n]\n";
+        print "$dest exists, overwrite? [n] ";
         chomp(my $ans = <STDIN>); $ans ||= 'n';
         exit 1 unless(lc($ans) eq 'y');
     }
@@ -148,8 +148,7 @@ sub run {
 
     # TODO put an option on that?
     if($ENV{EDITOR}) {
-        fork and exit;
-        exec("$ENV{EDITOR} $dest");
+        system($ENV{EDITOR}, $dest);
     }
 
 } # end run
