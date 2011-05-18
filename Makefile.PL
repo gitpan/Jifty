@@ -46,16 +46,15 @@ requires('HTML::Entities');
 requires('HTML::Lint');
 requires('HTML::Mason' => 1.3101);           # HTML::Mason::Exceptions HTML::Mason::FakeApache HTML::Mason::MethodMaker HTML::Mason::Request HTML::Mason::Utils
 requires('HTML::Mason::Plugin');
+requires('HTML::TreeBuilder::XPath');
 requires('HTTP::Cookies');
 requires('HTTP::Date');
-requires('HTTP::Server::Simple' => '0.35');  # HTTP::Server::Simple::CGI
-requires('HTTP::Server::Simple::Recorder');
 requires('Hash::Merge', '0.12');
 requires('Hash::MultiValue', 0.05);
 requires('IO::Handle::Util');
 requires('IPC::PubSub' => '0.23' );
 requires('IPC::Run3');
-requires('Jifty::DBI' => '0.66' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
+requires('Jifty::DBI' => '0.68' );            # Jifty::DBI::Collection Jifty::DBI::Handle Jifty::DBI::Record::Cachable Jifty::DBI::SchemaGenerator
 requires('JSON' => 2.17);
 requires('List::MoreUtils');
 requires('Locale::Maketext::Extract' => '0.35');
@@ -93,7 +92,6 @@ requires('URI' => 1.31);
 requires('URI::Escape');
 requires('XML::Writer' => '0.601');
 requires('XML::Simple');
-requires('XML::XPath');
 requires('version');
 
 if (can_cc()) {
@@ -132,7 +130,6 @@ feature 'Development of a jifty application' =>
     recommends('Test::MockModule' => '0.05'),
     recommends('Test::MockObject' => '1.07'),
     recommends('Module::Refresh' => '0.09'),
-    recommends('Test::WWW::Declare' => '0.01'),
     # Sub::Exporter is already required by SQL::ReservedWords (and also by
     # Moose if that's around), but make it explicit
     recommends('Sub::Exporter'),

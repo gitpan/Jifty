@@ -11,7 +11,7 @@ use Jifty::YAML;
 use HTML::Lint;
 use Test::HTML::Lint qw();
 use HTTP::Cookies;
-use XML::XPath;
+use HTML::TreeBuilder::XPath;
 use List::Util qw(first);
 use Plack::Test;
 use Carp;
@@ -341,7 +341,7 @@ sub fragment_request {
 
 Finds the error span on the current page for the name FIELD in the
 action MONIKER, and returns the text (tags stripped) from it.  (If the
-field can't be found.
+field can't be found, return undef).
 
 =cut
 
@@ -350,17 +350,16 @@ sub field_error_text {
     my $moniker = shift;
     my $field = shift;
 
-    my $xp = XML::XPath->new( xml => $self->content );
+    # Setup the XPath processor and the ID we're looking for
+    my $tree = HTML::TreeBuilder::XPath->new;
+    $tree->parse($self->content);
+    $tree->eof;
 
     my $id = "errors-J:A:F-$field-$moniker";
 
-    my $nodeset = $xp->findnodes(qq{//span[\@id = "$id"]});
-    return unless $nodeset->size == 1;
-    
-    # Note that $xp->getNodeText does not actually return undef for nodes that
-    # aren't found, even though it's documented to.  Thus the workaround above.
-    return $xp->getNodeText(qq{//span[\@id = "$id" ]});
-} 
+    # Search for the span containing that error
+    return $tree->findvalue(qq{//span[\@id = "$id"]});
+}
 
 =head2 uri
 

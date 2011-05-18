@@ -4,7 +4,7 @@ build_requires:
 configure_requires:
   ExtUtils::MakeMaker: 6.42
 distribution_type: module
-generated_by: 'Module::Install version 1.00'
+generated_by: 'Module::Install version 1.01'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -38,7 +38,6 @@ recommends:
   Test::HTML::Lint: 0
   Test::MockModule: 0.05
   Test::MockObject: 1.07
-  Test::WWW::Declare: 0.01
 requires:
   Any::Moose: 0
   App::CLI: 0.08
@@ -90,10 +89,9 @@ requires:
   HTML::Lint: 0
   HTML::Mason: 1.3101
   HTML::Mason::Plugin: 0
+  HTML::TreeBuilder::XPath: 0
   HTTP::Cookies: 0
   HTTP::Date: 0
-  HTTP::Server::Simple: 0.35
-  HTTP::Server::Simple::Recorder: 0
   Hash::Merge: 0.12
   Hash::MultiValue: 0.05
   IO::Handle::Util: 0
@@ -101,7 +99,7 @@ requires:
   IPC::Run3: 0
   JSON: 2.17
   JSON::XS: 2.27
-  Jifty::DBI: 0.66
+  Jifty::DBI: 0.68
   LWP::UserAgent: 0
   List::MoreUtils: 0
   Locale::Maketext::Extract: 0.35
@@ -136,7 +134,6 @@ requires:
   Test::MockObject: 1.07
   Test::More: 0.62
   Test::Script::Run: 0.03
-  Test::WWW::Declare: 0.01
   Test::WWW::Mechanize: 1.04
   Test::WWW::Mechanize::PSGI: 0.35
   Test::WWW::Selenium: 1.18
@@ -146,11 +143,10 @@ requires:
   WWW::Mechanize: 1.51
   XML::Simple: 0
   XML::Writer: 0.601
-  XML::XPath: 0
   YAML: 0.35
   YAML::Syck: 0.71
   perl: 5.8.3
   version: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 1.10228
+version: 1.10518

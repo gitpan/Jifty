@@ -498,6 +498,11 @@ sub handle_request {
     local $SIG{__DIE__} = 'DEFAULT';
     local $Request = Jifty->web->request;
 
+    my $handler = $Dispatcher->can("fragment_handler");
+    if ($Request->is_subrequest and $handler) {
+        $handler->();
+        return undef;
+    }
     eval {
          $Dispatcher->_do_dispatch( Jifty->web->request->path);
     };
@@ -815,12 +820,6 @@ sub _do_show {
     # If we've got a working directory (from an "under" rule) and we have
     # a relative path, prepend the working directory
     $path = "$self->{cwd}/$path" unless $path =~ m{^/};
-
-    # Check for ../../../../../etc/passwd
-    my $abs_template_path = Jifty::Util->absolute_path( Jifty->config->framework('Web')->{'TemplateRoot'} . $path );
-    my $abs_root_path = Jifty::Util->absolute_path( Jifty->config->framework('Web')->{'TemplateRoot'} );
-    Jifty->web->render_template('/errors/500')
-        if $abs_template_path !~ /^\Q$abs_root_path\E/;
 
     Jifty->web->render_template( $path );
 
